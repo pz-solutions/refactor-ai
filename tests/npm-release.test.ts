@@ -13,7 +13,7 @@ async function fixture(version = "0.1.0") {
   const root = await mkdtemp(join(tmpdir(), "refactor-ai-release-test-"));
   roots.push(root);
   const archives = [];
-  for (const base of ["refactor-ai", ...Object.keys(operationHelp).map(operation => `refactor-ai-${operation}`)]) {
+  for (const base of ["cli", ...Object.keys(operationHelp)]) {
     const content = Buffer.from(`test archive content for ${base}`);
     const filename = `${base}.tgz`;
     const integrity = `sha512-${createHash("sha512").update(content).digest("base64")}`;
@@ -162,8 +162,8 @@ test("packing rejects inconsistent versions and invalid prereleases before creat
     await writeFile(join(directory, "package.json"), JSON.stringify({ name: archive.name, version: archive.version, repository: { url: "git+https://github.com/pz-solutions/refactor-ai.git" } }));
   }
   const runner: Runner = () => { throw new Error("must not call npm"); };
-  const manifest = join(packages, "refactor-ai-move-type", "package.json");
-  await writeFile(manifest, JSON.stringify({ name: "@refactor-ai/refactor-ai-move-type", version: "0.2.0", repository: { url: "git+https://github.com/pz-solutions/refactor-ai.git" } }));
+  const manifest = join(packages, "move-type", "package.json");
+  await writeFile(manifest, JSON.stringify({ name: "@refactor-ai/move-type", version: "0.2.0", repository: { url: "git+https://github.com/pz-solutions/refactor-ai.git" } }));
   await expect(packRelease(packages, join(root, "output"), "v0.1.0", runner)).rejects.toThrow("INVALID_RELEASE");
   for (const version of ["0.2.0-beta..1", "0.2.0-beta.01", "v0.2.0", "0.2.0+build.1"]) expect(() => assertReleaseRef(version)).toThrow("INVALID_VERSION");
 });

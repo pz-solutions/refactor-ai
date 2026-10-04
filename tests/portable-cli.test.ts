@@ -95,7 +95,7 @@ test("a copied standalone skill runs through Node without the source checkout", 
 
 test("a packed npm bin runs through npm exec on native paths", async () => {
   run("bun", ["run", "package:npm"], repo);
-  const packed = JSON.parse(npm(["pack", join(repo, "dist", "npm", "refactor-ai-move-type"), "--json", "--pack-destination", root]))[0];
+  const packed = JSON.parse(npm(["pack", join(repo, "dist", "npm", "move-type"), "--json", "--pack-destination", root]))[0];
   const project = join(root, "npm project"), file = join(project, "Pair.ts"), config = join(project, "tsconfig.json");
   await mkdir(project);
   await writeFile(file, "export class Widget {}\nexport class Other {}\n");

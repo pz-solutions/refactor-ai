@@ -10,7 +10,7 @@ import { npmCli } from "../src/runtime/npm.ts";
 import { assertChannelAdvance, assertVersion, releaseChannel } from "./release-version.ts";
 
 const repository = "git+https://github.com/pz-solutions/refactor-ai.git";
-const names = ["refactor-ai", ...Object.keys(operationHelp).map(operation => `refactor-ai-${operation}`)];
+const names = ["cli", ...Object.keys(operationHelp)];
 interface Archive { name: string; version: string; filename: string; integrity: string }
 interface Release { version: string; archives: Archive[] }
 export type Runner = (args: string[]) => { status: number | null; stdout: string; stderr: string };

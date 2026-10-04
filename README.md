@@ -93,7 +93,7 @@ C# moves update namespaces that follow the project's folder convention. Custom n
 
 ## npm CLI packages
 
-Build nine independently publishable packages: the complete `@refactor-ai/refactor-ai` CLI and one `@refactor-ai/refactor-ai-<operation>` package for each of the eight refactorings. Each declares a single executable in npm's `bin` field. The author checkout remains private.
+Build nine independently publishable packages: the complete `@refactor-ai/cli` CLI and one `@refactor-ai/<operation>` package for each of the eight refactorings. Each declares a single executable in npm's `bin` field. The author checkout remains private.
 
 ```sh
 bun run package:npm
@@ -105,19 +105,19 @@ Generated packages are in `dist/npm/`. They include the built Node runner, a pin
 After publishing under names you own:
 
 ```sh
-npx @refactor-ai/refactor-ai --help
-npx @refactor-ai/refactor-ai-rename --help
-npx @refactor-ai/refactor-ai-rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
-npx @refactor-ai/refactor-ai-rename preview --plan ./path/to/plan.json
-npx @refactor-ai/refactor-ai-rename validate --plan ./path/to/plan.json
-npx @refactor-ai/refactor-ai-rename apply --plan ./path/to/plan.json
+npx @refactor-ai/cli --help
+npx @refactor-ai/rename --help
+npx @refactor-ai/rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
+npx @refactor-ai/rename preview --plan ./path/to/plan.json
+npx @refactor-ai/rename validate --plan ./path/to/plan.json
+npx @refactor-ai/rename apply --plan ./path/to/plan.json
 ```
 
 The default scope is `@refactor-ai`. Override it with `bun run package:npm --scope another-org` when needed. Local tarballs work before publishing:
 
 ```sh
-npm pack ./dist/npm/refactor-ai-rename --pack-destination /tmp
-npx --yes file:/tmp/refactor-ai-refactor-ai-rename-0.1.0.tgz --help
+npm pack ./dist/npm/rename --pack-destination /tmp
+npx --yes file:/tmp/refactor-ai-rename-0.1.0.tgz --help
 ```
 
 See [npm packaging and publishing](docs/npm-packages.md) for package names, local installation, publication and versioning. `bun run test:npm` tests actual packed archives through npx, including complete TS, JS and C# workflows.

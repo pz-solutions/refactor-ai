@@ -31,7 +31,7 @@ beforeAll(async () => {
   workspace = await realpath(await mkdtemp(join(tmpdir(), "refactor-ai-npm-test-")));
   success("bun", ["run", "package:npm"], repo);
   const version = JSON.parse(await readFile(join(repo, "package.json"), "utf8")).version;
-  for (const name of ["refactor-ai", ...operations.map(operation => `refactor-ai-${operation}`)]) {
+  for (const name of ["cli", ...operations]) {
     const packed = JSON.parse(success("npm", ["pack", join(repo, "dist", "npm", name), "--json", "--pack-destination", workspace]))[0];
     tarballs.set(name, join(workspace, packed.filename));
     const manifest = JSON.parse(await readFile(join(repo, "dist", "npm", name, "package.json"), "utf8"));
@@ -73,12 +73,12 @@ test("all nine prerelease packages inherit the beta version and default to next"
   const manifest = JSON.parse(await readFile(join(repo, "package.json"), "utf8"));
   await writeFile(join(checkout, "package.json"), JSON.stringify({ ...manifest, version: "0.2.0-beta.10" }));
   success("bun", [join(checkout, "scripts", "package-npm.ts")], checkout);
-  for (const name of ["refactor-ai", ...operations.map(operation => `refactor-ai-${operation}`)]) {
+  for (const name of ["cli", ...operations]) {
     const generated = JSON.parse(await readFile(join(checkout, "dist", "npm", name, "package.json"), "utf8"));
     expect(generated.version).toBe("0.2.0-beta.10");
     expect(generated.publishConfig).toEqual({ access: "public", tag: "next" });
   }
-  const packed = JSON.parse(success("npm", ["pack", join(checkout, "dist", "npm", "refactor-ai"), "--json", "--pack-destination", checkout]))[0];
+  const packed = JSON.parse(success("npm", ["pack", join(checkout, "dist", "npm", "cli"), "--json", "--pack-destination", checkout]))[0];
   expect(packed.version).toBe("0.2.0-beta.10");
 }, 120_000);
 
@@ -87,14 +87,14 @@ test("operation bins report their own capability and reject other operations", a
   await mkdir(join(workspace, "capabilities"));
   await writeFile(project, '{"include":["*.ts"]}\n');
   await writeFile(join(workspace, "capabilities", "src.ts"), "export const value = 1;\n");
-  expect(JSON.parse(npx("refactor-ai", ["capabilities", "--project", project])).length).toBeGreaterThan(1);
+  expect(JSON.parse(npx("cli", ["capabilities", "--project", project])).length).toBeGreaterThan(1);
   for (const operation of operations.filter(operation => operation !== "sync-namespace")) {
-    expect(JSON.parse(npx(`refactor-ai-${operation}`, ["capabilities", "--project", project])).map((item: { operation: string }) => item.operation)).toEqual([operation]);
+    expect(JSON.parse(npx(operation, ["capabilities", "--project", project])).map((item: { operation: string }) => item.operation)).toEqual([operation]);
   }
   const csharpProject = join(workspace, "capabilities", "App.csproj");
   await writeFile(csharpProject, '<Project Sdk="Microsoft.NET.Sdk"/>\n');
-  expect(JSON.parse(npx("refactor-ai-sync-namespace", ["capabilities", "--project", csharpProject])).map((item: { operation: string }) => item.operation)).toEqual(["sync-namespace"]);
-  const rejected = run("npx", ["--yes", `file:${tarballs.get("refactor-ai-rename")!}`, "plan", "format", "--project", "/missing.json"]);
+  expect(JSON.parse(npx("sync-namespace", ["capabilities", "--project", csharpProject])).map((item: { operation: string }) => item.operation)).toEqual(["sync-namespace"]);
+  const rejected = run("npx", ["--yes", `file:${tarballs.get("rename")!}`, "plan", "format", "--project", "/missing.json"]);
   expect(rejected.status).toBe(1);
   expect(rejected.stderr).toContain("only supports rename");
 }, 60_000);
@@ -117,12 +117,12 @@ for (const language of ["typescript", "javascript", "csharp"]) {
       await mkdir(foreign, { recursive: true });
       await writeFile(join(foreign, "RefactorHelper.dll"), "foreign helper must never execute");
     }
-    const result = JSON.parse(npx("refactor-ai-rename", ["plan", "--project", config, "--file", file, "--at", at, "--name", "Sum"], root));
+    const result = JSON.parse(npx("rename", ["plan", "--project", config, "--file", file, "--at", at, "--name", "Sum"], root));
     expect(result.validation.status).toBe("passed");
     expect(await readFile(file, "utf8")).toBe(source);
-    expect(npx("refactor-ai-rename", ["preview", "--plan", result.plan], root)).toContain("Sum");
-    expect(JSON.parse(npx("refactor-ai-rename", ["validate", "--plan", result.plan], root)).status).toBe("validated");
-    expect(JSON.parse(npx("refactor-ai-rename", ["apply", "--plan", result.plan], root)).status).toBe("applied");
+    expect(npx("rename", ["preview", "--plan", result.plan], root)).toContain("Sum");
+    expect(JSON.parse(npx("rename", ["validate", "--plan", result.plan], root)).status).toBe("validated");
+    expect(JSON.parse(npx("rename", ["apply", "--plan", result.plan], root)).status).toBe("applied");
     expect(await readFile(file, "utf8")).toContain("Sum");
     if (csharp) expect(success("dotnet", ["run", "--project", config, "--no-restore", "--nologo"], root).trim()).toBe("5");
   }, 120_000);
@@ -131,11 +131,11 @@ for (const language of ["typescript", "javascript", "csharp"]) {
 test("scoped packages have inferred npx bins and packager help has no side effects", async () => {
   const target = join(workspace, "scoped");
   success("bun", [join(repo, "scripts", "package-npm.ts"), "--out", target, "--scope", "@refactor-test"]);
-  const packageRoot = join(target, "refactor-ai-extract-variable");
+  const packageRoot = join(target, "extract-variable");
   const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-  expect(manifest.name).toBe("@refactor-test/refactor-ai-extract-variable");
+  expect(manifest.name).toBe("@refactor-test/extract-variable");
   const packed = JSON.parse(success("npm", ["pack", packageRoot, "--json", "--pack-destination", target]))[0];
-  expect(success("npx", ["--yes", `file:${join(target, packed.filename)}`, "plan", "--help"])).toContain("npx @refactor-test/refactor-ai-extract-variable plan");
+  expect(success("npx", ["--yes", `file:${join(target, packed.filename)}`, "plan", "--help"])).toContain("npx @refactor-test/extract-variable plan");
   const absent = join(workspace, "help-must-not-create");
   expect(success("bun", [join(repo, "scripts", "package-npm.ts"), "--out", absent, "--help"])).toContain("Examples");
   expect((await readdir(workspace)).includes("help-must-not-create")).toBe(false);

@@ -22,7 +22,7 @@ Options:
                     directories containing hand-written package content.
   --help, -h        Show help without building, copying or publishing files.
 
-Produces @${defaultScope}/refactor-ai plus @${defaultScope}/refactor-ai-{rename,imports,format,extract-function,
+Produces @${defaultScope}/cli plus @${defaultScope}/{rename,imports,format,extract-function,
 extract-variable,rename-file,sync-namespace,move-type}. Each has a single bin,
 bundled Node ESM runner, pinned TypeScript dependency and English README/help.
 C# tools include Roslyn helper sources and locked NuGet dependencies; the helper
@@ -38,12 +38,12 @@ Examples:
   bun run package:npm
   bun run package:npm --scope @refactor-ai
   bun run package:npm --out ./release/npm
-  npm pack ./dist/npm/refactor-ai-rename --pack-destination /tmp
-  npx --yes file:/tmp/refactor-ai-refactor-ai-rename-0.1.0.tgz --help
-  npm publish ./dist/npm/refactor-ai-rename --dry-run
-  npm publish ./dist/npm/refactor-ai-rename --access public
-  npx @refactor-ai/refactor-ai-rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
-  npx @refactor-ai/refactor-ai plan rename --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
+  npm pack ./dist/npm/rename --pack-destination /tmp
+  npx --yes file:/tmp/refactor-ai-rename-0.1.0.tgz --help
+  npm publish ./dist/npm/rename --dry-run
+  npm publish ./dist/npm/rename --access public
+  npx @refactor-ai/rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
+  npx @refactor-ai/cli plan rename --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
 
 Publication requires npm login and ownership of the chosen name/scope. Names are
 configuration defaults, not a claim of registry availability. Use
@@ -81,17 +81,18 @@ const helperRoot = join(repo, "dotnet", "RefactorHelper");
 const helperFiles = (await readdir(helperRoot)).filter(file => file.endsWith(".cs"));
 const operations = Object.keys(operationHelp) as (keyof typeof operationHelp)[];
 const entries = [undefined, ...operations];
-// Check every destination before touching files, including a dangerous --out .. .
-for (const operation of entries) {
-  const packageRoot = join(destination, operation ? `refactor-ai-${operation}` : "refactor-ai");
-  const difference = relative(packageRoot, repo);
+// Reject the output root and every managed package directory if either could
+// replace the checkout or an ancestor, including through a symlink alias.
+const outputTargets = [destination, ...entries.map(operation => join(destination, operation ?? "cli"))];
+for (const target of outputTargets) {
+  const difference = relative(target, repo);
   if (difference === "" || (!isAbsolute(difference) && difference !== ".." && !difference.startsWith(`..${sep}`))) {
     throw new Error("INVALID_ARGUMENT: npm output must not replace the checkout or its ancestors");
   }
 }
 await mkdir(destination, { recursive: true });
 for (const operation of entries) {
-  const baseName = operation ? `refactor-ai-${operation}` : "refactor-ai";
+  const baseName = operation ?? "cli";
   const packageName = scope ? `@${scope}/${baseName}` : baseName;
   const binName = operation ? `refactor-${operation}` : "refactor-ai";
   const packageRoot = join(destination, baseName);
