@@ -2,14 +2,14 @@ import { chmod, cp, mkdir, readFile, readdir, realpath, rm, writeFile } from "no
 import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { operationHelp } from "../src/help.ts";
-import { npmScope } from "../src/npm-config.ts";
+import { operationHelpFor } from "../src/help.ts";
+import { npmDistributions, npmScope } from "../src/npm-config.ts";
 import { assertVersion } from "./release-version.ts";
 
 const defaultScope = npmScope;
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h") || args[0] === "help") {
-  console.log(`refactor-ai npm packager — build nine independently publishable CLI packages
+  console.log(`refactor-ai npm packager — build fourteen independently publishable CLI packages
 
 Usage:
   bun run package:npm [--scope <name>] [--out <directory>]
@@ -22,12 +22,16 @@ Options:
                     directories containing hand-written package content.
   --help, -h        Show help without building, copying or publishing files.
 
-Produces @${defaultScope}/cli plus @${defaultScope}/{rename,imports,format,extract-function,
-extract-variable,rename-file,sync-namespace,move-type}. Each has a single bin,
-bundled Node ESM runner, pinned TypeScript dependency and English README/help.
-C# tools include Roslyn helper sources and locked NuGet dependencies; the helper
-builds on first C# use. No install/postinstall/prepare scripts or Bun at runtime.
-The author checkout stays private; only generated packages are publishable.
+Produces @${defaultScope}/cli (both backends), seven @${defaultScope}/ts-<operation>
+packages for TypeScript/JavaScript, and six @${defaultScope}/csharp-<operation> packages.
+TS operations: rename, imports, format, extract-function, extract-variable,
+rename-file and move-type. C# operations: rename, imports, format, rename-file,
+sync-namespace and move-type. Each package declares one executable.
+
+TS packages contain only their compiler adapter and pinned TypeScript dependency.
+C# packages contain only their Roslyn adapter and helper sources, with no TypeScript
+npm dependency. The aggregate cli contains both backends. The .NET helper builds on
+first C# use. No lifecycle scripts or Bun at runtime. The author checkout is private.
 
 Requirements: Bun, installed checkout dependencies and helper sources.
 Consumers: Node.js 22+ and npm; C# needs .NET 8 SDK and the project's SDK/workloads.
@@ -38,11 +42,11 @@ Examples:
   bun run package:npm
   bun run package:npm --scope @refactor-ai
   bun run package:npm --out ./release/npm
-  npm pack ./dist/npm/rename --pack-destination /tmp
-  npx --yes file:/tmp/refactor-ai-rename-0.1.0.tgz --help
-  npm publish ./dist/npm/rename --dry-run
-  npm publish ./dist/npm/rename --access public
-  npx @refactor-ai/rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
+  npm pack ./dist/npm/ts-rename --pack-destination /tmp
+  npx --yes file:/tmp/refactor-ai-ts-rename-0.1.3.tgz --help
+  npm publish ./dist/npm/ts-rename --dry-run
+  npm publish ./dist/npm/ts-rename --access public
+  npx @refactor-ai/ts-rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
   npx @refactor-ai/cli plan rename --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
 
 Publication requires npm login and ownership of the chosen name/scope. Names are
@@ -79,11 +83,10 @@ const rootManifest = JSON.parse(await readFile(join(repo, "package.json"), "utf8
 assertVersion(rootManifest.version);
 const helperRoot = join(repo, "dotnet", "RefactorHelper");
 const helperFiles = (await readdir(helperRoot)).filter(file => file.endsWith(".cs"));
-const operations = Object.keys(operationHelp) as (keyof typeof operationHelp)[];
-const entries = [undefined, ...operations];
+const entries = npmDistributions;
 // Reject the output root and every managed package directory if either could
 // replace the checkout or an ancestor, including through a symlink alias.
-const outputTargets = [destination, ...entries.map(operation => join(destination, operation ?? "cli"))];
+const outputTargets = [destination, ...entries.map(entry => join(destination, entry.name))];
 for (const target of outputTargets) {
   const difference = relative(target, repo);
   if (difference === "" || (!isAbsolute(difference) && difference !== ".." && !difference.startsWith(`..${sep}`))) {
@@ -91,17 +94,20 @@ for (const target of outputTargets) {
   }
 }
 await mkdir(destination, { recursive: true });
-for (const operation of entries) {
-  const baseName = operation ?? "cli";
+for (const { name: baseName, bin: binName, operation, language } of entries) {
   const packageName = scope ? `@${scope}/${baseName}` : baseName;
-  const binName = operation ? `refactor-${operation}` : "refactor-ai";
   const packageRoot = join(destination, baseName);
-  const csharp = !operation || !["extract-function", "extract-variable"].includes(operation);
+  const csharp = language !== "typescript";
+  const help = operation ? operationHelpFor(operation, language) : undefined;
   await rm(packageRoot, { recursive: true, force: true });
   await mkdir(join(packageRoot, "bin"), { recursive: true });
   await mkdir(join(packageRoot, "lib"));
   const source = join(packageRoot, "entry.ts");
-  await writeFile(source, `import { dirname, resolve } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nimport { runNpmCli } from ${JSON.stringify(join(repo, "src", "npm-cli.ts"))};\nawait runNpmCli(process.argv.slice(2), { packageName: ${JSON.stringify(packageName)}, packageRoot: resolve(dirname(fileURLToPath(import.meta.url)), '..'), ${operation ? `operation: ${JSON.stringify(operation)}` : ""} });\n`);
+  const loader = language
+    ? `const loadBackend = (_project: string) => import(${JSON.stringify(join(repo, "src", "backends", `${language}.ts`))});`
+    : `import { loadBackend } from ${JSON.stringify(join(repo, "src", "backends", "load.ts"))};`;
+  await writeFile(source, `import { dirname, resolve } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nimport { runNpmCli } from ${JSON.stringify(join(repo, "src", "npm-cli.ts"))};\n${loader}\nawait runNpmCli(process.argv.slice(2), { packageName: ${JSON.stringify(packageName)}, packageRoot: resolve(dirname(fileURLToPath(import.meta.url)), '..'), loadBackend, language: ${JSON.stringify(language)}, ${operation ? `operation: ${JSON.stringify(operation)}` : ""} });\n`);
+
   const runner = join(packageRoot, "lib", "runner.mjs");
   const result = spawnSync("bun", ["build", source, "--target", "node", "--format", "esm", "--external", "typescript", "--outfile", runner], { cwd: repo, encoding: "utf8" });
   if (result.error) throw result.error;
@@ -119,17 +125,17 @@ for (const operation of entries) {
   await mkdir(join(packageRoot, "licenses"));
   await cp(join(repo, "node_modules", "diff", "LICENSE"), join(packageRoot, "licenses", "diff.txt"));
   const manifest = {
-    name: packageName, version: rootManifest.version, description: operation ? operationHelp[operation].description : "Deterministic TypeScript, JavaScript and C# refactoring CLI.",
+    name: packageName, version: rootManifest.version, description: operation ? help!.description : "Deterministic TypeScript, JavaScript and C# refactoring CLI.",
     type: "module", repository: rootManifest.repository, bin: { [binName]: "bin/cli.mjs" }, engines: { node: ">=22" },
     files: ["bin/", "lib/", "licenses/", ...(csharp ? ["dotnet/**/*.cs", "dotnet/**/*.csproj", "dotnet/**/packages.lock.json"] : [])],
-    dependencies: { typescript: rootManifest.dependencies.typescript }, publishConfig: { access: "public", tag: rootManifest.version.includes("-") ? "next" : "latest" },
+    dependencies: language === "csharp" ? {} : { typescript: rootManifest.dependencies.typescript }, publishConfig: { access: "public", tag: rootManifest.version.includes("-") ? "next" : "latest" },
   };
   await writeFile(join(packageRoot, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
   const plan = operation ? "plan" : "plan rename";
-  const example = operation ? operationHelp[operation].examples[0].replace(`plan ${operation}`, "plan") : operationHelp.rename.examples[0];
+  const example = operation ? help!.examples[0].replace(`plan ${operation}`, "plan") : operationHelpFor("rename").examples[0];
   const csharpRequirements = csharp
     ? "C# also requires the .NET 8 SDK, the project's required SDK/workloads and restored project dependencies. The bundled Roslyn helper builds on first C# use; initial NuGet restore needs network access and a writable package/cache directory."
-    : "This operation supports TypeScript and JavaScript; .NET is unnecessary.";
+    : "This package supports TypeScript and JavaScript and includes only their compiler adapter. npm installs its pinned TypeScript dependency.";
   await writeFile(join(packageRoot, "README.md"), `# ${packageName}\n\n${manifest.description}\n\nUse Node.js 22+ and npm. Bun and a source checkout are unnecessary. ${csharpRequirements} This package has no install lifecycle scripts.\n\n\`\`\`sh\nnpx ${packageName} --help\nnpx ${packageName} ${plan} --help\nnpx ${packageName} ${example}\n\`\`\`\n\nReplace example paths with your project paths. Planning leaves sources untouched and returns a saved plan path. Preview and validate it, then apply that exact plan:\n\n\`\`\`sh\nnpx ${packageName} preview --plan ./path/to/plan.json\nnpx ${packageName} validate --plan ./path/to/plan.json\nnpx ${packageName} apply --plan ./path/to/plan.json\n\`\`\`\n\nOr install with \`npm install --save-dev ${packageName}\` and run \`npx ${binName} --help\`. ${operation ? `Only ${operation} can be planned by this tool. ` : ""}Plans use snapshots, compiler diagnostics and journaled writes. Validation does not run project tests. Full options, language support, limitations and examples are available in \`--help\`.\n\nBuilt from refactor-ai ${rootManifest.version}. Third-party diff license: \`licenses/diff.txt\`.\n`);
   console.log(`Built ${packageName}: ${packageRoot}`);
 }

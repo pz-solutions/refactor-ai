@@ -46,3 +46,10 @@ export interface Capability {
   modes?: string[];
   description: string;
 }
+
+/** Compiler adapter injected into the shared command workflow. */
+export interface RefactorBackend {
+  capabilities: Capability[];
+  analyze(request: RefactorRequest): Promise<BackendResult>;
+}
+export type BackendLoader = (project: string) => Promise<RefactorBackend>;

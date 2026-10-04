@@ -3,12 +3,17 @@ import { spawnSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { operationHelp } from "../src/help.ts";
 
 const repo = resolve(import.meta.dir, "..");
 let workspace: string;
 const tarballs = new Map<string, string>();
-const operations = Object.keys(operationHelp);
+const tsOperations = ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type"];
+const csharpOperations = ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"];
+const distributions = [
+  { name: "cli", language: "all" },
+  ...tsOperations.map(operation => ({ name: `ts-${operation}`, language: "typescript", operation })),
+  ...csharpOperations.map(operation => ({ name: `csharp-${operation}`, language: "csharp", operation })),
+];
 
 function run(command: string, args: string[], cwd = workspace) {
   return spawnSync(command, args, {
@@ -31,7 +36,7 @@ beforeAll(async () => {
   workspace = await realpath(await mkdtemp(join(tmpdir(), "refactor-ai-npm-test-")));
   success("bun", ["run", "package:npm"], repo);
   const version = JSON.parse(await readFile(join(repo, "package.json"), "utf8")).version;
-  for (const name of ["cli", ...operations]) {
+  for (const { name, language } of distributions) {
     const packed = JSON.parse(success("npm", ["pack", join(repo, "dist", "npm", name), "--json", "--pack-destination", workspace]))[0];
     tarballs.set(name, join(workspace, packed.filename));
     const manifest = JSON.parse(await readFile(join(repo, "dist", "npm", name, "package.json"), "utf8"));
@@ -42,6 +47,12 @@ beforeAll(async () => {
     expect(manifest.private).not.toBe(true);
     expect(Object.keys(manifest.bin)).toHaveLength(1);
     expect(manifest.scripts).toBeUndefined();
+    expect(manifest.dependencies).toEqual(language === "csharp" ? {} : { typescript: "5.9.3" });
+    expect(packed.files.some((file: { path: string }) => file.path.startsWith("dotnet/"))).toBe(language !== "typescript");
+    const runner = await readFile(join(repo, "dist", "npm", name, "lib", "runner.mjs"), "utf8");
+    if (language === "typescript") expect(runner).not.toContain("CSHARP_HELPER_FAILED");
+    if (language === "csharp") expect(runner).not.toMatch(/from ["']typescript["']/);
+
     expect(packed.files.some((file: { path: string }) => file.path === "bin/cli.mjs")).toBe(true);
     expect(packed.files.every((file: { path: string }) => !/(^|\/)(node_modules|obj|bin\/Release|entry\.ts)(\/|$)/.test(file.path))).toBe(true);
   }
@@ -49,17 +60,28 @@ beforeAll(async () => {
 
 afterAll(async () => { if (workspace) await rm(workspace, { recursive: true, force: true }); });
 
-test("all nine tarballs execute through npx with their own help and bin", () => {
-  for (const [name] of tarballs) {
+test("all fourteen tarballs expose language-specific help through npx", () => {
+  for (const { name, language } of distributions) {
     const help = npx(name, ["--help"]);
     expect(help).toContain(`npx @refactor-ai/${name}`);
     expect(help).toContain("Examples");
     expect(help).not.toContain("node dist/cli.js");
+    if (language === "typescript") {
+      expect(help).not.toContain(".csproj");
+      expect(help).not.toContain("Roslyn");
+      expect(help).not.toContain("dotnet");
+    }
+    if (language === "csharp") {
+      expect(help).not.toContain("tsconfig.json");
+      expect(help).not.toContain("typescript/");
+      expect(help).not.toContain("TypeScript");
+    }
+
     expect(npx(name, ["apply", "--help"])).toContain("--plan");
   }
 }, 120_000);
 
-test("all nine prerelease packages inherit the beta version and default to next", async () => {
+test("all fourteen prerelease packages inherit the beta version and default to next", async () => {
   const checkout = join(workspace, "beta-author");
   await mkdir(join(checkout, "scripts"), { recursive: true });
   await cp(join(repo, "src"), join(checkout, "src"), { recursive: true });
@@ -73,7 +95,7 @@ test("all nine prerelease packages inherit the beta version and default to next"
   const manifest = JSON.parse(await readFile(join(repo, "package.json"), "utf8"));
   await writeFile(join(checkout, "package.json"), JSON.stringify({ ...manifest, version: "0.2.0-beta.10" }));
   success("bun", [join(checkout, "scripts", "package-npm.ts")], checkout);
-  for (const name of ["cli", ...operations]) {
+  for (const { name, language } of distributions) {
     const generated = JSON.parse(await readFile(join(checkout, "dist", "npm", name, "package.json"), "utf8"));
     expect(generated.version).toBe("0.2.0-beta.10");
     expect(generated.publishConfig).toEqual({ access: "public", tag: "next" });
@@ -82,28 +104,37 @@ test("all nine prerelease packages inherit the beta version and default to next"
   expect(packed.version).toBe("0.2.0-beta.10");
 }, 120_000);
 
-test("operation bins report their own capability and reject other operations", async () => {
-  const project = join(workspace, "capabilities", "tsconfig.json");
-  await mkdir(join(workspace, "capabilities"));
-  await writeFile(project, '{"include":["*.ts"]}\n');
-  await writeFile(join(workspace, "capabilities", "src.ts"), "export const value = 1;\n");
-  expect(JSON.parse(npx("cli", ["capabilities", "--project", project])).length).toBeGreaterThan(1);
-  for (const operation of operations.filter(operation => operation !== "sync-namespace")) {
-    expect(JSON.parse(npx(operation, ["capabilities", "--project", project])).map((item: { operation: string }) => item.operation)).toEqual([operation]);
-  }
-  const csharpProject = join(workspace, "capabilities", "App.csproj");
+test("language bins report their own capability and reject foreign projects", async () => {
+  const directory = join(workspace, "capabilities");
+  await mkdir(directory);
+  const tsProject = join(directory, "tsconfig.json"), csharpProject = join(directory, "App.csproj");
+  await writeFile(tsProject, '{"include":["*.ts"]}\n');
+  await writeFile(join(directory, "src.ts"), "export const value = 1;\n");
   await writeFile(csharpProject, '<Project Sdk="Microsoft.NET.Sdk"/>\n');
-  expect(JSON.parse(npx("sync-namespace", ["capabilities", "--project", csharpProject])).map((item: { operation: string }) => item.operation)).toEqual(["sync-namespace"]);
-  const rejected = run("npx", ["--yes", `file:${tarballs.get("rename")!}`, "plan", "format", "--project", "/missing.json"]);
+  expect(JSON.parse(npx("cli", ["capabilities", "--project", tsProject])).length).toBe(tsOperations.length);
+  expect(JSON.parse(npx("cli", ["capabilities", "--project", csharpProject])).length).toBe(csharpOperations.length);
+  for (const entry of distributions) {
+    if (!("operation" in entry)) continue;
+    const project = entry.language === "csharp" ? csharpProject : tsProject;
+    const foreign = entry.language === "csharp" ? tsProject : csharpProject;
+    expect(JSON.parse(npx(entry.name, ["capabilities", "--project", project])).map((item: { operation: string }) => item.operation)).toEqual([entry.operation]);
+    for (const args of [["capabilities", "--project", foreign], ["plan", "--project", foreign, "--file", "/missing-source"]]) {
+      const rejected = run("npx", ["--yes", `file:${tarballs.get(entry.name)!}`, ...args]);
+      expect(rejected.status).toBe(1);
+      expect(rejected.stderr).toContain("UNSUPPORTED_LANGUAGE");
+    }
+  }
+  const rejected = run("npx", ["--yes", `file:${tarballs.get("ts-rename")!}`, "plan", "format", "--project", "/missing.json"]);
   expect(rejected.status).toBe(1);
   expect(rejected.stderr).toContain("only supports rename");
-}, 60_000);
+}, 120_000);
 
 for (const language of ["typescript", "javascript", "csharp"]) {
-  test(`packed rename bin plans, previews, validates and applies ${language} without the checkout`, async () => {
+  test(`language-specific rename bin plans, previews, validates and applies ${language} without the checkout`, async () => {
     const root = join(workspace, language);
     await cp(join(repo, "examples", language), root, { recursive: true });
     const csharp = language === "csharp";
+    const packageName = csharp ? "csharp-rename" : "ts-rename";
     const config = join(root, csharp ? "Caller.csproj" : language === "typescript" ? "tsconfig.json" : "jsconfig.json");
     const file = join(root, csharp ? "Utility.cs" : language === "typescript" ? "math.ts" : "math.js");
     const source = await readFile(file, "utf8");
@@ -117,25 +148,39 @@ for (const language of ["typescript", "javascript", "csharp"]) {
       await mkdir(foreign, { recursive: true });
       await writeFile(join(foreign, "RefactorHelper.dll"), "foreign helper must never execute");
     }
-    const result = JSON.parse(npx("rename", ["plan", "--project", config, "--file", file, "--at", at, "--name", "Sum"], root));
+    const result = JSON.parse(npx(packageName, ["plan", "--project", config, "--file", file, "--at", at, "--name", "Sum"], root));
     expect(result.validation.status).toBe("passed");
     expect(await readFile(file, "utf8")).toBe(source);
-    expect(npx("rename", ["preview", "--plan", result.plan], root)).toContain("Sum");
-    expect(JSON.parse(npx("rename", ["validate", "--plan", result.plan], root)).status).toBe("validated");
-    expect(JSON.parse(npx("rename", ["apply", "--plan", result.plan], root)).status).toBe("applied");
+    for (const command of ["preview", "validate", "apply"]) {
+      const wrongPackage = csharp ? "ts-rename" : "csharp-rename";
+      const rejected = run("npx", ["--yes", `file:${tarballs.get(wrongPackage)!}`, command, "--plan", result.plan], root);
+      expect(rejected.status).toBe(1);
+      expect(rejected.stderr).toContain("UNSUPPORTED_LANGUAGE");
+      expect(await readFile(file, "utf8")).toBe(source);
+    }
+
+    expect(npx(packageName, ["preview", "--plan", result.plan], root)).toContain("Sum");
+    expect(JSON.parse(npx(packageName, ["validate", "--plan", result.plan], root)).status).toBe("validated");
+    expect(JSON.parse(npx(packageName, ["apply", "--plan", result.plan], root)).status).toBe("applied");
     expect(await readFile(file, "utf8")).toContain("Sum");
-    if (csharp) expect(success("dotnet", ["run", "--project", config, "--no-restore", "--nologo"], root).trim()).toBe("5");
+    if (csharp) {
+      expect(success("dotnet", ["run", "--project", config, "--no-restore", "--nologo"], root).trim()).toBe("5");
+      const imports = JSON.parse(npx("csharp-imports", ["plan", "--project", config, "--file", file], root));
+      const stored = JSON.parse(await readFile(imports.plan, "utf8"));
+      expect(stored.request.mode).toBe("remove-unused");
+      expect(imports.validation.status).toBe("passed");
+    }
   }, 120_000);
 }
 
 test("scoped packages have inferred npx bins and packager help has no side effects", async () => {
   const target = join(workspace, "scoped");
   success("bun", [join(repo, "scripts", "package-npm.ts"), "--out", target, "--scope", "@refactor-test"]);
-  const packageRoot = join(target, "extract-variable");
+  const packageRoot = join(target, "ts-extract-variable");
   const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-  expect(manifest.name).toBe("@refactor-test/extract-variable");
+  expect(manifest.name).toBe("@refactor-test/ts-extract-variable");
   const packed = JSON.parse(success("npm", ["pack", packageRoot, "--json", "--pack-destination", target]))[0];
-  expect(success("npx", ["--yes", `file:${join(target, packed.filename)}`, "plan", "--help"])).toContain("npx @refactor-test/extract-variable plan");
+  expect(success("npx", ["--yes", `file:${join(target, packed.filename)}`, "plan", "--help"])).toContain("npx @refactor-test/ts-extract-variable plan");
   const absent = join(workspace, "help-must-not-create");
   expect(success("bun", [join(repo, "scripts", "package-npm.ts"), "--out", absent, "--help"])).toContain("Examples");
   expect((await readdir(workspace)).includes("help-must-not-create")).toBe(false);

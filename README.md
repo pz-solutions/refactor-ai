@@ -93,36 +93,36 @@ C# moves update namespaces that follow the project's folder convention. Custom n
 
 ## npm CLI packages
 
-Build nine independently publishable packages: the complete `@refactor-ai/cli` CLI and one `@refactor-ai/<operation>` package for each of the eight refactorings. Each declares a single executable in npm's `bin` field. The author checkout remains private.
+Build fourteen independently publishable packages: the complete `@refactor-ai/cli`, seven `@refactor-ai/ts-<operation>` tools for TypeScript/JavaScript, and six `@refactor-ai/csharp-<operation>` tools for C#. Each declares a single executable in npm's `bin` field. The author checkout remains private.
 
 ```sh
 bun run package:npm
 bun run package:npm --help
 ```
 
-Generated packages are in `dist/npm/`. They include the built Node runner, a pinned TypeScript dependency and, where supported, Roslyn helper sources with a NuGet lockfile. Consumers need Node.js 22+ and npm; C# also requires .NET SDK. Bun is unnecessary at runtime. There are no install lifecycle scripts; the helper builds on first C# use.
+Language tools include only their compiler adapter: TS/JS tools contain no Roslyn helper, and C# tools have no TypeScript npm dependency. The aggregate `cli` supports both. Generated packages are in `dist/npm/`. They include the built Node runner and the selected backend’s dependencies: pinned TypeScript for TS/JS, or Roslyn helper sources with a NuGet lockfile for C#. Consumers need Node.js 22+ and npm; C# also requires .NET SDK. Bun is unnecessary at runtime. There are no install lifecycle scripts; the helper builds on first C# use.
 
 After publishing under names you own:
 
 ```sh
 npx @refactor-ai/cli --help
-npx @refactor-ai/rename --help
-npx @refactor-ai/rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
-npx @refactor-ai/rename preview --plan ./path/to/plan.json
-npx @refactor-ai/rename validate --plan ./path/to/plan.json
-npx @refactor-ai/rename apply --plan ./path/to/plan.json
+npx @refactor-ai/ts-rename --help
+npx @refactor-ai/ts-rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
+npx @refactor-ai/ts-rename preview --plan ./path/to/plan.json
+npx @refactor-ai/ts-rename validate --plan ./path/to/plan.json
+npx @refactor-ai/ts-rename apply --plan ./path/to/plan.json
 ```
 
 The default scope is `@refactor-ai`. Override it with `bun run package:npm --scope another-org` when needed. Local tarballs work before publishing:
 
 ```sh
-npm pack ./dist/npm/rename --pack-destination /tmp
-npx --yes file:/tmp/refactor-ai-rename-0.1.0.tgz --help
+npm pack ./dist/npm/ts-rename --pack-destination /tmp
+npx --yes file:/tmp/refactor-ai-ts-rename-0.1.3.tgz --help
 ```
 
 See [npm packaging and publishing](docs/npm-packages.md) for package names, local installation, publication and versioning. `bun run test:npm` tests actual packed archives through npx, including complete TS, JS and C# workflows.
 
-All nine npm packages share the version in the author `package.json`. After building, use `bun run version:packages patch --dry-run` to preview a bump, or `bun run version:packages --help` for minor/major and beta/RC examples. Release tags must match `v<version>`; stable releases use `latest` and prereleases use `next`. The publisher checks registry versions and refuses to move those channels backwards. See the [release procedure](docs/github-actions.md#release-a-version).
+All fourteen npm packages share the version in the author `package.json`. After building, use `bun run version:packages patch --dry-run` to preview a bump, or `bun run version:packages --help` for minor/major and beta/RC examples. Release tags must match `v<version>`; stable releases use `latest` and prereleases use `next`. The publisher checks registry versions and refuses to move those channels backwards. See the [release procedure](docs/github-actions.md#release-a-version).
 
 ## Skills
 

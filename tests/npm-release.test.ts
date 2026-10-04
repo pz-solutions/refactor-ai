@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertReleaseRef, packRelease, publishRelease, type Runner } from "../scripts/npm-release.ts";
-import { operationHelp } from "../src/help.ts";
+import { npmDistributions } from "../src/npm-config.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -13,7 +13,7 @@ async function fixture(version = "0.1.0") {
   const root = await mkdtemp(join(tmpdir(), "refactor-ai-release-test-"));
   roots.push(root);
   const archives = [];
-  for (const base of ["cli", ...Object.keys(operationHelp)]) {
+  for (const base of npmDistributions.map(entry => entry.name)) {
     const content = Buffer.from(`test archive content for ${base}`);
     const filename = `${base}.tgz`;
     const integrity = `sha512-${createHash("sha512").update(content).digest("base64")}`;
@@ -45,12 +45,12 @@ test("preflights all packages and retries only missing versions with identical c
       return existing ? { status: 0, stdout: JSON.stringify(existing.integrity), stderr: "" }
         : { status: 1, stdout: '{"error":{"code":"E404"}}', stderr: "" };
     }
-    expect(calls.slice(0, 18).every(call => call[0] === "view")).toBe(true);
+    expect(calls.slice(0, release.archives.length * 2).every(call => call[0] === "view")).toBe(true);
     return { status: 0, stdout: "", stderr: "" };
   };
   await publishRelease(root, { ref: "v0.1.0" }, runner);
   const publishes = calls.filter(args => args[0] === "publish");
-  expect(publishes).toHaveLength(5);
+  expect(publishes).toHaveLength(release.archives.length - 4);
   expect(publishes[0][1]).toBe(join(root, release.archives[4].filename));
   expect(publishes.every(args => args[args.indexOf("--tag") + 1] === "latest")).toBe(true);
 });
@@ -105,7 +105,7 @@ test("prerelease advancement uses numeric SemVer precedence and leaves latest un
     publishes.push(args);
     return { status: 0, stdout: "", stderr: "" };
   });
-  expect(publishes).toHaveLength(9);
+  expect(publishes).toHaveLength(14);
   expect(publishes.every(args => args[args.indexOf("--tag") + 1] === "next")).toBe(true);
 });
 
@@ -118,7 +118,7 @@ test("completed old releases are idempotent and preserve newer registry tags", a
     expect(args[2]).toBe("dist.integrity");
     return { status: 0, stdout: JSON.stringify(archive.integrity), stderr: "" };
   });
-  expect(calls).toHaveLength(9);
+  expect(calls).toHaveLength(14);
 });
 
 test("channel lookup supports beta-only packages and falls back when next is absent", async () => {
@@ -162,8 +162,8 @@ test("packing rejects inconsistent versions and invalid prereleases before creat
     await writeFile(join(directory, "package.json"), JSON.stringify({ name: archive.name, version: archive.version, repository: { url: "git+https://github.com/pz-solutions/refactor-ai.git" } }));
   }
   const runner: Runner = () => { throw new Error("must not call npm"); };
-  const manifest = join(packages, "move-type", "package.json");
-  await writeFile(manifest, JSON.stringify({ name: "@refactor-ai/move-type", version: "0.2.0", repository: { url: "git+https://github.com/pz-solutions/refactor-ai.git" } }));
+  const manifest = join(packages, "csharp-move-type", "package.json");
+  await writeFile(manifest, JSON.stringify({ name: "@refactor-ai/csharp-move-type", version: "0.2.0", repository: { url: "git+https://github.com/pz-solutions/refactor-ai.git" } }));
   await expect(packRelease(packages, join(root, "output"), "v0.1.0", runner)).rejects.toThrow("INVALID_RELEASE");
   for (const version of ["0.2.0-beta..1", "0.2.0-beta.01", "v0.2.0", "0.2.0+build.1"]) expect(() => assertReleaseRef(version)).toThrow("INVALID_VERSION");
 });
@@ -175,6 +175,6 @@ test("prerelease dry runs use next and never query registry state", async () => 
     calls.push(args);
     return { status: 0, stdout: "", stderr: "" };
   });
-  expect(calls).toHaveLength(9);
+  expect(calls).toHaveLength(14);
   expect(calls.every(args => args[0] === "publish" && args.includes("--dry-run") && args[args.indexOf("--tag") + 1] === "next")).toBe(true);
 });

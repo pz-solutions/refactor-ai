@@ -1,4 +1,5 @@
 import type { Operation } from "./types.ts";
+import { languageOperations, type Language } from "./languages.ts";
 
 interface OperationHelp {
   description: string;
@@ -92,35 +93,63 @@ export const operationHelp: Record<Operation, OperationHelp> = {
   },
 };
 
-const options = `  --project <config>       Required for capabilities and plan; tsconfig.json,
-                           jsconfig.json, .csproj or .sln. Named TS configurations
-                           are supported by file/type operations.
-  --file <source>          Required for plan; file included by the selected project.
+
+const languageDetails: Record<Language, Partial<Record<Operation, Partial<OperationHelp>>>> = {
+  typescript: {
+    rename: { details: "Comments and string literals are excluded. References are resolved within the configured project; external consumers and dynamic references are outside the loaded scope." },
+    imports: { description: "Sort imports or explicitly remove unused imports.", details: "Default mode: sort. Sorting retains unused imports and can change module initialization order. Removing an unused value import can remove initialization; bare side-effect imports are retained." },
+    format: { description: "Format a file with the TypeScript formatter.", details: "Uses the runner's fixed formatting settings. An already formatted file produces a plan with no changes." },
+    "rename-file": { details: "The only top-level type is selected automatically; select explicitly when several exist. Renames the whole file and keeps its extension and other declarations. Compiler-resolved imports and supported project file lists are updated. Existing targets and unsupported case-only renames are rejected." },
+    "move-type": { details: "Select a top-level type explicitly when several exist. Other declarations stay in the source; an empty source may be deleted. Missing destination directories are created during apply. Use a --root covering source, destination and callers, and --target-project for a cross-project move. Sources must use ES modules; compatible module resolution and valid composite project references are required. Effectful static initializers, static blocks, decorators, computed members, evaluated bases and nonconstant enum initializers are rejected (INITIALIZATION_EFFECTS_UNSUPPORTED). Simple identifier bases are supported if no new module cycle is introduced. Compiler checks do not prove whole-program behavior equivalence; run application tests." },
+  },
+  csharp: {
+    imports: { description: "Remove unused C# using directives identified by Roslyn.", required: "[--mode remove-unused]", details: "The C# package defaults to remove-unused; sorting is unsupported. Uses Roslyn's built-in compiler diagnostics." },
+    format: { description: "Format a C# file with the Roslyn Formatter API.", details: "Uses Roslyn document options. An already formatted file produces a plan with no changes." },
+    "rename-file": { details: "The only top-level type is selected automatically; select explicitly when several exist. Renames the whole file and keeps its extension and other declarations. Explicit Compile entries are updated. Existing targets and unsupported case-only renames are rejected." },
+    "move-type": { details: "Select a top-level type explicitly when several exist. Other declarations stay in the source; an empty source may be deleted. Missing destination directories are created during apply. Use a --root covering source, destination and callers. Cross-project moves require a loaded target project, normally through a .sln, --target-project and a new destination file. Global using directives stay in the source project. Required ProjectReference edits are unconditional. The destination namespace convention is followed when the source follows its convention; custom namespaces are otherwise retained unless overridden. Moving between projects changes assembly identity. Cycles, inaccessible dependencies, unsupported project rules and new compiler errors are rejected. Run application tests after applying." },
+  },
+};
+
+export function operationHelpFor(operation: Operation, language?: Language): OperationHelp {
+  const item = operationHelp[operation];
+  if (!language) return item;
+  return { ...item, ...languageDetails[language][operation],
+    support: language === "typescript" ? "TypeScript and JavaScript" : "C#",
+    examples: item.examples.filter(example => language === "csharp"
+      ? /--project \S+\.(csproj|sln)(?: |$)/.test(example)
+      : /--project \S+\.json(?: |$)/.test(example)),
+  };
+}
+
+function optionsText(language?: Language): string {
+  const project = language === "typescript" ? "tsconfig.json or jsconfig.json"
+    : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln";
+  return `  --project <config>       Required for capabilities and plan; ${project}.
+${language !== "csharp" ? "                           Named TS configurations are supported by file/type operations.\n" : ""}  --file <source>          Required for plan; file included by the selected project.
   --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
   --at <line:column>       Symbol/type position or extraction start, 1-based UTF-16.
   --end <line:column>      Extraction end, exclusive, 1-based UTF-16.
   --name <identifier>      Required new name for rename and extraction.
-  --mode <mode>            imports: sort (default) or remove-unused.
+  --mode <mode>            imports: ${language === "csharp" ? "remove-unused (default); sorting is unsupported" : "sort (default) or remove-unused"}.
   --type <identifier>      Declared type for rename-file or move-type; select when
                            several types exist, or use --at.
   --to <file>              Required destination for move-type; relative to cwd.
-  --target-project <config> Destination .csproj/TS/JS config; move-type only.
-  --root-namespace <name>  C# namespace convention override for sync-namespace
-                           or move-type.
-  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
+  --target-project <config> Destination project config; move-type only.
+${language !== "typescript" ? "  --root-namespace <name>  C# namespace convention override for sync-namespace\n                           or move-type.\n" : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
                            Within root, store plans only in .refactor-ai;
                            an output path outside root is also allowed.
   --plan <plan.json>       Required for preview, validate and apply.
   --help, -h              Show general, command or operation help; no project needed.
 `;
+}
 
-const context = `Paths are relative to the current working directory unless absolute. Quote paths
+function contextText(language?: Language): string {
+  return `Paths are relative to the current working directory unless absolute. Quote paths
 with spaces. Source/config paths must exist; a move destination may be new.
 Positions count UTF-16 code units: an emoji occupies two columns. CRLF is supported.
-TS/JS rename, imports, format and extract reject project references; file/type
-operations validate supported project graphs and affected named configurations.
-`;
+${language !== "csharp" ? "TS/JS rename, imports, format and extract reject project references; file/type\noperations validate supported project graphs and affected named configurations.\n" : ""}`;
+}
 
 const requirements = `Requirements:
   Node.js 22+. Installed skill commands use npm to set up pinned TypeScript 5.9.3
@@ -157,8 +186,8 @@ Output and exit status:
 `;
 }
 
-function operationText(operation: Operation, invocation: string): string {
-  const item = operationHelp[operation];
+function operationText(operation: Operation, invocation: string, language?: Language): string {
+  const item = operationHelpFor(operation, language);
   return `${operation}: ${item.description}
   Languages: ${item.support}
   Operation options: ${item.required}
@@ -172,7 +201,7 @@ export function helpRequested(args: string[]): boolean {
   return args.length === 0 || args[0] === "help" || args.includes("--help") || args.includes("-h");
 }
 
-export function renderHelp(args: string[], invocation = "node dist/cli.js", runtimeRequirements = requirements): string {
+export function renderHelp(args: string[], invocation = "node dist/cli.js", runtimeRequirements = requirements, language?: Language): string {
   const topics = args[0] === "help" ? args.slice(1) : args;
   const command = topics[0]?.startsWith("-") ? undefined : topics[0];
   const operation = topics[1]?.startsWith("-") ? undefined : topics[1];
@@ -181,7 +210,10 @@ export function renderHelp(args: string[], invocation = "node dist/cli.js", runt
   if (operation && (command !== "plan" || !Object.hasOwn(operationHelp, operation))) {
     throw new Error(`UNSUPPORTED: help topic ${command} ${operation}`);
   }
-  const title = "refactor-ai — deterministic TypeScript/JavaScript and C# refactorings\n";
+  if (operation && language && !languageOperations[language].includes(operation as Operation)) throw new Error(`UNSUPPORTED: ${operation} is unavailable for ${language}`);
+  const title = `refactor-ai — deterministic ${language === "typescript" ? "TypeScript/JavaScript" : language === "csharp" ? "C#" : "TypeScript/JavaScript and C#"} refactorings\n`;
+  const options = optionsText(language);
+  const context = contextText(language);
   if (["preview", "validate", "apply"].includes(command ?? "")) {
     const descriptions = {
       preview: "Print the stored unified diff, including file creation/deletion. Does not write sources or check snapshot freshness; use validate before apply.",
@@ -191,13 +223,13 @@ export function renderHelp(args: string[], invocation = "node dist/cli.js", runt
     return `${title}\n${command}: ${descriptions[command as keyof typeof descriptions]}\n\nUsage:\n  ${invocation} ${command} --plan <plan.json>\n\nOptions:\n  --plan <plan.json>  Required saved plan path.\n  --help, -h         Show this help.\n\nExamples:\n${examples(invocation, [`${command} --plan ./.refactor-ai/saved-plan.json`, `${command} --plan "/path with spaces/plan.json"`])}\n\n${workflow(invocation)}`;
   }
   if (command === "capabilities") {
-    return `${title}\ncapabilities: List implemented operations and modes as JSON for the selected backend.\n\nUsage:\n  ${invocation} capabilities --project <config>\n\nOptions:\n  --project <config>  Required tsconfig.json, jsconfig.json, .csproj or .sln.\n  --help, -h          Show this help.\n\nExamples:\n${examples(invocation, ["capabilities --project examples/typescript/tsconfig.json", "capabilities --project examples/javascript/jsconfig.json", "capabilities --project examples/csharp/Caller.csproj"])}\n\nThe configuration must exist. This command reports implemented backend capabilities,\nnot whether a particular source selection can be refactored. It does not load or\nchange source files.\n\n${runtimeRequirements}`;
+    return `${title}\ncapabilities: List implemented operations and modes as JSON for the selected backend.\n\nUsage:\n  ${invocation} capabilities --project <config>\n\nOptions:\n  --project <config>  Required ${language === "typescript" ? "tsconfig.json or jsconfig.json" : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln"}.\n  --help, -h          Show this help.\n\nExamples:\n${examples(invocation, (["capabilities --project examples/typescript/tsconfig.json", "capabilities --project examples/javascript/jsconfig.json", "capabilities --project examples/csharp/Caller.csproj"]).filter(example => !language || (language === "csharp" ? example.includes("csharp/") : !example.includes("csharp/"))))}\n\nThe configuration must exist. This command reports implemented backend capabilities,\nnot whether a particular source selection can be refactored. It does not load or\nchange source files.\n\n${runtimeRequirements}`;
   }
   if (operation) {
-    return `${title}\nUsage:\n  ${invocation} plan ${operation} --project <config> --file <source> [operation options]\n\n${operationText(operation as Operation, invocation)}\nOptions and defaults:\n${options}\n${context}\n${workflow(invocation)}\n${runtimeRequirements}`;
+    return `${title}\nUsage:\n  ${invocation} plan ${operation} --project <config> --file <source> [operation options]\n\n${operationText(operation as Operation, invocation, language)}\nOptions and defaults:\n${options}\n${context}\n${workflow(invocation)}\n${runtimeRequirements}`;
   }
   const commands = command === "plan"
     ? `Usage:\n  ${invocation} plan <operation> --project <config> --file <source> [options]\n`
     : `Commands:\n  capabilities --project <config>       List backend operations and modes (JSON).\n  plan <operation> --project <config> --file <source> [options]\n                                       Compute a plan without writing sources.\n  preview --plan <plan.json>            Print a stored unified diff.\n  validate --plan <plan.json>           Check freshness and stored validation.\n  apply --plan <plan.json>              Apply the exact plan and journal writes.\n  help [command] [operation]            Show help, also available via --help/-h.\n`;
-  return `${title}\n${commands}\nHelp examples:\n${examples(invocation, ["--help", "plan move-type --help", "help plan rename", "apply --help"])}\n\nOptions and defaults:\n${options}\n${context}\nOperations:\n${Object.keys(operationHelp).map(key => operationText(key as Operation, invocation)).join("\n")}\n${workflow(invocation)}\n${runtimeRequirements}`;
+  return `${title}\n${commands}\nHelp examples:\n${examples(invocation, ["--help", "plan move-type --help", "help plan rename", "apply --help"])}\n\nOptions and defaults:\n${options}\n${context}\nOperations:\n${(language ? languageOperations[language] : Object.keys(operationHelp)).map(key => operationText(key as Operation, invocation, language)).join("\n")}\n${workflow(invocation)}\n${runtimeRequirements}`;
 }

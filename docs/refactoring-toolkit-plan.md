@@ -179,3 +179,9 @@ The runner records a plan of whole resulting files with the original text, snaps
 Writing uses atomic replacement of individual files, a lock and a journal of the original content; a forced write-failure test confirms rollback of an earlier file. Automatic recovery after the process is killed is deferred. We do not claim an atomic multi-file transaction.
 
 The five skills in `skills/` refer to the existing CLI. `bun run demo --built` shows plan/diff/apply on copies of TS, JS and C# examples, checks the run output before/after, and checks that a subsequent format is a no-op. The example templates remain unchanged by the demonstration.
+
+## Language-specific npm distribution
+
+The source engines remain shared, while npm packages select their backend at build time. `src/cli-core.ts` owns planning and saved-plan commands through an injected `BackendLoader`; it imports no concrete engine. `src/cli.ts` and the aggregate npm CLI use `src/backends/load.ts` to select either engine. Language-specific entries inject only the TypeScript or C# adapter, allowing Bun to exclude the other adapter from the bundle.
+
+`src/npm-config.ts` defines fourteen distributions: the aggregate CLI, seven TS/JS operations and six C# operations. TS packages contain no Roslyn helper. C# packages contain no TypeScript npm dependency. A language package rejects foreign project files and saved plans before loading a compiler or applying edits. The generated package help and examples follow the selected language. See [npm CLI packages](npm-packages.md) for package names, executables and requirements.

@@ -31,7 +31,7 @@ __export(exports_csharp, {
   analyze: () => analyze,
   capabilities: () => capabilities
 });
-import { basename as basename2, dirname as dirname3, isAbsolute as isAbsolute2, join, relative as relative3, resolve as resolve4, sep as sep3 } from "node:path";
+import { basename as basename3, dirname as dirname4, isAbsolute as isAbsolute3, join, relative as relative4, resolve as resolve5, sep as sep4 } from "node:path";
 import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -69,7 +69,7 @@ function validateRequest(request) {
     ["root", request.root],
     ["file", request.file]
   ]) {
-    if (!isAbsolute2(value)) {
+    if (!isAbsolute3(value)) {
       throw new Error(`INVALID_REQUEST: ${name} must be an absolute path`);
     }
   }
@@ -94,12 +94,12 @@ function validateRequest(request) {
     throw new Error("INVALID_REQUEST: rootNamespace must be a dotted C# namespace");
   }
   if (request.operation === "move-type") {
-    if (!request.target || !isAbsolute2(request.target) || !request.target.endsWith(".cs")) {
+    if (!request.target || !isAbsolute3(request.target) || !request.target.endsWith(".cs")) {
       throw new Error("INVALID_REQUEST: move-type requires an absolute target .cs file path");
     }
     ensureWithinRoot(request.root, request.target, "target");
     if (request.targetProject !== undefined) {
-      if (!isAbsolute2(request.targetProject) || !request.targetProject.toLowerCase().endsWith(".csproj")) {
+      if (!isAbsolute3(request.targetProject) || !request.targetProject.toLowerCase().endsWith(".csproj")) {
         throw new Error("INVALID_REQUEST: targetProject must be an absolute .csproj path");
       }
       ensureWithinRoot(request.root, request.targetProject, "targetProject");
@@ -116,22 +116,22 @@ function validateResult(result, root) {
     if (typeof change.path !== "string" || change.before !== null && typeof change.before !== "string" || change.after !== null && typeof change.after !== "string" || change.before === null && change.after === null) {
       throw new Error("CSHARP_PROTOCOL_ERROR: helper returned a malformed change");
     }
-    if (!isAbsolute2(change.path)) {
+    if (!isAbsolute3(change.path)) {
       throw new Error("CSHARP_PROTOCOL_ERROR: helper returned a relative change path");
     }
     ensureWithinRoot(root, change.path, "changed file");
   }
 }
 function ensureWithinRoot(root, path, label) {
-  const difference = relative3(resolve4(root), resolve4(path));
-  if (difference === ".." || difference.startsWith(`..${sep3}`) || isAbsolute2(difference)) {
+  const difference = relative4(resolve5(root), resolve5(path));
+  if (difference === ".." || difference.startsWith(`..${sep4}`) || isAbsolute3(difference)) {
     throw new Error(`OUTSIDE_ROOT: ${label} is outside root: ${path}`);
   }
 }
 async function findOrBuildHelper() {
   const configured = process.env.REFACTOR_AI_HOME;
-  const directory = dirname3(fileURLToPath(import.meta.url));
-  const sourceRoot = configured ? resolve4(configured) : resolve4(directory, basename2(directory) === "backends" && basename2(dirname3(directory)) === "src" ? "../.." : "..");
+  const directory = dirname4(fileURLToPath(import.meta.url));
+  const sourceRoot = configured ? resolve5(configured) : resolve5(directory, basename3(directory) === "backends" && basename3(dirname4(directory)) === "src" ? "../.." : "..");
   const dll = helperDll(sourceRoot);
   if (await exists(dll))
     return dll;
@@ -235,20 +235,20 @@ var init_csharp = __esm(() => {
 });
 
 // src/backends/typescript-paths.ts
-import { isAbsolute as isAbsolute3, relative as relative4, sep as sep4 } from "node:path";
-function portablePath(path, separator = sep4) {
+import { isAbsolute as isAbsolute4, relative as relative5, sep as sep5 } from "node:path";
+function portablePath(path, separator = sep5) {
   return path.split(separator).join("/");
 }
 function isInside(root, path) {
-  const difference = relative4(root, path);
-  return difference !== ".." && !difference.startsWith(`..${sep4}`) && !isAbsolute3(difference);
+  const difference = relative5(root, path);
+  return difference !== ".." && !difference.startsWith(`..${sep5}`) && !isAbsolute4(difference);
 }
 var init_typescript_paths = () => {};
 
 // src/backends/typescript-vfs.ts
 import ts from "typescript";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename as basename3, dirname as dirname4, relative as relative5, resolve as resolve5, sep as sep5 } from "node:path";
+import { basename as basename4, dirname as dirname5, relative as relative6, resolve as resolve6, sep as sep6 } from "node:path";
 function fail(code, reason) {
   throw new Error(`${code}: ${reason}`);
 }
@@ -256,10 +256,10 @@ function swapCase(value) {
   return [...value].map((char) => char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase()).join("");
 }
 function detectCaseSensitivity(root) {
-  const probe = [root, ...readdirSync(root).map((name) => resolve5(root, name))].find((path) => swapCase(basename3(path)) !== basename3(path));
+  const probe = [root, ...readdirSync(root).map((name) => resolve6(root, name))].find((path) => swapCase(basename4(path)) !== basename4(path));
   if (!probe)
     return ts.sys.useCaseSensitiveFileNames;
-  const swapped = resolve5(dirname4(probe), swapCase(basename3(probe)));
+  const swapped = resolve6(dirname5(probe), swapCase(basename4(probe)));
   if (!existsSync(swapped))
     return true;
   const a = statSync(probe), b = statSync(swapped);
@@ -276,7 +276,7 @@ function withEol(text, eol) {
   return text.replace(/\r?\n/g, eol);
 }
 function specComponents(spec, basePath) {
-  const normalized = portablePath(resolve5(basePath, spec));
+  const normalized = portablePath(resolve6(basePath, spec));
   const parts = normalized.split("/").filter((component, index) => index === 0 || component !== "");
   if (normalized.startsWith("//"))
     parts[0] = "/";
@@ -336,7 +336,7 @@ function wildcardRegex(specs, basePath, usage, flags) {
 function includeBasePath(absolute) {
   const wildcard = absolute.search(/[*?]/);
   if (wildcard < 0)
-    return basename3(absolute).includes(".") ? dirname4(absolute) : absolute;
+    return basename4(absolute).includes(".") ? dirname5(absolute) : absolute;
   const normalized = portablePath(absolute);
   const end = normalized.lastIndexOf("/", wildcard);
   return end === 2 && /^[A-Za-z]:/.test(normalized) ? normalized.slice(0, 3) : normalized.slice(0, end) || "/";
@@ -357,7 +357,7 @@ class VirtualFs {
     this.caseSensitive = detectCaseSensitivity(root);
   }
   key(path) {
-    const normalized = resolve5(path);
+    const normalized = resolve6(path);
     return this.caseSensitive ? normalized : normalized.toLowerCase();
   }
   samePath(a, b) {
@@ -367,7 +367,7 @@ class VirtualFs {
     return isInside(this.key(directory), this.key(path));
   }
   setHiddenDirectories(directories) {
-    this.hiddenDirectories = directories.map((directory) => resolve5(directory));
+    this.hiddenDirectories = directories.map((directory) => resolve6(directory));
   }
   isHidden(path) {
     return this.hiddenDirectories.some((directory) => this.contains(directory, path));
@@ -430,7 +430,7 @@ class VirtualFs {
   write(path, text, bom = this.hasBom(path)) {
     const key = this.key(path);
     const existing = this.overlays.get(key);
-    this.overlays.set(key, { path: existing?.path ?? resolve5(path), text: text?.startsWith(BOM) ? text.slice(1) : text, bom });
+    this.overlays.set(key, { path: existing?.path ?? resolve6(path), text: text?.startsWith(BOM) ? text.slice(1) : text, bom });
     this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.version += 1;
   }
@@ -444,7 +444,7 @@ class VirtualFs {
     if (!this.isHidden(path))
       fail("DECLARATION_OUTPUT_UNSUPPORTED", `in-memory build would emit outside a declaration output directory: ${path}`);
     const key = this.key(path);
-    this.generated.set(key, { path: resolve5(path), text });
+    this.generated.set(key, { path: resolve6(path), text });
     this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.version += 1;
   }
@@ -459,7 +459,7 @@ class VirtualFs {
     }
     for (const name of names) {
       try {
-        const stat = statSync(resolve5(directory, name));
+        const stat = statSync(resolve6(directory, name));
         if (stat.isFile())
           files.push(name);
         else if (stat.isDirectory())
@@ -478,19 +478,19 @@ class VirtualFs {
     return paths;
   }
   entries(directory) {
-    directory = resolve5(directory);
+    directory = resolve6(directory);
     const hidden = this.isHidden(directory);
     const files = new Map;
     const directories = new Map;
     if (!hidden) {
       const disk = this.diskEntries(directory);
       for (const name of disk.files) {
-        const path = resolve5(directory, name);
+        const path = resolve6(directory, name);
         if (!this.isHidden(path) && this.fileExists(path))
           files.set(this.key(path), name);
       }
       for (const name of disk.directories) {
-        const path = resolve5(directory, name);
+        const path = resolve6(directory, name);
         if (!this.isHidden(path) || this.directoryExists(path))
           directories.set(this.key(path), name);
       }
@@ -498,8 +498,8 @@ class VirtualFs {
     for (const path of this.virtualPaths()) {
       if (!this.contains(directory, path) || this.samePath(directory, path))
         continue;
-      const rest = relative5(directory, path).split(sep5);
-      const child = resolve5(directory, rest[0]);
+      const rest = relative6(directory, path).split(sep6);
+      const child = resolve6(directory, rest[0]);
       if (rest.length === 1)
         files.set(this.key(child), rest[0]);
       else
@@ -508,7 +508,7 @@ class VirtualFs {
     return { files: [...files.values()], directories: [...directories.values()] };
   }
   directoryExists(path) {
-    path = resolve5(path);
+    path = resolve6(path);
     if (this.virtualPaths().some((item) => this.contains(path, item) && !this.samePath(path, item)))
       return true;
     if (this.isHidden(path))
@@ -525,7 +525,7 @@ class VirtualFs {
   realpath(path) {
     const key = this.key(path);
     if (this.generated.has(key) || !this.suspended && this.overlays.has(key))
-      return resolve5(path);
+      return resolve6(path);
     try {
       return ts.sys.realpath?.(path) ?? path;
     } catch {
@@ -533,14 +533,14 @@ class VirtualFs {
     }
   }
   readDirectory(path, extensions, excludes, includes, depth) {
-    path = resolve5(path);
+    path = resolve6(path);
     const flags = this.caseSensitive ? "" : "i";
     const includeFiles = includes?.length ? includes.map((spec) => subPattern(spec, path, "files")).map((pattern) => pattern === undefined ? undefined : new RegExp(`^${pattern}$`, flags)) : undefined;
     const includeDirectories = wildcardRegex(includes, path, "directories", flags);
     const exclude = wildcardRegex(excludes, path, "exclude", flags);
     const results = includeFiles ? includeFiles.map(() => []) : [[]];
     const bases = [path];
-    for (const base of (includes ?? []).map((spec) => includeBasePath(resolve5(path, spec))).sort()) {
+    for (const base of (includes ?? []).map((spec) => includeBasePath(resolve6(path, spec))).sort()) {
       if (bases.every((existing) => !this.contains(existing, base)))
         bases.push(base);
     }
@@ -552,7 +552,7 @@ class VirtualFs {
       visited.add(key);
       const { files, directories } = this.entries(directory);
       for (const name of [...files].sort()) {
-        const absolute = resolve5(directory, name);
+        const absolute = resolve6(directory, name);
         if (extensions && !extensions.some((extension) => absolute.endsWith(extension)))
           continue;
         const normalized = portablePath(absolute);
@@ -569,7 +569,7 @@ class VirtualFs {
       if (remaining !== undefined && --remaining === 0)
         return;
       for (const name of [...directories].sort()) {
-        const absolute = resolve5(directory, name);
+        const absolute = resolve6(directory, name);
         const normalized = portablePath(absolute);
         if ((!includeDirectories || includeDirectories.test(normalized)) && !exclude?.test(normalized))
           visit(absolute, remaining);
@@ -628,7 +628,7 @@ var init_typescript_vfs = __esm(() => {
 // src/backends/typescript-workspace.ts
 import ts2 from "typescript";
 import { readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
-import { basename as basename4, dirname as dirname5, relative as relative6, resolve as resolve6 } from "node:path";
+import { basename as basename5, dirname as dirname6, relative as relative7, resolve as resolve7 } from "node:path";
 function configPathFor(project) {
   let stat;
   try {
@@ -637,13 +637,13 @@ function configPathFor(project) {
     fail("PROJECT_NOT_FOUND", project);
   }
   if (stat.isFile()) {
-    if (!configName.test(basename4(project)))
+    if (!configName.test(basename5(project)))
       fail("UNSUPPORTED_PROJECT", "project must name a tsconfig*.json or jsconfig*.json file");
-    return resolve6(project);
+    return resolve7(project);
   }
   if (!stat.isDirectory())
     fail("UNSUPPORTED_PROJECT", "project must be a config file or directory");
-  const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve6(project, name)).filter((path) => {
+  const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve7(project, name)).filter((path) => {
     try {
       return statSync2(path).isFile();
     } catch {
@@ -666,7 +666,7 @@ function discoverConfigs(root) {
       return;
     }
     for (const name of names) {
-      const path = resolve6(directory, name);
+      const path = resolve7(directory, name);
       let stat;
       try {
         stat = statSync2(path);
@@ -786,7 +786,7 @@ class Workspace {
         return text === undefined ? undefined : ts2.ScriptSnapshot.fromString(text);
       },
       getScriptKind: (fileName) => scriptKindFor(fileName),
-      getCurrentDirectory: () => dirname5(sourceConfig),
+      getCurrentDirectory: () => dirname6(sourceConfig),
       getDefaultLibFileName: (options) => ts2.getDefaultLibFilePath(options),
       fileExists: (path) => vfs.fileExists(path),
       readFile: (path) => vfs.readFile(path),
@@ -829,7 +829,7 @@ class Workspace {
     const references = result.config?.references;
     if (!Array.isArray(references))
       return [];
-    return references.map((reference) => typeof reference?.path === "string" ? resolve6(ts2.resolveProjectReferencePath({ path: resolve6(dirname5(configPath), reference.path) })) : undefined).filter((path) => path !== undefined);
+    return references.map((reference) => typeof reference?.path === "string" ? resolve7(ts2.resolveProjectReferencePath({ path: resolve7(dirname6(configPath), reference.path) })) : undefined).filter((path) => path !== undefined);
   }
   loadGraph() {
     const vfs = this.vfs;
@@ -842,12 +842,12 @@ class Workspace {
       paths.set(vfs.key(config), config);
       this.importingConfigs.push(config);
     }
-    const graphDirectories = new Set([...affected].map((key) => vfs.key(dirname5(paths.get(key)))));
+    const graphDirectories = new Set([...affected].map((key) => vfs.key(dirname6(paths.get(key)))));
     const observers = new Set;
     for (const config of this.discovered) {
-      if (affected.has(vfs.key(config)) || editorConfigName.test(basename4(config)) || this.isBaseConfig(config))
+      if (affected.has(vfs.key(config)) || editorConfigName.test(basename5(config)) || this.isBaseConfig(config))
         continue;
-      if (!graphDirectories.has(vfs.key(dirname5(config))) || !this.listsAny(config, this.affected))
+      if (!graphDirectories.has(vfs.key(dirname6(config))) || !this.listsAny(config, this.affected))
         continue;
       affected.add(vfs.key(config));
       paths.set(vfs.key(config), config);
@@ -882,13 +882,13 @@ class Workspace {
       diskParsed.set(key, parsed);
       paths.set(key, config);
       for (const reference of parsed.projectReferences ?? [])
-        pending.push(resolve6(ts2.resolveProjectReferencePath(reference)));
+        pending.push(resolve7(ts2.resolveProjectReferencePath(reference)));
     }
     for (const [key, parsed] of diskParsed) {
       const configPath = paths.get(key);
       if (parsed.options.outFile)
         fail("UNSUPPORTED_PROJECT", `${configPath}: outFile bundles are not supported`);
-      const references = (parsed.projectReferences ?? []).map((reference) => resolve6(ts2.resolveProjectReferencePath(reference)));
+      const references = (parsed.projectReferences ?? []).map((reference) => resolve7(ts2.resolveProjectReferencePath(reference)));
       if (references.some((reference) => !diskParsed.has(vfs.key(reference)))) {
         fail("UNHANDLED_PROJECT_GRAPH", `${configPath} references a project that could not be loaded`);
       }
@@ -905,10 +905,10 @@ class Workspace {
       if (!output) {
         fail("DECLARATION_OUTPUT_UNSUPPORTED", `${item.configPath} is referenced by another project and must emit declarations to outDir or declarationDir`);
       }
-      if (!isInside(this.root, output) || vfs.samePath(output, dirname5(item.configPath)) || vfs.contains(output, dirname5(item.configPath))) {
+      if (!isInside(this.root, output) || vfs.samePath(output, dirname6(item.configPath)) || vfs.contains(output, dirname6(item.configPath))) {
         fail("DECLARATION_OUTPUT_UNSUPPORTED", `${item.configPath}: declaration output directory must be a dedicated directory inside ${this.root}`);
       }
-      item.outputDirectory = resolve6(output);
+      item.outputDirectory = resolve7(output);
       outputs.push(item.outputDirectory);
     }
     vfs.setHiddenDirectories(outputs);
@@ -949,7 +949,7 @@ class Workspace {
         }
       }
     }
-    const configDirectories = new Set(withFiles.map((item) => vfs.key(dirname5(item.configPath))));
+    const configDirectories = new Set(withFiles.map((item) => vfs.key(dirname6(item.configPath))));
     if (configDirectories.size > 1 && first.parsed.options.paths && !first.parsed.options.baseUrl) {
       fail("PROJECT_OPTIONS_INCOMPATIBLE", "'paths' without 'baseUrl' resolves relative to each config; set baseUrl to plan across projects");
     }
@@ -985,13 +985,13 @@ class Workspace {
     return this.participant(config).references;
   }
   fileNames(config) {
-    return this.participant(config).parsed.fileNames.map((path) => resolve6(path));
+    return this.participant(config).parsed.fileNames.map((path) => resolve7(path));
   }
   unionFiles() {
     const files = new Map;
     for (const item of this.participants.values())
       for (const path of item.parsed.fileNames)
-        files.set(this.vfs.key(path), resolve6(path));
+        files.set(this.vfs.key(path), resolve7(path));
     return [...files.values()].sort();
   }
   program() {
@@ -1030,7 +1030,7 @@ class Workspace {
     return paths.some((path) => listed.has(this.vfs.key(path)));
   }
   isBaseConfig(config) {
-    if (editorConfigName.test(basename4(config)))
+    if (editorConfigName.test(basename5(config)))
       return false;
     if (!this.extendedConfigs) {
       this.extendedConfigs = new Set;
@@ -1039,7 +1039,7 @@ class Workspace {
         for (const entry of Array.isArray(raw) ? raw : [raw]) {
           if (typeof entry !== "string" || !/^\.\.?[\\/]/.test(entry))
             continue;
-          const path = resolve6(dirname5(candidate), entry);
+          const path = resolve7(dirname6(candidate), entry);
           this.extendedConfigs.add(this.vfs.key(/\.json$/i.test(path) ? path : `${path}.json`));
         }
       }
@@ -1078,7 +1078,7 @@ class Workspace {
             fail("UNHANDLED_PROJECT_GRAPH", `${config} cannot be parsed, so it cannot be shown to be unaffected`);
           const included = new Set(parsed.fileNames.map((path) => this.vfs.key(path)));
           const hit = paths.find((path) => included.has(this.vfs.key(path)));
-          if (hit && editorConfigName.test(basename4(config))) {
+          if (hit && editorConfigName.test(basename5(config))) {
             fail("UNHANDLED_PROJECT_GRAPH", `${config} also includes ${hit} but is not connected to ${this.sourceConfig} by project references`);
           }
           if (hit) {
@@ -1086,7 +1086,7 @@ class Workspace {
           }
         }
         if (checkImports && this.importsAffected(config, paths)) {
-          fail("UNHANDLED_PROJECT_GRAPH", `${config} imports a changed file (${paths.map((path) => relative6(this.root, path)).join(", ")}) but was not part of the planned project graph`);
+          fail("UNHANDLED_PROJECT_GRAPH", `${config} imports a changed file (${paths.map((path) => relative7(this.root, path)).join(", ")}) but was not part of the planned project graph`);
         }
       }
     };
@@ -1114,7 +1114,7 @@ class Workspace {
       getSourceFile: (fileName, settings) => this.sourceFile(fileName, settings, options),
       getDefaultLibFileName: (options) => ts2.getDefaultLibFilePath(options),
       writeFile: () => {},
-      getCurrentDirectory: () => dirname5(configPath),
+      getCurrentDirectory: () => dirname6(configPath),
       getCanonicalFileName: (fileName) => vfs.caseSensitive ? fileName : fileName.toLowerCase(),
       useCaseSensitiveFileNames: () => vfs.caseSensitive,
       getNewLine: () => `
@@ -1147,7 +1147,7 @@ class Workspace {
         if (diagnostic.category !== ts2.DiagnosticCategory.Error)
           return;
         const record = {
-          file: diagnostic.file ? resolve6(diagnostic.file.fileName) : item.configPath,
+          file: diagnostic.file ? resolve7(diagnostic.file.fileName) : item.configPath,
           code: `TS${diagnostic.code}`,
           message: flatten(diagnostic)
         };
@@ -1159,7 +1159,7 @@ class Workspace {
       program.getOptionsDiagnostics().forEach(add);
       program.getGlobalDiagnostics().forEach(add);
       for (const sourceFile of program.getSourceFiles()) {
-        const path = resolve6(sourceFile.fileName);
+        const path = resolve7(sourceFile.fileName);
         if (!isInside(this.root, path)) {
           if (!sourceFile.isDeclarationFile)
             fail("PROJECT_SCOPE_INCOMPLETE", `${item.configPath} uses user source outside ${this.root}: ${path}`);
@@ -1192,7 +1192,7 @@ class Workspace {
     const options = item.parsed.options;
     if (options.noEmit || options.rootDir || options.composite || !options.outDir && !options.declarationDir)
       return;
-    const directories = program.getSourceFiles().filter((sourceFile) => !sourceFile.isDeclarationFile && !program.isSourceFileFromExternalLibrary(sourceFile)).filter((sourceFile) => !(options.noEmitForJsFiles && /\.[cm]?jsx?$/i.test(sourceFile.fileName))).filter((sourceFile) => !/\.json$/i.test(sourceFile.fileName) || options.outDir).map((sourceFile) => portablePath(dirname5(resolve6(sourceFile.fileName))).split("/"));
+    const directories = program.getSourceFiles().filter((sourceFile) => !sourceFile.isDeclarationFile && !program.isSourceFileFromExternalLibrary(sourceFile)).filter((sourceFile) => !(options.noEmitForJsFiles && /\.[cm]?jsx?$/i.test(sourceFile.fileName))).filter((sourceFile) => !/\.json$/i.test(sourceFile.fileName) || options.outDir).map((sourceFile) => portablePath(dirname6(resolve7(sourceFile.fileName))).split("/"));
     if (!directories.length)
       return;
     let common = directories[0];
@@ -1215,7 +1215,7 @@ class Workspace {
       const object = json.statements[0]?.expression;
       if (!object || !ts2.isObjectLiteralExpression(object))
         continue;
-      const directory = dirname5(item.configPath);
+      const directory = dirname6(item.configPath);
       const changes = [];
       for (const property of object.properties) {
         if (!ts2.isPropertyAssignment(property) || !ts2.isStringLiteral(property.name))
@@ -1226,11 +1226,11 @@ class Workspace {
         elements.forEach((element, index) => {
           if (!ts2.isStringLiteral(element) || /[*?]/.test(element.text))
             return;
-          const absolute = resolve6(directory, element.text);
+          const absolute = resolve7(directory, element.text);
           const start = element.getStart(json);
           const rename = configRenames.find(([from]) => vfs.samePath(from, absolute));
           if (rename) {
-            const relativePath = portablePath(relative6(directory, rename[1]));
+            const relativePath = portablePath(relative7(directory, rename[1]));
             const spec = element.text.startsWith("./") && !relativePath.startsWith("../") ? `./${relativePath}` : relativePath;
             const quote = text[start];
             changes.push({ span: { start, length: element.end - start }, newText: `${quote}${JSON.stringify(spec).slice(1, -1)}${quote}` });
@@ -1254,7 +1254,7 @@ class Workspace {
     if (!files || !ts2.isArrayLiteralExpression(files.initializer))
       return false;
     const elements = files.initializer.elements;
-    const relativePath = portablePath(relative6(dirname5(configPath), path));
+    const relativePath = portablePath(relative7(dirname6(configPath), path));
     const dotted = elements.some((element) => ts2.isStringLiteral(element) && element.text.startsWith("./"));
     const literal = JSON.stringify(dotted && !relativePath.startsWith("../") ? `./${relativePath}` : relativePath);
     let change;
@@ -1345,7 +1345,7 @@ var init_typescript_workspace = __esm(() => {
 // src/backends/typescript-fileops.ts
 import ts3 from "typescript";
 import { existsSync as existsSync2, readdirSync as readdirSync3 } from "node:fs";
-import { dirname as dirname6, extname, isAbsolute as isAbsolute4, relative as relative7, resolve as resolve7, sep as sep6 } from "node:path";
+import { dirname as dirname7, extname as extname2, isAbsolute as isAbsolute5, relative as relative8, resolve as resolve8, sep as sep7 } from "node:path";
 function preferencesFor(ws) {
   let single = 0, double = 0;
   for (const path of userFiles(ws)) {
@@ -1361,14 +1361,14 @@ function preferencesFor(ws) {
   return { allowTextChangesInNewFiles: true, quotePreference: single > double ? "single" : double > single ? "double" : "auto" };
 }
 function assertAbsolute(name, value) {
-  if (!value || !isAbsolute4(value))
+  if (!value || !isAbsolute5(value))
     fail("INVALID_REQUEST", `${name} must be an absolute path`);
-  return resolve7(value);
+  return resolve8(value);
 }
 function sourceExtension(path) {
   if (/\.d(\.[^./]+)?\.[cm]?ts$/i.test(path))
     fail("UNSUPPORTED_FILE", "declaration files cannot be renamed or moved");
-  const extension = extname(path);
+  const extension = extname2(path);
   if (![...tsExtensions, ...jsExtensions].includes(extension))
     fail("UNSUPPORTED_FILE", extension || "file has no extension");
   return extension;
@@ -1443,14 +1443,14 @@ function selectType(context, request) {
 }
 function assertCaseSafe(root, path) {
   let current = root;
-  for (const part of relative7(root, path).split(sep6)) {
+  for (const part of relative8(root, path).split(sep7)) {
     let names;
     try {
       names = readdirSync3(current);
     } catch {
       return;
     }
-    const next = resolve7(current, part);
+    const next = resolve8(current, part);
     if (!names.includes(part)) {
       if (existsSync2(next)) {
         const actual = names.find((name) => name.toLowerCase() === part.toLowerCase()) ?? "an existing entry";
@@ -1469,15 +1469,15 @@ function parseFile(ws, path) {
   return ts3.createSourceFile(path, text, { languageVersion: ts3.ScriptTarget.Latest, impliedNodeFormat }, true, scriptKindFor(path));
 }
 function userFiles(ws) {
-  return ws.unionFiles().filter((path) => isInside(ws.root, path) && !path.split(sep6).includes("node_modules"));
+  return ws.unionFiles().filter((path) => isInside(ws.root, path) && !path.split(sep7).includes("node_modules"));
 }
 function applyEdits(context, edits, newFile) {
   const { ws } = context;
   for (const edit of [...edits].sort((a, b) => a.fileName.localeCompare(b.fileName))) {
-    const path = resolve7(edit.fileName);
+    const path = resolve8(edit.fileName);
     if (!isInside(ws.root, path))
       fail("OUTSIDE_ROOT", `TypeScript proposed a change outside ${ws.root}: ${path}`);
-    if (path.split(sep6).includes("node_modules") || ws.vfs.isHidden(path))
+    if (path.split(sep7).includes("node_modules") || ws.vfs.isHidden(path))
       fail("OUTSIDE_PROJECT", `TypeScript proposed a change to a dependency or build output: ${path}`);
     const before = ws.vfs.readFile(path);
     if (edit.isNewFile) {
@@ -1532,7 +1532,7 @@ function importers(ws, path) {
         found.push(ws.vfs.key(file));
     }
     for (const reference of sourceFile.referencedFiles) {
-      if (ws.vfs.samePath(resolve7(dirname6(file), reference.fileName), path))
+      if (ws.vfs.samePath(resolve8(dirname7(file), reference.fileName), path))
         found.push(ws.vfs.key(file));
     }
   }
@@ -1601,13 +1601,13 @@ function specifierLike(from, to, original, originalTarget) {
   if (!original.startsWith("./") && !original.startsWith("../")) {
     fail("REEXPORT_UNSUPPORTED", `non-relative specifier '${original}' in ${from} cannot be retargeted deterministically`);
   }
-  const written = extname(original);
-  const targetExtension = extname(to);
+  const written = extname2(original);
+  const targetExtension = extname2(to);
   let extension = "";
   if ([...tsExtensions, ...jsExtensions].includes(written)) {
-    extension = written === extname(originalTarget) ? targetExtension : written === ".jsx" && targetExtension === ".tsx" ? ".jsx" : jsEquivalent[targetExtension] ?? targetExtension;
+    extension = written === extname2(originalTarget) ? targetExtension : written === ".jsx" && targetExtension === ".tsx" ? ".jsx" : jsEquivalent[targetExtension] ?? targetExtension;
   }
-  const path = portablePath(relative7(dirname6(from), to.slice(0, to.length - targetExtension.length))) + extension;
+  const path = portablePath(relative8(dirname7(from), to.slice(0, to.length - targetExtension.length))) + extension;
   return path.startsWith(".") ? path : `./${path}`;
 }
 function updateReexports(context, target, name, exported, sourceDeleted) {
@@ -1674,8 +1674,8 @@ function moduleEdges(ws, files, owners) {
       const resolved = ws.resolveModule(specifier, sourceFile, options);
       if (!resolved || resolved.isExternalLibraryImport)
         continue;
-      const target = resolve7(resolved.resolvedFileName);
-      if (!isInside(ws.root, target) || target.split(sep6).includes("node_modules") || ws.vfs.isHidden(target))
+      const target = resolve8(resolved.resolvedFileName);
+      if (!isInside(ws.root, target) || target.split(sep7).includes("node_modules") || ws.vfs.isHidden(target))
         continue;
       edges.push({ file, target, from, to: owners(target) });
     }
@@ -1747,7 +1747,7 @@ function renameFile(context, request) {
     fail("INVALID_REQUEST", "rename-file keeps the file in its project; targetProject must be omitted");
   }
   const { name } = selectType(context, request);
-  const target = resolve7(dirname6(file), `${name}${extname(file)}`);
+  const target = resolve8(dirname7(file), `${name}${extname2(file)}`);
   if (request.target !== undefined && assertAbsolute("target", request.target) !== target) {
     fail("INVALID_REQUEST", `rename-file derives its destination from the type name: ${target}`);
   }
@@ -1890,7 +1890,7 @@ function moveType(context, request) {
       beforeOwners.set(key, [...beforeOwners.get(key) ?? [], config]);
   }
   const listedBefore = (config, path) => before.get(config).includes(ws.vfs.key(path));
-  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname6(config), dirname6(ws.targetConfig)));
+  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname7(config), dirname7(ws.targetConfig)));
   const mirroring = siblings.filter((config) => listedBefore(config, file) && !listedBefore(config, target));
   const statementStart = declaration.getStart(sourceFile);
   const moduleGraph = () => {
@@ -1991,8 +1991,8 @@ async function analyzeFileOperation(request) {
   const sourceConfig = configPathFor(assertAbsolute("project", request.project));
   const targetConfig = request.operation === "move-type" && request.targetProject ? configPathFor(assertAbsolute("targetProject", request.targetProject)) : sourceConfig;
   const affected = [file];
-  if (request.operation === "move-type" && request.target && isAbsolute4(request.target) && existsSync2(request.target))
-    affected.push(resolve7(request.target));
+  if (request.operation === "move-type" && request.target && isAbsolute5(request.target) && existsSync2(request.target))
+    affected.push(resolve8(request.target));
   const ws = new Workspace(root, sourceConfig, targetConfig, affected);
   try {
     if (!ws.vfs.fileExists(file))
@@ -2032,19 +2032,19 @@ async function analyzeFileOperation(request) {
       }
     }
     for (const config of ws.importingConfigs) {
-      context.notes.push(`Included ${relative7(root, config)} because its program imports ${relative7(root, file)} without a project reference.`);
+      context.notes.push(`Included ${relative8(root, config)} because its program imports ${relative8(root, file)} without a project reference.`);
     }
     for (const config of ws.observers()) {
-      context.notes.push(`Updated and validated ${relative7(root, config)}, a variant config that also compiles the affected files.`);
+      context.notes.push(`Updated and validated ${relative8(root, config)}, a variant config that also compiles the affected files.`);
     }
     if (ws.participants.size > 1) {
-      context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative7(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
+      context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative8(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
     }
     if (isJs) {
       context.notes.push("JavaScript analysis is semantic only for references TypeScript can resolve; dynamic imports with computed paths and string-based references are not changed.");
     }
     if (renamed)
-      context.notes.push(`Renamed ${relative7(root, renamed[0])} to ${relative7(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
+      context.notes.push(`Renamed ${relative8(root, renamed[0])} to ${relative8(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
     return {
       backend: "typescript",
       version: ts3.version,
@@ -2085,15 +2085,15 @@ __export(exports_typescript, {
 });
 import ts4 from "typescript";
 import { statSync as statSync3 } from "node:fs";
-import { basename as basename5, dirname as dirname7, extname as extname2, isAbsolute as isAbsolute5, resolve as resolve8 } from "node:path";
+import { basename as basename6, dirname as dirname8, extname as extname3, isAbsolute as isAbsolute6, resolve as resolve9 } from "node:path";
 function fail2(code, reason) {
   throw new Error(`${code}: ${reason}`);
 }
 function canonical(path) {
-  return resolve8(path);
+  return resolve9(path);
 }
 function assertAbsolute2(name, value) {
-  if (!isAbsolute5(value))
+  if (!isAbsolute6(value))
     fail2("INVALID_REQUEST", `${name} must be an absolute path`);
   return canonical(value);
 }
@@ -2105,14 +2105,14 @@ function configPathFor2(project) {
     fail2("PROJECT_NOT_FOUND", project);
   }
   if (stat.isFile()) {
-    if (!["tsconfig.json", "jsconfig.json"].includes(basename5(project))) {
+    if (!["tsconfig.json", "jsconfig.json"].includes(basename6(project))) {
       fail2("UNSUPPORTED_PROJECT", "project must name tsconfig.json or jsconfig.json");
     }
     return project;
   }
   if (!stat.isDirectory())
     fail2("UNSUPPORTED_PROJECT", "project must be a config file or directory");
-  const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve8(project, name)).filter(ts4.sys.fileExists);
+  const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve9(project, name)).filter(ts4.sys.fileExists);
   if (candidates.length === 0)
     fail2("CONFIG_NOT_FOUND", `no tsconfig.json or jsconfig.json in ${project}`);
   if (candidates.length > 1)
@@ -2154,7 +2154,7 @@ function loadProject(request) {
       const text = overlays.get(path) ?? ts4.sys.readFile(path);
       return text === undefined ? undefined : ts4.ScriptSnapshot.fromString(text);
     },
-    getCurrentDirectory: () => dirname7(configPath),
+    getCurrentDirectory: () => dirname8(configPath),
     getDefaultLibFileName: (options) => ts4.getDefaultLibFilePath(options),
     fileExists: ts4.sys.fileExists,
     readFile: ts4.sys.readFile,
@@ -2396,7 +2396,7 @@ async function analyze2(request) {
     const text = sourceText(state, file);
     if (text === undefined)
       fail2("FILE_NOT_FOUND", file);
-    const extension = extname2(file).toLowerCase();
+    const extension = extname3(file).toLowerCase();
     if (![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].includes(extension)) {
       fail2("UNSUPPORTED_FILE", extension || "file has no extension");
     }
@@ -2498,9 +2498,11 @@ var init_typescript = __esm(() => {
 
 // src/cli.ts
 import { realpathSync } from "node:fs";
-import { lstat as lstat4, mkdir as mkdir2, readFile as readFile4, realpath as realpath3, writeFile as writeFile2 } from "node:fs/promises";
-import { basename as basename6, dirname as dirname8, extname as extname3, isAbsolute as isAbsolute6, relative as relative8, resolve as resolve9, sep as sep7 } from "node:path";
 import { pathToFileURL } from "node:url";
+
+// src/cli-core.ts
+import { lstat as lstat4, mkdir as mkdir2, readFile as readFile4, realpath as realpath3, writeFile as writeFile2 } from "node:fs/promises";
+import { basename as basename2, dirname as dirname3, isAbsolute as isAbsolute2, relative as relative3, resolve as resolve4, sep as sep3 } from "node:path";
 
 // src/core/apply.ts
 import { lstat as lstat3, mkdir, open, readFile as readFile3, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
@@ -3429,6 +3431,21 @@ async function applyPlan(plan) {
   }
 }
 
+// src/languages.ts
+import { extname } from "node:path";
+var languageOperations = {
+  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type"],
+  csharp: ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"]
+};
+function languageForProject(project) {
+  const extension = extname(project).toLowerCase();
+  if (extension === ".csproj" || extension === ".sln")
+    return "csharp";
+  if (extension === ".json")
+    return "typescript";
+  throw new Error("UNSUPPORTED_PROJECT: use tsconfig/jsconfig.json, .csproj or .sln");
+}
+
 // src/help.ts
 var operationHelp = {
   rename: {
@@ -3513,34 +3530,64 @@ var operationHelp = {
     ]
   }
 };
-var options = `  --project <config>       Required for capabilities and plan; tsconfig.json,
-                           jsconfig.json, .csproj or .sln. Named TS configurations
-                           are supported by file/type operations.
-  --file <source>          Required for plan; file included by the selected project.
+var languageDetails = {
+  typescript: {
+    rename: { details: "Comments and string literals are excluded. References are resolved within the configured project; external consumers and dynamic references are outside the loaded scope." },
+    imports: { description: "Sort imports or explicitly remove unused imports.", details: "Default mode: sort. Sorting retains unused imports and can change module initialization order. Removing an unused value import can remove initialization; bare side-effect imports are retained." },
+    format: { description: "Format a file with the TypeScript formatter.", details: "Uses the runner's fixed formatting settings. An already formatted file produces a plan with no changes." },
+    "rename-file": { details: "The only top-level type is selected automatically; select explicitly when several exist. Renames the whole file and keeps its extension and other declarations. Compiler-resolved imports and supported project file lists are updated. Existing targets and unsupported case-only renames are rejected." },
+    "move-type": { details: "Select a top-level type explicitly when several exist. Other declarations stay in the source; an empty source may be deleted. Missing destination directories are created during apply. Use a --root covering source, destination and callers, and --target-project for a cross-project move. Sources must use ES modules; compatible module resolution and valid composite project references are required. Effectful static initializers, static blocks, decorators, computed members, evaluated bases and nonconstant enum initializers are rejected (INITIALIZATION_EFFECTS_UNSUPPORTED). Simple identifier bases are supported if no new module cycle is introduced. Compiler checks do not prove whole-program behavior equivalence; run application tests." }
+  },
+  csharp: {
+    imports: { description: "Remove unused C# using directives identified by Roslyn.", required: "[--mode remove-unused]", details: "The C# package defaults to remove-unused; sorting is unsupported. Uses Roslyn's built-in compiler diagnostics." },
+    format: { description: "Format a C# file with the Roslyn Formatter API.", details: "Uses Roslyn document options. An already formatted file produces a plan with no changes." },
+    "rename-file": { details: "The only top-level type is selected automatically; select explicitly when several exist. Renames the whole file and keeps its extension and other declarations. Explicit Compile entries are updated. Existing targets and unsupported case-only renames are rejected." },
+    "move-type": { details: "Select a top-level type explicitly when several exist. Other declarations stay in the source; an empty source may be deleted. Missing destination directories are created during apply. Use a --root covering source, destination and callers. Cross-project moves require a loaded target project, normally through a .sln, --target-project and a new destination file. Global using directives stay in the source project. Required ProjectReference edits are unconditional. The destination namespace convention is followed when the source follows its convention; custom namespaces are otherwise retained unless overridden. Moving between projects changes assembly identity. Cycles, inaccessible dependencies, unsupported project rules and new compiler errors are rejected. Run application tests after applying." }
+  }
+};
+function operationHelpFor(operation, language) {
+  const item = operationHelp[operation];
+  if (!language)
+    return item;
+  return {
+    ...item,
+    ...languageDetails[language][operation],
+    support: language === "typescript" ? "TypeScript and JavaScript" : "C#",
+    examples: item.examples.filter((example) => language === "csharp" ? /--project \S+\.(csproj|sln)(?: |$)/.test(example) : /--project \S+\.json(?: |$)/.test(example))
+  };
+}
+function optionsText(language) {
+  const project = language === "typescript" ? "tsconfig.json or jsconfig.json" : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln";
+  return `  --project <config>       Required for capabilities and plan; ${project}.
+${language !== "csharp" ? `                           Named TS configurations are supported by file/type operations.
+` : ""}  --file <source>          Required for plan; file included by the selected project.
   --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
   --at <line:column>       Symbol/type position or extraction start, 1-based UTF-16.
   --end <line:column>      Extraction end, exclusive, 1-based UTF-16.
   --name <identifier>      Required new name for rename and extraction.
-  --mode <mode>            imports: sort (default) or remove-unused.
+  --mode <mode>            imports: ${language === "csharp" ? "remove-unused (default); sorting is unsupported" : "sort (default) or remove-unused"}.
   --type <identifier>      Declared type for rename-file or move-type; select when
                            several types exist, or use --at.
   --to <file>              Required destination for move-type; relative to cwd.
-  --target-project <config> Destination .csproj/TS/JS config; move-type only.
-  --root-namespace <name>  C# namespace convention override for sync-namespace
+  --target-project <config> Destination project config; move-type only.
+${language !== "typescript" ? `  --root-namespace <name>  C# namespace convention override for sync-namespace
                            or move-type.
-  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
+` : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
                            Within root, store plans only in .refactor-ai;
                            an output path outside root is also allowed.
   --plan <plan.json>       Required for preview, validate and apply.
   --help, -h              Show general, command or operation help; no project needed.
 `;
-var context = `Paths are relative to the current working directory unless absolute. Quote paths
+}
+function contextText(language) {
+  return `Paths are relative to the current working directory unless absolute. Quote paths
 with spaces. Source/config paths must exist; a move destination may be new.
 Positions count UTF-16 code units: an emoji occupies two columns. CRLF is supported.
-TS/JS rename, imports, format and extract reject project references; file/type
+${language !== "csharp" ? `TS/JS rename, imports, format and extract reject project references; file/type
 operations validate supported project graphs and affected named configurations.
-`;
+` : ""}`;
+}
 var requirements = `Requirements:
   Node.js 22+. Installed skill commands use npm to set up pinned TypeScript 5.9.3
   on first execution; initial setup needs network access and a writable skill
@@ -3574,8 +3621,8 @@ Output and exit status:
   and the .journal.json journal before recovery; preserve subsequent external edits.
 `;
 }
-function operationText(operation, invocation) {
-  const item = operationHelp[operation];
+function operationText(operation, invocation, language) {
+  const item = operationHelpFor(operation, language);
   return `${operation}: ${item.description}
   Languages: ${item.support}
   Operation options: ${item.required}
@@ -3587,7 +3634,7 @@ ${examples(invocation, item.examples)}
 function helpRequested(args) {
   return args.length === 0 || args[0] === "help" || args.includes("--help") || args.includes("-h");
 }
-function renderHelp(args, invocation = "node dist/cli.js", runtimeRequirements = requirements) {
+function renderHelp(args, invocation = "node dist/cli.js", runtimeRequirements = requirements, language) {
   const topics = args[0] === "help" ? args.slice(1) : args;
   const command = topics[0]?.startsWith("-") ? undefined : topics[0];
   const operation = topics[1]?.startsWith("-") ? undefined : topics[1];
@@ -3597,8 +3644,12 @@ function renderHelp(args, invocation = "node dist/cli.js", runtimeRequirements =
   if (operation && (command !== "plan" || !Object.hasOwn(operationHelp, operation))) {
     throw new Error(`UNSUPPORTED: help topic ${command} ${operation}`);
   }
-  const title = `refactor-ai — deterministic TypeScript/JavaScript and C# refactorings
+  if (operation && language && !languageOperations[language].includes(operation))
+    throw new Error(`UNSUPPORTED: ${operation} is unavailable for ${language}`);
+  const title = `refactor-ai — deterministic ${language === "typescript" ? "TypeScript/JavaScript" : language === "csharp" ? "C#" : "TypeScript/JavaScript and C#"} refactorings
 `;
+  const options = optionsText(language);
+  const context = contextText(language);
   if (["preview", "validate", "apply"].includes(command ?? "")) {
     const descriptions = {
       preview: "Print the stored unified diff, including file creation/deletion. Does not write sources or check snapshot freshness; use validate before apply.",
@@ -3628,11 +3679,11 @@ Usage:
   ${invocation} capabilities --project <config>
 
 Options:
-  --project <config>  Required tsconfig.json, jsconfig.json, .csproj or .sln.
+  --project <config>  Required ${language === "typescript" ? "tsconfig.json or jsconfig.json" : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln"}.
   --help, -h          Show this help.
 
 Examples:
-${examples(invocation, ["capabilities --project examples/typescript/tsconfig.json", "capabilities --project examples/javascript/jsconfig.json", "capabilities --project examples/csharp/Caller.csproj"])}
+${examples(invocation, ["capabilities --project examples/typescript/tsconfig.json", "capabilities --project examples/javascript/jsconfig.json", "capabilities --project examples/csharp/Caller.csproj"].filter((example) => !language || (language === "csharp" ? example.includes("csharp/") : !example.includes("csharp/"))))}
 
 The configuration must exist. This command reports implemented backend capabilities,
 not whether a particular source selection can be refactored. It does not load or
@@ -3645,7 +3696,7 @@ ${runtimeRequirements}`;
 Usage:
   ${invocation} plan ${operation} --project <config> --file <source> [operation options]
 
-${operationText(operation, invocation)}
+${operationText(operation, invocation, language)}
 Options and defaults:
 ${options}
 ${context}
@@ -3672,13 +3723,13 @@ Options and defaults:
 ${options}
 ${context}
 Operations:
-${Object.keys(operationHelp).map((key) => operationText(key, invocation)).join(`
+${(language ? languageOperations[language] : Object.keys(operationHelp)).map((key) => operationText(key, invocation, language)).join(`
 `)}
 ${workflow(invocation)}
 ${runtimeRequirements}`;
 }
 
-// src/cli.ts
+// src/cli-core.ts
 function parse(args) {
   const command = args.shift() ?? "help";
   const operation = args[0] && !args[0].startsWith("--") ? args.shift() : undefined;
@@ -3705,7 +3756,7 @@ async function canonicalDirectory(path) {
   } catch (error) {
     if (error.code !== "ENOENT")
       throw error;
-    return resolve9(await canonicalDirectory(dirname8(path)), basename6(path));
+    return resolve4(await canonicalDirectory(dirname3(path)), basename2(path));
   }
 }
 function offset(text, point) {
@@ -3720,22 +3771,20 @@ function offset(text, point) {
   }
   return lines.slice(0, line - 1).reduce((total, item) => total + item.length + 1, 0) + column - 1;
 }
-async function backend(project) {
-  const extension = extname3(project).toLowerCase();
-  if (extension === ".csproj" || extension === ".sln")
-    return Promise.resolve().then(() => (init_csharp(), exports_csharp));
-  if (extension === ".json")
-    return Promise.resolve().then(() => (init_typescript(), exports_typescript));
-  throw new Error("UNSUPPORTED_PROJECT: use tsconfig/jsconfig.json, .csproj or .sln");
+function assertLanguage(project, language, backend) {
+  if (language && (languageForProject(project) !== language || backend !== undefined && backend !== (language === "typescript" ? "typescript" : "roslyn"))) {
+    throw new Error(`UNSUPPORTED_LANGUAGE: this tool only supports ${language === "typescript" ? "TypeScript/JavaScript" : "C#"}`);
+  }
 }
-async function main(args, context = {}) {
+async function runCli(args, context) {
   if (helpRequested(args)) {
-    process.stdout.write(renderHelp(args, context.invocation));
+    process.stdout.write(renderHelp(args, context.invocation, undefined, context.language));
     return;
   }
   const { command, operation, flags } = parse([...args]);
   if (["preview", "validate", "apply"].includes(command)) {
-    const plan = await loadPlan(resolve9(required(flags, "plan")));
+    const plan = await loadPlan(resolve4(required(flags, "plan")));
+    assertLanguage(plan.request.project, context.language, plan.backend);
     if (command === "preview") {
       process.stdout.write(preview(plan) || `No changes.
 `);
@@ -3751,8 +3800,11 @@ async function main(args, context = {}) {
       process.exitCode = 1;
     return;
   }
-  const project = await realpath3(resolve9(required(flags, "project")));
-  const engine = await backend(project);
+  assertLanguage(required(flags, "project"), context.language);
+  if (flags["target-project"])
+    assertLanguage(flags["target-project"], context.language);
+  const project = await realpath3(resolve4(required(flags, "project")));
+  const engine = await context.loadBackend(project);
   if (command === "capabilities") {
     console.log(JSON.stringify(context.operation ? engine.capabilities.filter((item) => item.operation === context.operation) : engine.capabilities, null, 2));
     return;
@@ -3764,8 +3816,8 @@ async function main(args, context = {}) {
     throw new Error(`UNSUPPORTED: ${operation}`);
   if (context.operation && operation !== context.operation)
     throw new Error(`UNSUPPORTED: this tool only supports ${context.operation}`);
-  const file = await realpath3(resolve9(required(flags, "file")));
-  const root = await realpath3(resolve9(flags.root ?? dirname8(project)));
+  const file = await realpath3(resolve4(required(flags, "file")));
+  const root = await realpath3(resolve4(flags.root ?? dirname3(project)));
   const text = await readFile4(file, "utf8");
   if (flags.mode && !["sort", "remove-unused"].includes(flags.mode))
     throw new Error("INVALID_ARGUMENT: --mode sort|remove-unused");
@@ -3782,15 +3834,15 @@ async function main(args, context = {}) {
     ...flags.at ? { position: offset(text, flags.at) } : {},
     ...flags.end ? { end: offset(text, flags.end) } : {},
     ...flags.name ? { newName: flags.name } : {},
-    ...operation === "imports" ? { mode: flags.mode ?? "sort" } : {},
-    ...flags.to ? { target: resolve9(flags.to) } : {},
-    ...flags["target-project"] ? { targetProject: await realpath3(resolve9(flags["target-project"])) } : {},
+    ...operation === "imports" ? { mode: flags.mode ?? (context.language === "csharp" ? "remove-unused" : "sort") } : {},
+    ...flags.to ? { target: resolve4(flags.to) } : {},
+    ...flags["target-project"] ? { targetProject: await realpath3(resolve4(flags["target-project"])) } : {},
     ...flags.type ? { typeName: flags.type } : {},
     ...flags["root-namespace"] ? { rootNamespace: flags["root-namespace"] } : {}
   };
   const plan = await createPlan(request, engine.analyze);
-  let output = resolve9(flags.out ?? resolve9(root, ".refactor-ai", `${plan.id}.json`));
-  const stateDirectory = resolve9(root, ".refactor-ai");
+  let output = resolve4(flags.out ?? resolve4(root, ".refactor-ai", `${plan.id}.json`));
+  const stateDirectory = resolve4(root, ".refactor-ai");
   const stateStat = await lstat4(stateDirectory).catch((error) => {
     if (error.code === "ENOENT")
       return;
@@ -3798,16 +3850,16 @@ async function main(args, context = {}) {
   });
   if (stateStat?.isSymbolicLink())
     throw new Error("SYMLINK_UNSUPPORTED: state directory");
-  output = resolve9(await canonicalDirectory(dirname8(output)), basename6(output));
+  output = resolve4(await canonicalDirectory(dirname3(output)), basename2(output));
   const within = (directory, path) => {
-    const difference = relative8(directory, path);
-    return difference !== ".." && !difference.startsWith(`..${sep7}`) && !isAbsolute6(difference);
+    const difference = relative3(directory, path);
+    return difference !== ".." && !difference.startsWith(`..${sep3}`) && !isAbsolute2(difference);
   };
   if (within(root, output) && !within(stateDirectory, output)) {
     throw new Error("INVALID_ARGUMENT: store plan outside the project or in <root>/.refactor-ai to keep snapshot fresh");
   }
-  await mkdir2(dirname8(output), { recursive: true });
-  if (await realpath3(dirname8(output)) !== dirname8(output))
+  await mkdir2(dirname3(output), { recursive: true });
+  if (await realpath3(dirname3(output)) !== dirname3(output))
     throw new Error("SYMLINK_UNSUPPORTED: plan output directory changed");
   const outputStat = await lstat4(output).catch((error) => {
     if (error.code === "ENOENT")
@@ -3830,10 +3882,17 @@ async function main(args, context = {}) {
   if (plan.validation.status !== "passed")
     process.exitCode = 1;
 }
+
+// src/backends/load.ts
+var loadBackend = (project) => languageForProject(project) === "csharp" ? Promise.resolve().then(() => (init_csharp(), exports_csharp)) : Promise.resolve().then(() => (init_typescript(), exports_typescript));
+
+// src/cli.ts
+async function main(args, context = {}) {
+  return runCli(args, { ...context, loadBackend });
+}
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main(process.argv.slice(2)).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(JSON.stringify({ status: "failed", error: message }));
+    console.error(JSON.stringify({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
     process.exitCode = 1;
   });
 }
