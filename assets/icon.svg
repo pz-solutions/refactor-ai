@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#0d9488"/>
-  <text x="32" y="32" dy="0.35em" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="26" font-weight="600" fill="#ffffff">RA</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title description">
+  <title id="title">RAI — refactor-ai</title>
+  <desc id="description">A geometric RAI monogram on a deep teal tile with a mint corner accent.</desc>
+  <rect width="128" height="128" rx="28" fill="#0b3034"/>
+  <rect x="8" y="8" width="112" height="112" rx="20" fill="none" stroke="#24575b" stroke-width="1.5"/>
+  <path d="M88 8h12a20 20 0 0 1 20 20v12" fill="none" stroke="#2dd4bf" stroke-width="3" stroke-linecap="round"/>
+  <g fill="#f0fdfa" fill-rule="evenodd">
+    <path d="M18 86V42h17c11 0 17 6 17 15 0 7-4 12-10 14l12 15H43L33 73h-6v13H18Zm9-36v15h8c5 0 8-3 8-8s-3-7-8-7h-8Z"/>
+    <path d="m55 86 16-44h10l16 44H87l-3-9H68l-3 9H55Zm16-17h10l-5-16-5 16Z"/>
+  </g>
+  <path d="M102 42h9v44h-9z" fill="#2dd4bf"/>
 </svg>
