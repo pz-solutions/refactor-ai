@@ -1,6 +1,6 @@
 # GitHub Actions
 
-The workflows target `pz-solutions/refactor-ai`; npm packages use `@pz-solutions`. The workflow files are versioned in this repository. Repository environment settings and npm Trusted Publisher connections are configured separately.
+The workflows target `pz-solutions/refactor-ai`; npm packages use `@refactor-ai`. The workflow files are versioned in this repository. Repository environment settings and npm Trusted Publisher connections are configured separately.
 
 ## CI
 
@@ -45,7 +45,7 @@ Before publishing, it queries each exact version. Identical existing archives ar
 
 The workflow serializes publishers with its concurrency group. Registry checks are not a transaction against publishers outside this workflow; use this workflow as the single release path rather than publishing concurrently by hand. Dry runs do not query registry state, so they validate packaging, not availability or advancement of distribution tags.
 
-The publishing job uses Node 22 and npm 11.5.1, grants `id-token: write`, and authenticates through npm Trusted Publishing without an `NPM_TOKEN` secret. OIDC support requires Node 22.14+ and npm 11.5.1+. Configure a Trusted Publisher separately for each package; GitHub-hosted runners are supported. [npm Trusted Publishing documentation](https://docs.npmjs.com/trusted-publishers/)
+The publishing job uses Node 22 and pinned npm 11.19.0, grants `id-token: write`, and authenticates through npm Trusted Publishing without an `NPM_TOKEN` secret. OIDC support requires Node 22.14+ and npm 11.5.1+. Configure a Trusted Publisher separately for each package; GitHub-hosted runners are supported. [npm Trusted Publishing documentation](https://docs.npmjs.com/trusted-publishers/)
 
 ## One-time setup
 
@@ -55,11 +55,16 @@ For this project's initial release, create the packages through an authenticated
 npm login
 node /absolute/path/to/npm-packages/release.mjs publish \
   --artifacts /absolute/path/to/npm-packages --ref v0.1.0 --dry-run
-node /absolute/path/to/npm-packages/release.mjs publish \
-  --artifacts /absolute/path/to/npm-packages --ref v0.1.0
+(
+  set -e
+  for archive in /absolute/path/to/npm-packages/*.tgz; do
+    npm publish "$archive" --access public --tag latest --ignore-scripts \
+      --registry=https://registry.npmjs.org
+  done
+)
 ```
 
-Use the artifact's actual version. These commands are instructions for the publisher; repository builds and tests never execute a real publication.
+Use the artifact's actual version and select `next` instead of `latest` for a prerelease. The native `npm publish` commands allow interactive 2FA during this one-time bootstrap. Each new scoped package must exist before its Trusted Publisher can be configured. These commands are instructions for the publisher; repository builds and tests never execute a real publication.
 
 In GitHub, create an environment named `npm`. In each of the nine packages' npm Settings, add a GitHub Actions Trusted Publisher with these exact values:
 
@@ -71,7 +76,7 @@ In GitHub, create an environment named `npm`. In each of the nine packages' npm 
 | Environment name | `npm` |
 | Allowed action | Enable direct `npm publish` |
 
-Both the GitHub organization and npm organization are `pz-solutions`. npm's workflow field takes the filename, without `.github/workflows/`. New publisher configurations may default to staged publication, so direct publication must be enabled for this workflow. [npm publisher configuration](https://docs.npmjs.com/trusted-publishers/)
+The GitHub organization is `pz-solutions`; the npm organization is `refactor-ai`. npm's workflow field takes the filename, without `.github/workflows/`. New publisher configurations may default to staged publication, so direct publication must be enabled for this workflow. [npm publisher configuration](https://docs.npmjs.com/trusted-publishers/)
 
 After transferring the repository to `pz-solutions`, recreate any Trusted Publisher connection that still names the previous GitHub owner; existing connections cannot be edited. Published npm versions remain unchanged. Release updated repository metadata under a new version and rebuild the archives rather than reusing the original `0.1.0` tarballs. [Managing Trusted Publisher connections](https://docs.npmjs.com/trusted-publishers/)
 

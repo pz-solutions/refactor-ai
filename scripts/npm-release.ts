@@ -118,7 +118,7 @@ export async function publishRelease(artifacts: string, options: { ref?: string;
 
 async function main(args: string[]): Promise<void> {
   if (!args.length || args.includes("--help") || args.includes("-h") || args[0] === "help") {
-    console.log(`refactor-ai npm release runner — pack and publish verified @pz-solutions archives
+    console.log(`refactor-ai npm release runner — pack and publish verified @refactor-ai archives
 
 Usage:
   node dist/npm-release.mjs pack [--packages <directory>] [--artifacts <directory>] [--ref <vX.Y.Z>]
@@ -131,7 +131,7 @@ Options:
   --dry-run                publish only; validate archives and run npm publish --dry-run.
   --help, -h               Show help without reading packages or calling npm.
 
-Pack requires exactly nine @pz-solutions packages with the same semantic version and
+Pack requires exactly nine @refactor-ai packages with the same semantic version and
 pz-solutions/refactor-ai repository metadata. Writes .tgz files and release.json with
 SHA-512 integrity. Publish checks all archives before contacting the registry;
 matching published versions are skipped, differing content or registry errors

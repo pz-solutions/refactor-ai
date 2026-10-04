@@ -93,7 +93,7 @@ C# moves update namespaces that follow the project's folder convention. Custom n
 
 ## npm CLI packages
 
-Build nine independently publishable packages: the complete `@pz-solutions/refactor-ai` CLI and one `@pz-solutions/refactor-ai-<operation>` package for each of the eight refactorings. Each declares a single executable in npm's `bin` field. The author checkout remains private.
+Build nine independently publishable packages: the complete `@refactor-ai/refactor-ai` CLI and one `@refactor-ai/refactor-ai-<operation>` package for each of the eight refactorings. Each declares a single executable in npm's `bin` field. The author checkout remains private.
 
 ```sh
 bun run package:npm
@@ -105,19 +105,19 @@ Generated packages are in `dist/npm/`. They include the built Node runner, a pin
 After publishing under names you own:
 
 ```sh
-npx @pz-solutions/refactor-ai --help
-npx @pz-solutions/refactor-ai-rename --help
-npx @pz-solutions/refactor-ai-rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
-npx @pz-solutions/refactor-ai-rename preview --plan ./path/to/plan.json
-npx @pz-solutions/refactor-ai-rename validate --plan ./path/to/plan.json
-npx @pz-solutions/refactor-ai-rename apply --plan ./path/to/plan.json
+npx @refactor-ai/refactor-ai --help
+npx @refactor-ai/refactor-ai-rename --help
+npx @refactor-ai/refactor-ai-rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
+npx @refactor-ai/refactor-ai-rename preview --plan ./path/to/plan.json
+npx @refactor-ai/refactor-ai-rename validate --plan ./path/to/plan.json
+npx @refactor-ai/refactor-ai-rename apply --plan ./path/to/plan.json
 ```
 
-The default scope is `@pz-solutions`. Override it with `bun run package:npm --scope another-org` when needed. Local tarballs work before publishing:
+The default scope is `@refactor-ai`. Override it with `bun run package:npm --scope another-org` when needed. Local tarballs work before publishing:
 
 ```sh
 npm pack ./dist/npm/refactor-ai-rename --pack-destination /tmp
-npx --yes file:/tmp/pz-solutions-refactor-ai-rename-0.1.0.tgz --help
+npx --yes file:/tmp/refactor-ai-refactor-ai-rename-0.1.0.tgz --help
 ```
 
 See [npm packaging and publishing](docs/npm-packages.md) for package names, local installation, publication and versioning. `bun run test:npm` tests actual packed archives through npx, including complete TS, JS and C# workflows.
@@ -178,7 +178,7 @@ For authors: `bun run package:skills` rebuilds the CLI and refreshes the resourc
 
 ## Verification and research
 
-GitHub Actions are configured in [CI](.github/workflows/ci.yml) and [npm publication](.github/workflows/publish.yml). CI builds and tests the Node CLI, Roslyn helper, installed skills and packed npm tools, runs the demo, and uploads npm archives plus self-contained skills. A matching `vX.Y.Z` tag publishes the verified `@pz-solutions` archives using npm OIDC. [GitHub Actions setup and releases](docs/github-actions.md) describes the first publication, Trusted Publisher settings and retries.
+GitHub Actions are configured in [CI](.github/workflows/ci.yml) and [npm publication](.github/workflows/publish.yml). CI builds and tests the Node CLI, Roslyn helper, installed skills and packed npm tools, runs the demo, and uploads npm archives plus self-contained skills. A matching `vX.Y.Z` tag publishes the verified `@refactor-ai` archives using npm OIDC. [GitHub Actions setup and releases](docs/github-actions.md) describes the first publication, Trusted Publisher settings and retries.
 
 ```sh
 bun run typecheck

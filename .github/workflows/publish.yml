@@ -40,7 +40,10 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - name: Install npm with Trusted Publishing support
-        run: npm install --global npm@11.5.1 --ignore-scripts
+        run: |
+          npm install --global npm@11.19.0 --ignore-scripts
+          node --version
+          npm --version
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: npm-packages

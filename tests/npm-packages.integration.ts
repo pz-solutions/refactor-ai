@@ -35,7 +35,7 @@ beforeAll(async () => {
     const packed = JSON.parse(success("npm", ["pack", join(repo, "dist", "npm", name), "--json", "--pack-destination", workspace]))[0];
     tarballs.set(name, join(workspace, packed.filename));
     const manifest = JSON.parse(await readFile(join(repo, "dist", "npm", name, "package.json"), "utf8"));
-    expect(manifest.name).toBe(`@pz-solutions/${name}`);
+    expect(manifest.name).toBe(`@refactor-ai/${name}`);
     expect(manifest.version).toBe(version);
     expect(packed.version).toBe(version);
     expect(manifest.publishConfig.tag).toBe(version.includes("-") ? "next" : "latest");
@@ -52,7 +52,7 @@ afterAll(async () => { if (workspace) await rm(workspace, { recursive: true, for
 test("all nine tarballs execute through npx with their own help and bin", () => {
   for (const [name] of tarballs) {
     const help = npx(name, ["--help"]);
-    expect(help).toContain(`npx @pz-solutions/${name}`);
+    expect(help).toContain(`npx @refactor-ai/${name}`);
     expect(help).toContain("Examples");
     expect(help).not.toContain("node dist/cli.js");
     expect(npx(name, ["apply", "--help"])).toContain("--plan");

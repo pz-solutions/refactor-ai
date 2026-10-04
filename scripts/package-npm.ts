@@ -36,14 +36,14 @@ Initial npm/NuGet downloads need network access. No registry changes are made.
 Examples:
   bun install --frozen-lockfile
   bun run package:npm
-  bun run package:npm --scope @pz-solutions
+  bun run package:npm --scope @refactor-ai
   bun run package:npm --out ./release/npm
   npm pack ./dist/npm/refactor-ai-rename --pack-destination /tmp
-  npx --yes file:/tmp/pz-solutions-refactor-ai-rename-0.1.0.tgz --help
+  npx --yes file:/tmp/refactor-ai-refactor-ai-rename-0.1.0.tgz --help
   npm publish ./dist/npm/refactor-ai-rename --dry-run
   npm publish ./dist/npm/refactor-ai-rename --access public
-  npx @pz-solutions/refactor-ai-rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
-  npx @pz-solutions/refactor-ai plan rename --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
+  npx @refactor-ai/refactor-ai-rename plan --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
+  npx @refactor-ai/refactor-ai plan rename --project ./tsconfig.json --file ./src.ts --at 1:14 --name newName
 
 Publication requires npm login and ownership of the chosen name/scope. Names are
 configuration defaults, not a claim of registry availability. Use
