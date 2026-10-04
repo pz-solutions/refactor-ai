@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows Node CLI and distributions
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run build
+      - run: bun test ./tests/portable-cli.test.ts ./tests/typescript-windows-vfs.test.ts
+  checks:
+    name: Build, test and pack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      DOTNET_MULTILEVEL_LOOKUP: '0'
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+        with:
+          dotnet-version: '8.0.x'
+      - name: Install pinned dependencies
+        run: bun install --frozen-lockfile
+      - name: Check TypeScript
+        run: bun run typecheck
+      - name: Build Roslyn helper with locked restore
+        run: bun run build:csharp
+      - name: Build Node CLI, release runner and skills
+        run: bun run build
+      - name: Run regression tests
+        run: bun test
+      - name: Test copied skills installed through npx skills
+        run: bun test ./tests/skills-install.integration.ts
+      - name: Test packed npm tools through npx
+        run: bun run test:npm
+      - name: Verify demo behavior
+        run: node dist/demo.js
+      - name: Pack verified release artifacts
+        env:
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          args=(pack)
+          if [[ "$RELEASE_REF_TYPE" == "tag" ]]; then
+            args+=(--ref "$RELEASE_REF")
+          fi
+          node dist/npm-release.mjs "${args[@]}"
+          cp dist/npm-release.mjs dist/npm-artifacts/release.mjs
+      - name: Upload npm archives and release manifest
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: npm-packages
+          path: dist/npm-artifacts/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload self-contained skills
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: refactor-skills
+          path: |
+            skills/
+            !skills/**/node_modules/**
+            !skills/**/bin/**
+            !skills/**/obj/**
+          if-no-files-found: error
+          retention-days: 14

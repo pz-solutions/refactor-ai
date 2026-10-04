@@ -1,0 +1,369 @@
+
+[typescript-rename] 2 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.ts	
++++ b/caller.ts	
+@@ -1,4 +1,4 @@
+ import { unused } from "./unused";
+-import { add } from "./math";
++import { sum } from "./math";
+ 
+-console.log(add(2, 3));
++console.log(sum(2, 3));
+
+===================================================================
+--- a/math.ts	
++++ b/math.ts	
+@@ -1,3 +1,3 @@
+-export function add(left: number, right: number): number {
++export function sum(left: number, right: number): number {
+   return left + right;
+ }
+
+[typescript-sort-imports] 1 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.ts	
++++ b/caller.ts	
+@@ -1,4 +1,4 @@
+-import { unused } from "./unused";
+ import { sum } from "./math";
++import { unused } from "./unused";
+ 
+ console.log(sum(2, 3));
+
+[typescript-remove-unused] 1 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.ts	
++++ b/caller.ts	
+@@ -1,4 +1,3 @@
+ import { sum } from "./math";
+-import { unused } from "./unused";
+ 
+ console.log(sum(2, 3));
+
+[typescript-format] 0 changed file(s), compiler validation: passed
+No changes.
+
+[typescript-extract-function] 1 changed file(s), compiler validation: passed
+===================================================================
+--- a/math.ts	
++++ b/math.ts	
+@@ -1,3 +1,7 @@
+ export function sum(left: number, right: number): number {
+-  return left + right;
++  return sumParts();
++
++  function sumParts(): number {
++    return left + right;
++  }
+ }
+
+[typescript-extract-variable] 1 changed file(s), compiler validation: passed
+===================================================================
+--- a/math.ts	
++++ b/math.ts	
+@@ -2,6 +2,7 @@
+   return sumParts();
+ 
+   function sumParts(): number {
+-    return left + right;
++    const subtotal = left + right;
++    return subtotal;
+   }
+ }
+
+[typescript-format-after-extraction] 0 changed file(s), compiler validation: passed
+No changes.
+
+[typescript-idempotent] 0 changed file(s), compiler validation: passed
+No changes.
+typescript: "5"; fresh-plan cleanup passed
+
+[javascript-rename] 2 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.js	
++++ b/caller.js	
+@@ -1,4 +1,4 @@
+ import { unused } from "./unused.js";
+-import { add } from "./math.js";
++import { sum } from "./math.js";
+ 
+-console.log(add(2, 3));
++console.log(sum(2, 3));
+
+===================================================================
+--- a/math.js	
++++ b/math.js	
+@@ -1,4 +1,4 @@
+ /** @param {number} left @param {number} right @returns {number} */
+-export function add(left, right) {
++export function sum(left, right) {
+   return left + right;
+ }
+
+[javascript-sort-imports] 1 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.js	
++++ b/caller.js	
+@@ -1,4 +1,4 @@
+-import { unused } from "./unused.js";
+ import { sum } from "./math.js";
++import { unused } from "./unused.js";
+ 
+ console.log(sum(2, 3));
+
+[javascript-remove-unused] 1 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.js	
++++ b/caller.js	
+@@ -1,4 +1,3 @@
+ import { sum } from "./math.js";
+-import { unused } from "./unused.js";
+ 
+ console.log(sum(2, 3));
+
+[javascript-format] 0 changed file(s), compiler validation: passed
+No changes.
+
+[javascript-idempotent] 0 changed file(s), compiler validation: passed
+No changes.
+javascript: "5"; fresh-plan cleanup passed
+
+[csharp-rename] 2 changed file(s), compiler validation: passed
+===================================================================
+--- a/Caller.cs	
++++ b/Caller.cs	
+@@ -6,6 +6,6 @@
+ {
+     public static void Main()
+     {
+-        Console.WriteLine(Utility.Add(2, 3));
++        Console.WriteLine(Utility.Sum(2, 3));
+     }
+ }
+
+===================================================================
+--- a/Utility.cs	
++++ b/Utility.cs	
+@@ -4,5 +4,5 @@
+ 
+ public static class Utility
+ {
+-    public static int Add(int left,int right)=>left+right;
++    public static int Sum(int left,int right)=>left+right;
+ }
+
+[csharp-imports] 1 changed file(s), compiler validation: passed
+===================================================================
+--- a/Utility.cs	
++++ b/Utility.cs	
+@@ -1,5 +1,5 @@
+-using System.Collections.Generic;
+ 
++
+ namespace Demo;
+ 
+ public static class Utility
+
+[csharp-format] 1 changed file(s), compiler validation: passed
+===================================================================
+--- a/Utility.cs	
++++ b/Utility.cs	
+@@ -4,5 +4,5 @@
+ 
+ public static class Utility
+ {
+-    public static int Sum(int left,int right)=>left+right;
++    public static int Sum(int left, int right) => left + right;
+ }
+
+[csharp-idempotent] 0 changed file(s), compiler validation: passed
+No changes.
+
+[csharp-move-type] 3 changed file(s), compiler validation: passed
+===================================================================
+--- a/Caller.csproj	
++++ b/Caller.csproj	
+@@ -7,7 +7,7 @@
+     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+   </PropertyGroup>
+   <ItemGroup>
+-    <Compile Include="Utility.cs" />
+     <Compile Include="Caller.cs" />
++    <Compile Include="Services\Wrong.cs" />
+   </ItemGroup>
+ </Project>
+
+===================================================================
+--- /dev/null	
++++ b/Services/Wrong.cs	
+@@ -0,0 +1,6 @@
++namespace Demo;
++
++public static class Utility
++{
++    public static int Sum(int left, int right) => left + right;
++}
+
+===================================================================
+--- a/Utility.cs	
++++ /dev/null	
+@@ -1,8 +0,0 @@
+-
+-
+-namespace Demo;
+-
+-public static class Utility
+-{
+-    public static int Sum(int left, int right) => left + right;
+-}
+
+[csharp-rename-file] 3 changed file(s), compiler validation: passed
+===================================================================
+--- a/Caller.csproj	
++++ b/Caller.csproj	
+@@ -8,6 +8,6 @@
+   </PropertyGroup>
+   <ItemGroup>
+     <Compile Include="Caller.cs" />
+-    <Compile Include="Services\Wrong.cs" />
++    <Compile Include="Services\Utility.cs" />
+   </ItemGroup>
+ </Project>
+
+===================================================================
+--- /dev/null	
++++ b/Services/Utility.cs	
+@@ -0,0 +1,6 @@
++namespace Demo;
++
++public static class Utility
++{
++    public static int Sum(int left, int right) => left + right;
++}
+
+===================================================================
+--- a/Services/Wrong.cs	
++++ /dev/null	
+@@ -1,6 +0,0 @@
+-namespace Demo;
+-
+-public static class Utility
+-{
+-    public static int Sum(int left, int right) => left + right;
+-}
+
+[csharp-sync-namespace] 2 changed file(s), compiler validation: passed
+===================================================================
+--- a/Caller.cs	
++++ b/Caller.cs	
+@@ -1,4 +1,5 @@
+ using System;
++using Caller.Services;
+ 
+ namespace Demo;
+ 
+
+===================================================================
+--- a/Services/Utility.cs	
++++ b/Services/Utility.cs	
+@@ -1,4 +1,4 @@
+-namespace Demo;
++namespace Caller.Services;
+ 
+ public static class Utility
+ {
+csharp: "5"; fresh-plan cleanup passed
+
+[typescript-move-type] 3 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.ts	
++++ b/caller.ts	
+@@ -1,2 +1,3 @@
+-import { Widget, Other } from "./types.js";
++import { Other } from "./types.js";
++import { Widget } from "./models/deep/Wrong.js";
+ console.log(Widget.value + Other.value);
+
+===================================================================
+--- /dev/null	
++++ b/models/deep/Wrong.ts	
+@@ -0,0 +1,1 @@
++export class Widget { static value = 5; }
+
+===================================================================
+--- a/types.ts	
++++ b/types.ts	
+@@ -1,2 +1,1 @@
+-export class Widget { static value = 5; }
+ export class Other { static value = 2; }
+
+[typescript-rename-file] 3 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.ts	
++++ b/caller.ts	
+@@ -1,3 +1,3 @@
+ import { Other } from "./types.js";
+-import { Widget } from "./models/deep/Wrong.js";
++import { Widget } from "./models/deep/Widget.js";
+ console.log(Widget.value + Other.value);
+
+===================================================================
+--- /dev/null	
++++ b/models/deep/Widget.ts	
+@@ -0,0 +1,1 @@
++export class Widget { static value = 5; }
+
+===================================================================
+--- a/models/deep/Wrong.ts	
++++ /dev/null	
+@@ -1,1 +0,0 @@
+-export class Widget { static value = 5; }
+typescript type/file refactorings: "7"; execution preserved
+
+[javascript-move-type] 3 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.js	
++++ b/caller.js	
+@@ -1,2 +1,3 @@
+-import { Widget, Other } from "./types.js";
++import { Other } from "./types.js";
++import { Widget } from "./models/deep/Wrong.js";
+ console.log(Widget.value + Other.value);
+
+===================================================================
+--- /dev/null	
++++ b/models/deep/Wrong.js	
+@@ -0,0 +1,1 @@
++export class Widget { static value = 5; }
+
+===================================================================
+--- a/types.js	
++++ b/types.js	
+@@ -1,2 +1,1 @@
+-export class Widget { static value = 5; }
+ export class Other { static value = 2; }
+
+[javascript-rename-file] 3 changed file(s), compiler validation: passed
+===================================================================
+--- a/caller.js	
++++ b/caller.js	
+@@ -1,3 +1,3 @@
+ import { Other } from "./types.js";
+-import { Widget } from "./models/deep/Wrong.js";
++import { Widget } from "./models/deep/Widget.js";
+ console.log(Widget.value + Other.value);
+
+===================================================================
+--- /dev/null	
++++ b/models/deep/Widget.js	
+@@ -0,0 +1,1 @@
++export class Widget { static value = 5; }
+
+===================================================================
+--- a/models/deep/Wrong.js	
++++ /dev/null	
+@@ -1,1 +0,0 @@
+-export class Widget { static value = 5; }
+javascript type/file refactorings: "7"; execution preserved
+Demo passed; temporary copies removed.
