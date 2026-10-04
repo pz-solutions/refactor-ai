@@ -23,7 +23,7 @@ jobs:
   publish:
     name: Publish verified npm archives
     needs: verify
-    if: github.repository == 'wooboo/refactor-ai' && github.ref_type == 'tag'
+    if: github.repository == 'pz-solutions/refactor-ai' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: npm

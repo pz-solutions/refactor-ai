@@ -1,6 +1,6 @@
 # GitHub Actions
 
-The workflows target `wooboo/refactor-ai`; npm packages use `@pz-solutions`. They are local workflow definitions until committed and pushed to GitHub. Creating these files does not change repository settings, configure npm accounts or publish packages.
+The workflows target `pz-solutions/refactor-ai`; npm packages use `@pz-solutions`. The workflow files are versioned in this repository. Repository environment settings and npm Trusted Publisher connections are configured separately.
 
 ## CI
 
@@ -37,7 +37,7 @@ node dist/npm-release.mjs pack
 
 ## Publication
 
-`.github/workflows/publish.yml` triggers on pushed `v*` tags. Its publishing job runs only for tags in `wooboo/refactor-ai`, after verification passes. It downloads `npm-packages` from that same workflow run and publishes those archives without rebuilding them. Repository write access is unnecessary.
+`.github/workflows/publish.yml` triggers on pushed `v*` tags. Its publishing job runs only for tags in `pz-solutions/refactor-ai`, after verification passes. It downloads `npm-packages` from that same workflow run and publishes those archives without rebuilding them. Repository write access is unnecessary.
 
 All nine packages follow a **fixed common version** sourced from the private author `package.json`. CI checks a release tag against that version while packing, before uploading release artifacts; the publisher checks it again. Local real publication also requires an explicit matching `--ref`. Packages must have the expected scope and repository metadata. All archive hashes are checked before registry access. Stable versions use the npm `latest` tag; prereleases use `next`.
 
@@ -65,13 +65,15 @@ In GitHub, create an environment named `npm`. In each of the nine packages' npm 
 
 | npm field | Value |
 | --- | --- |
-| Organization or user | `wooboo` |
+| Organization or user | `pz-solutions` |
 | Repository | `refactor-ai` |
 | Workflow filename | `publish.yml` |
 | Environment name | `npm` |
 | Allowed action | Enable direct `npm publish` |
 
-The GitHub account is `wooboo`; the npm organization is `pz-solutions`. npm's workflow field takes the filename, without `.github/workflows/`. New publisher configurations may default to staged publication, so direct publication must be enabled for this workflow. [npm publisher configuration](https://docs.npmjs.com/trusted-publishers/)
+Both the GitHub organization and npm organization are `pz-solutions`. npm's workflow field takes the filename, without `.github/workflows/`. New publisher configurations may default to staged publication, so direct publication must be enabled for this workflow. [npm publisher configuration](https://docs.npmjs.com/trusted-publishers/)
+
+After transferring the repository to `pz-solutions`, recreate any Trusted Publisher connection that still names the previous GitHub owner; existing connections cannot be edited. Published npm versions remain unchanged. Release updated repository metadata under a new version and rebuild the archives rather than reusing the original `0.1.0` tarballs. [Managing Trusted Publisher connections](https://docs.npmjs.com/trusted-publishers/)
 
 Generated manifests inherit `repository.url` from the root `package.json`. That URL must match the GitHub repository. npm automatically adds provenance for trusted publication from public repositories to public packages; private repositories do not produce provenance. [npm provenance behavior](https://docs.npmjs.com/trusted-publishers/)
 

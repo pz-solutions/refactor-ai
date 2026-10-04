@@ -9,7 +9,7 @@ import { npmScope } from "../src/npm-config.ts";
 import { npmCli } from "../src/runtime/npm.ts";
 import { assertChannelAdvance, assertVersion, releaseChannel } from "./release-version.ts";
 
-const repository = "git+https://github.com/wooboo/refactor-ai.git";
+const repository = "git+https://github.com/pz-solutions/refactor-ai.git";
 const names = ["refactor-ai", ...Object.keys(operationHelp).map(operation => `refactor-ai-${operation}`)];
 interface Archive { name: string; version: string; filename: string; integrity: string }
 interface Release { version: string; archives: Archive[] }
@@ -132,7 +132,7 @@ Options:
   --help, -h               Show help without reading packages or calling npm.
 
 Pack requires exactly nine @pz-solutions packages with the same semantic version and
-wooboo/refactor-ai repository metadata. Writes .tgz files and release.json with
+pz-solutions/refactor-ai repository metadata. Writes .tgz files and release.json with
 SHA-512 integrity. Publish checks all archives before contacting the registry;
 matching published versions are skipped, differing content or registry errors
 abort preflight. A partial publication can be rerun with the same artifacts.

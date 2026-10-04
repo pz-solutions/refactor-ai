@@ -159,11 +159,11 @@ test("packing rejects inconsistent versions and invalid prereleases before creat
   for (const archive of release.archives) {
     const directory = join(packages, archive.name.split("/")[1]);
     await mkdir(directory, { recursive: true });
-    await writeFile(join(directory, "package.json"), JSON.stringify({ name: archive.name, version: archive.version, repository: { url: "git+https://github.com/wooboo/refactor-ai.git" } }));
+    await writeFile(join(directory, "package.json"), JSON.stringify({ name: archive.name, version: archive.version, repository: { url: "git+https://github.com/pz-solutions/refactor-ai.git" } }));
   }
   const runner: Runner = () => { throw new Error("must not call npm"); };
   const manifest = join(packages, "refactor-ai-move-type", "package.json");
-  await writeFile(manifest, JSON.stringify({ name: "@pz-solutions/refactor-ai-move-type", version: "0.2.0", repository: { url: "git+https://github.com/wooboo/refactor-ai.git" } }));
+  await writeFile(manifest, JSON.stringify({ name: "@pz-solutions/refactor-ai-move-type", version: "0.2.0", repository: { url: "git+https://github.com/pz-solutions/refactor-ai.git" } }));
   await expect(packRelease(packages, join(root, "output"), "v0.1.0", runner)).rejects.toThrow("INVALID_RELEASE");
   for (const version of ["0.2.0-beta..1", "0.2.0-beta.01", "v0.2.0", "0.2.0+build.1"]) expect(() => assertReleaseRef(version)).toThrow("INVALID_VERSION");
 });
