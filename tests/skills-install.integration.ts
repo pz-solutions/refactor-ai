@@ -55,6 +55,39 @@ test("npx skills copies all eight independent skills and each launcher sets up a
   }
 }, 240_000);
 
+test("custom scripts import relocated skill APIs without CLI output and prepare their own runtime on demand", async () => {
+  const copied = join(workspace, "renamed-skill-directory");
+  await cp(join(workspace, ".agents", "skills", "refactor-rename"), copied, {
+    recursive: true, filter: path => !/[\\/](node_modules|bin|obj)([\\/]|$)/.test(path),
+  });
+  const root = join(workspace, "api-project");
+  await cp(join(repo, "examples", "typescript"), root, { recursive: true });
+  const script = join(workspace, "custom-api.mjs");
+  const project = join(root, "tsconfig.json"), file = join(root, "math.ts");
+  await writeFile(script, `
+    import assert from 'node:assert/strict';
+    import { access, readFile } from 'node:fs/promises';
+    import { pathToFileURL } from 'node:url';
+    const home = process.env.REFACTOR_AI_HOME, args = [...process.argv];
+    const { createRefactor } = await import(pathToFileURL(${JSON.stringify(join(copied, "scripts", "api.mjs"))}).href);
+    await assert.rejects(access(${JSON.stringify(join(copied, "assets", "runtime", "node_modules"))}));
+    assert.deepEqual(process.argv, args);
+    const api = await createRefactor();
+    const project = ${JSON.stringify(project)}, file = ${JSON.stringify(file)};
+    const before = await readFile(file, 'utf8');
+    const plan = await api.plan({ project, file, at: before.indexOf('add'), name: 'sum' });
+    assert.equal(await readFile(file, 'utf8'), before);
+    assert.equal((await api.validate(plan)).status, 'validated');
+    await api.apply(plan);
+    assert.ok((await readFile(file, 'utf8')).includes('function sum'));
+    assert.equal(process.env.REFACTOR_AI_HOME, home);
+    console.log('skill API passed');
+  `);
+  expect(run("node", [script]).trim()).toBe("skill API passed");
+  expect(await readFile(join(copied, "scripts", "API.md"), "utf8")).toContain("Sequential automation");
+  expect(await readFile(join(copied, "scripts", "api.d.mts"), "utf8")).toContain("createRefactor");
+}, 240_000);
+
 for (const kind of ["typescript", "javascript", "csharp"]) {
   test(`the copied rename skill plans, previews, validates and applies ${kind} without the original tool checkout`, async () => {
     const root = join(workspace, kind);

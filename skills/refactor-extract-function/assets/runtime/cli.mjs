@@ -25,230 +25,21 @@ var __esm = (fn, res, err) => () => {
   return res;
 };
 
-// src/backends/csharp.ts
-var exports_csharp = {};
-__export(exports_csharp, {
-  analyze: () => analyze,
-  capabilities: () => capabilities
-});
-import { basename as basename3, dirname as dirname4, isAbsolute as isAbsolute3, join, relative as relative4, resolve as resolve5, sep as sep4 } from "node:path";
-import { access } from "node:fs/promises";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-async function analyze(request) {
-  validateRequest(request);
-  const helper = await findOrBuildHelper();
-  const { stdout, stderr, exitCode, timedOut } = await runDotnet([helper], JSON.stringify(request));
-  if (timedOut) {
-    throw new Error("CSHARP_HELPER_TIMEOUT: helper exceeded 120 seconds");
-  }
-  let response;
-  try {
-    response = JSON.parse(stdout);
-  } catch {
-    const detail = stderr.trim() || stdout.trim() || `exit code ${exitCode}`;
-    throw new Error(`CSHARP_HELPER_FAILED: ${detail}`);
-  }
-  if (response.error) {
-    throw new Error(`${response.error.code}: ${response.error.message}`);
-  }
-  if (exitCode !== 0) {
-    const detail = stderr.trim() || `exit code ${exitCode}`;
-    throw new Error(`CSHARP_HELPER_FAILED: ${detail}`);
-  }
-  if (!response.result) {
-    const detail = stderr.trim() || `helper exited with code ${exitCode}`;
-    throw new Error(`CSHARP_PROTOCOL_ERROR: ${detail}`);
-  }
-  validateResult(response.result, request.root);
-  return response.result;
-}
-function validateRequest(request) {
-  for (const [name, value] of [
-    ["project", request.project],
-    ["root", request.root],
-    ["file", request.file]
-  ]) {
-    if (!isAbsolute3(value)) {
-      throw new Error(`INVALID_REQUEST: ${name} must be an absolute path`);
-    }
-  }
-  ensureWithinRoot(request.root, request.project, "project");
-  ensureWithinRoot(request.root, request.file, "file");
-  if (request.operation === "rename" && (!Number.isInteger(request.position) || request.position < 0 || !request.newName?.trim())) {
-    throw new Error("INVALID_REQUEST: rename requires a non-negative position and newName");
-  }
-  if (request.operation === "imports" && request.mode !== "remove-unused") {
-    throw new Error("UNSUPPORTED_OPERATION: C# supports only imports mode remove-unused");
-  }
-  if (request.operation === "extract-function" || request.operation === "extract-variable") {
-    throw new Error(`UNSUPPORTED_OPERATION: C# operation '${request.operation}' is not supported`);
-  }
-  if (request.position !== undefined && (!Number.isInteger(request.position) || request.position < 0)) {
-    throw new Error("INVALID_REQUEST: position must be a non-negative integer");
-  }
-  if (request.typeName !== undefined && !/^[\p{L}_][\p{L}\p{N}_]*$/u.test(request.typeName)) {
-    throw new Error("INVALID_REQUEST: typeName must be a simple C# identifier");
-  }
-  if (request.rootNamespace !== undefined && request.rootNamespace !== "" && !/^[\p{L}_][\p{L}\p{N}_]*(\.[\p{L}_][\p{L}\p{N}_]*)*$/u.test(request.rootNamespace)) {
-    throw new Error("INVALID_REQUEST: rootNamespace must be a dotted C# namespace");
-  }
-  if (request.operation === "move-type") {
-    if (!request.target || !isAbsolute3(request.target) || !request.target.endsWith(".cs")) {
-      throw new Error("INVALID_REQUEST: move-type requires an absolute target .cs file path");
-    }
-    ensureWithinRoot(request.root, request.target, "target");
-    if (request.targetProject !== undefined) {
-      if (!isAbsolute3(request.targetProject) || !request.targetProject.toLowerCase().endsWith(".csproj")) {
-        throw new Error("INVALID_REQUEST: targetProject must be an absolute .csproj path");
-      }
-      ensureWithinRoot(request.root, request.targetProject, "targetProject");
-    }
-  } else if (request.target !== undefined || request.targetProject !== undefined) {
-    throw new Error("INVALID_REQUEST: target and targetProject are only valid for move-type");
-  }
-}
-function validateResult(result, root) {
-  if (result.backend !== "roslyn" || result.version !== "4.12.0") {
-    throw new Error("CSHARP_PROTOCOL_ERROR: unexpected helper identity");
-  }
-  for (const change of result.changes) {
-    if (typeof change.path !== "string" || change.before !== null && typeof change.before !== "string" || change.after !== null && typeof change.after !== "string" || change.before === null && change.after === null) {
-      throw new Error("CSHARP_PROTOCOL_ERROR: helper returned a malformed change");
-    }
-    if (!isAbsolute3(change.path)) {
-      throw new Error("CSHARP_PROTOCOL_ERROR: helper returned a relative change path");
-    }
-    ensureWithinRoot(root, change.path, "changed file");
-  }
-}
-function ensureWithinRoot(root, path, label) {
-  const difference = relative4(resolve5(root), resolve5(path));
-  if (difference === ".." || difference.startsWith(`..${sep4}`) || isAbsolute3(difference)) {
-    throw new Error(`OUTSIDE_ROOT: ${label} is outside root: ${path}`);
-  }
-}
-async function findOrBuildHelper() {
-  const configured = process.env.REFACTOR_AI_HOME;
-  const directory = dirname4(fileURLToPath(import.meta.url));
-  const sourceRoot = configured ? resolve5(configured) : resolve5(directory, basename3(directory) === "backends" && basename3(dirname4(directory)) === "src" ? "../.." : "..");
-  const dll = helperDll(sourceRoot);
-  if (await exists(dll))
-    return dll;
-  const project = join(sourceRoot, "dotnet", "RefactorHelper", "RefactorHelper.csproj");
-  if (!await exists(project))
-    throw new Error("CSHARP_HELPER_NOT_FOUND: the selected toolkit root has no helper; set REFACTOR_AI_HOME to the package root");
-  const { stdout, stderr, exitCode, timedOut } = await runDotnet([
-    "build",
-    project,
-    "-c",
-    "Release",
-    "--nologo",
-    "-p:RestoreLockedMode=true"
-  ]);
-  if (timedOut)
-    throw new Error("CSHARP_HELPER_BUILD_TIMEOUT: build exceeded 120 seconds");
-  if (exitCode !== 0) {
-    throw new Error(`CSHARP_HELPER_BUILD_FAILED: ${(stderr || stdout).trim()}`);
-  }
-  return helperDll(sourceRoot);
-}
-function helperDll(root) {
-  return join(root, "dotnet", "RefactorHelper", "bin", "Release", "net8.0", "RefactorHelper.dll");
-}
-function processEnv() {
-  return { ...process.env, DOTNET_NOLOGO: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1" };
-}
-async function exists(path) {
-  try {
-    await access(path);
-    return true;
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return false;
-    throw error;
-  }
-}
-function runDotnet(args, input) {
-  return new Promise((resolveResult, reject) => {
-    const child = spawn("dotnet", args, { stdio: ["pipe", "pipe", "pipe"], env: processEnv() });
-    let stdout = "", stderr = "", timedOut = false;
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, 120000);
-    child.on("error", (error) => {
-      clearTimeout(timeout);
-      reject(new Error(`CSHARP_HELPER_FAILED: ${error.message}`));
-    });
-    child.stdin.on("error", (error) => {
-      if (error.code !== "EPIPE") {
-        clearTimeout(timeout);
-        child.kill("SIGKILL");
-        reject(error);
-      }
-    });
-    child.on("close", (code) => {
-      clearTimeout(timeout);
-      resolveResult({ stdout, stderr, exitCode: code ?? -1, timedOut });
-    });
-    child.stdin.end(input);
-  });
-}
-var capabilities;
-var init_csharp = __esm(() => {
-  capabilities = [
-    {
-      operation: "rename",
-      description: "Solution-wide semantic symbol rename using Roslyn."
-    },
-    {
-      operation: "format",
-      description: "Document formatting using the public Roslyn Formatter API."
-    },
-    {
-      operation: "imports",
-      modes: ["remove-unused"],
-      description: "Remove unused imports identified by Roslyn's built-in compiler diagnostics."
-    },
-    {
-      operation: "rename-file",
-      description: "Rename a file to match its selected top-level type, updating explicit Compile items."
-    },
-    {
-      operation: "sync-namespace",
-      description: "Set a file's namespace from RootNamespace and folders, updating references with Roslyn binding checks."
-    },
-    {
-      operation: "move-type",
-      description: "Move a top-level type to a new file in the same or another project, updating namespaces, references and project references."
-    }
-  ];
-});
-
 // src/backends/typescript-paths.ts
-import { isAbsolute as isAbsolute4, relative as relative5, sep as sep5 } from "node:path";
-function portablePath(path, separator = sep5) {
+import { isAbsolute as isAbsolute3, relative as relative4, sep as sep4 } from "node:path";
+function portablePath(path, separator = sep4) {
   return path.split(separator).join("/");
 }
 function isInside(root, path) {
-  const difference = relative5(root, path);
-  return difference !== ".." && !difference.startsWith(`..${sep5}`) && !isAbsolute4(difference);
+  const difference = relative4(root, path);
+  return difference !== ".." && !difference.startsWith(`..${sep4}`) && !isAbsolute3(difference);
 }
 var init_typescript_paths = () => {};
 
 // src/backends/typescript-vfs.ts
 import ts from "typescript";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename as basename4, dirname as dirname5, relative as relative6, resolve as resolve6, sep as sep6 } from "node:path";
+import { basename as basename3, dirname as dirname5, relative as relative5, resolve as resolve6, sep as sep5 } from "node:path";
 function fail(code, reason) {
   throw new Error(`${code}: ${reason}`);
 }
@@ -256,10 +47,10 @@ function swapCase(value) {
   return [...value].map((char) => char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase()).join("");
 }
 function detectCaseSensitivity(root) {
-  const probe = [root, ...readdirSync(root).map((name) => resolve6(root, name))].find((path) => swapCase(basename4(path)) !== basename4(path));
+  const probe = [root, ...readdirSync(root).map((name) => resolve6(root, name))].find((path) => swapCase(basename3(path)) !== basename3(path));
   if (!probe)
     return ts.sys.useCaseSensitiveFileNames;
-  const swapped = resolve6(dirname5(probe), swapCase(basename4(probe)));
+  const swapped = resolve6(dirname5(probe), swapCase(basename3(probe)));
   if (!existsSync(swapped))
     return true;
   const a = statSync(probe), b = statSync(swapped);
@@ -336,7 +127,7 @@ function wildcardRegex(specs, basePath, usage, flags) {
 function includeBasePath(absolute) {
   const wildcard = absolute.search(/[*?]/);
   if (wildcard < 0)
-    return basename4(absolute).includes(".") ? dirname5(absolute) : absolute;
+    return basename3(absolute).includes(".") ? dirname5(absolute) : absolute;
   const normalized = portablePath(absolute);
   const end = normalized.lastIndexOf("/", wildcard);
   return end === 2 && /^[A-Za-z]:/.test(normalized) ? normalized.slice(0, 3) : normalized.slice(0, end) || "/";
@@ -498,7 +289,7 @@ class VirtualFs {
     for (const path of this.virtualPaths()) {
       if (!this.contains(directory, path) || this.samePath(directory, path))
         continue;
-      const rest = relative6(directory, path).split(sep6);
+      const rest = relative5(directory, path).split(sep5);
       const child = resolve6(directory, rest[0]);
       if (rest.length === 1)
         files.set(this.key(child), rest[0]);
@@ -628,7 +419,7 @@ var init_typescript_vfs = __esm(() => {
 // src/backends/typescript-workspace.ts
 import ts2 from "typescript";
 import { readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
-import { basename as basename5, dirname as dirname6, relative as relative7, resolve as resolve7 } from "node:path";
+import { basename as basename4, dirname as dirname6, relative as relative6, resolve as resolve7 } from "node:path";
 function configPathFor(project) {
   let stat;
   try {
@@ -637,7 +428,7 @@ function configPathFor(project) {
     fail("PROJECT_NOT_FOUND", project);
   }
   if (stat.isFile()) {
-    if (!configName.test(basename5(project)))
+    if (!configName.test(basename4(project)))
       fail("UNSUPPORTED_PROJECT", "project must name a tsconfig*.json or jsconfig*.json file");
     return resolve7(project);
   }
@@ -845,7 +636,7 @@ class Workspace {
     const graphDirectories = new Set([...affected].map((key) => vfs.key(dirname6(paths.get(key)))));
     const observers = new Set;
     for (const config of this.discovered) {
-      if (affected.has(vfs.key(config)) || editorConfigName.test(basename5(config)) || this.isBaseConfig(config))
+      if (affected.has(vfs.key(config)) || editorConfigName.test(basename4(config)) || this.isBaseConfig(config))
         continue;
       if (!graphDirectories.has(vfs.key(dirname6(config))) || !this.listsAny(config, this.affected))
         continue;
@@ -1030,7 +821,7 @@ class Workspace {
     return paths.some((path) => listed.has(this.vfs.key(path)));
   }
   isBaseConfig(config) {
-    if (editorConfigName.test(basename5(config)))
+    if (editorConfigName.test(basename4(config)))
       return false;
     if (!this.extendedConfigs) {
       this.extendedConfigs = new Set;
@@ -1078,7 +869,7 @@ class Workspace {
             fail("UNHANDLED_PROJECT_GRAPH", `${config} cannot be parsed, so it cannot be shown to be unaffected`);
           const included = new Set(parsed.fileNames.map((path) => this.vfs.key(path)));
           const hit = paths.find((path) => included.has(this.vfs.key(path)));
-          if (hit && editorConfigName.test(basename5(config))) {
+          if (hit && editorConfigName.test(basename4(config))) {
             fail("UNHANDLED_PROJECT_GRAPH", `${config} also includes ${hit} but is not connected to ${this.sourceConfig} by project references`);
           }
           if (hit) {
@@ -1086,7 +877,7 @@ class Workspace {
           }
         }
         if (checkImports && this.importsAffected(config, paths)) {
-          fail("UNHANDLED_PROJECT_GRAPH", `${config} imports a changed file (${paths.map((path) => relative7(this.root, path)).join(", ")}) but was not part of the planned project graph`);
+          fail("UNHANDLED_PROJECT_GRAPH", `${config} imports a changed file (${paths.map((path) => relative6(this.root, path)).join(", ")}) but was not part of the planned project graph`);
         }
       }
     };
@@ -1230,7 +1021,7 @@ class Workspace {
           const start = element.getStart(json);
           const rename = configRenames.find(([from]) => vfs.samePath(from, absolute));
           if (rename) {
-            const relativePath = portablePath(relative7(directory, rename[1]));
+            const relativePath = portablePath(relative6(directory, rename[1]));
             const spec = element.text.startsWith("./") && !relativePath.startsWith("../") ? `./${relativePath}` : relativePath;
             const quote = text[start];
             changes.push({ span: { start, length: element.end - start }, newText: `${quote}${JSON.stringify(spec).slice(1, -1)}${quote}` });
@@ -1254,7 +1045,7 @@ class Workspace {
     if (!files || !ts2.isArrayLiteralExpression(files.initializer))
       return false;
     const elements = files.initializer.elements;
-    const relativePath = portablePath(relative7(dirname6(configPath), path));
+    const relativePath = portablePath(relative6(dirname6(configPath), path));
     const dotted = elements.some((element) => ts2.isStringLiteral(element) && element.text.startsWith("./"));
     const literal = JSON.stringify(dotted && !relativePath.startsWith("../") ? `./${relativePath}` : relativePath);
     let change;
@@ -1345,7 +1136,7 @@ var init_typescript_workspace = __esm(() => {
 // src/backends/typescript-fileops.ts
 import ts3 from "typescript";
 import { existsSync as existsSync2, readdirSync as readdirSync3 } from "node:fs";
-import { dirname as dirname7, extname as extname2, isAbsolute as isAbsolute5, relative as relative8, resolve as resolve8, sep as sep7 } from "node:path";
+import { dirname as dirname7, extname as extname2, isAbsolute as isAbsolute4, relative as relative7, resolve as resolve8, sep as sep6 } from "node:path";
 function preferencesFor(ws) {
   let single = 0, double = 0;
   for (const path of userFiles(ws)) {
@@ -1361,7 +1152,7 @@ function preferencesFor(ws) {
   return { allowTextChangesInNewFiles: true, quotePreference: single > double ? "single" : double > single ? "double" : "auto" };
 }
 function assertAbsolute(name, value) {
-  if (!value || !isAbsolute5(value))
+  if (!value || !isAbsolute4(value))
     fail("INVALID_REQUEST", `${name} must be an absolute path`);
   return resolve8(value);
 }
@@ -1443,7 +1234,7 @@ function selectType(context, request) {
 }
 function assertCaseSafe(root, path) {
   let current = root;
-  for (const part of relative8(root, path).split(sep7)) {
+  for (const part of relative7(root, path).split(sep6)) {
     let names;
     try {
       names = readdirSync3(current);
@@ -1469,7 +1260,7 @@ function parseFile(ws, path) {
   return ts3.createSourceFile(path, text, { languageVersion: ts3.ScriptTarget.Latest, impliedNodeFormat }, true, scriptKindFor(path));
 }
 function userFiles(ws) {
-  return ws.unionFiles().filter((path) => isInside(ws.root, path) && !path.split(sep7).includes("node_modules"));
+  return ws.unionFiles().filter((path) => isInside(ws.root, path) && !path.split(sep6).includes("node_modules"));
 }
 function applyEdits(context, edits, newFile) {
   const { ws } = context;
@@ -1477,7 +1268,7 @@ function applyEdits(context, edits, newFile) {
     const path = resolve8(edit.fileName);
     if (!isInside(ws.root, path))
       fail("OUTSIDE_ROOT", `TypeScript proposed a change outside ${ws.root}: ${path}`);
-    if (path.split(sep7).includes("node_modules") || ws.vfs.isHidden(path))
+    if (path.split(sep6).includes("node_modules") || ws.vfs.isHidden(path))
       fail("OUTSIDE_PROJECT", `TypeScript proposed a change to a dependency or build output: ${path}`);
     const before = ws.vfs.readFile(path);
     if (edit.isNewFile) {
@@ -1607,7 +1398,7 @@ function specifierLike(from, to, original, originalTarget) {
   if ([...tsExtensions, ...jsExtensions].includes(written)) {
     extension = written === extname2(originalTarget) ? targetExtension : written === ".jsx" && targetExtension === ".tsx" ? ".jsx" : jsEquivalent[targetExtension] ?? targetExtension;
   }
-  const path = portablePath(relative8(dirname7(from), to.slice(0, to.length - targetExtension.length))) + extension;
+  const path = portablePath(relative7(dirname7(from), to.slice(0, to.length - targetExtension.length))) + extension;
   return path.startsWith(".") ? path : `./${path}`;
 }
 function updateReexports(context, target, name, exported, sourceDeleted) {
@@ -1675,7 +1466,7 @@ function moduleEdges(ws, files, owners) {
       if (!resolved || resolved.isExternalLibraryImport)
         continue;
       const target = resolve8(resolved.resolvedFileName);
-      if (!isInside(ws.root, target) || target.split(sep7).includes("node_modules") || ws.vfs.isHidden(target))
+      if (!isInside(ws.root, target) || target.split(sep6).includes("node_modules") || ws.vfs.isHidden(target))
         continue;
       edges.push({ file, target, from, to: owners(target) });
     }
@@ -1991,7 +1782,7 @@ async function analyzeFileOperation(request) {
   const sourceConfig = configPathFor(assertAbsolute("project", request.project));
   const targetConfig = request.operation === "move-type" && request.targetProject ? configPathFor(assertAbsolute("targetProject", request.targetProject)) : sourceConfig;
   const affected = [file];
-  if (request.operation === "move-type" && request.target && isAbsolute5(request.target) && existsSync2(request.target))
+  if (request.operation === "move-type" && request.target && isAbsolute4(request.target) && existsSync2(request.target))
     affected.push(resolve8(request.target));
   const ws = new Workspace(root, sourceConfig, targetConfig, affected);
   try {
@@ -2032,19 +1823,19 @@ async function analyzeFileOperation(request) {
       }
     }
     for (const config of ws.importingConfigs) {
-      context.notes.push(`Included ${relative8(root, config)} because its program imports ${relative8(root, file)} without a project reference.`);
+      context.notes.push(`Included ${relative7(root, config)} because its program imports ${relative7(root, file)} without a project reference.`);
     }
     for (const config of ws.observers()) {
-      context.notes.push(`Updated and validated ${relative8(root, config)}, a variant config that also compiles the affected files.`);
+      context.notes.push(`Updated and validated ${relative7(root, config)}, a variant config that also compiles the affected files.`);
     }
     if (ws.participants.size > 1) {
-      context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative8(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
+      context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative7(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
     }
     if (isJs) {
       context.notes.push("JavaScript analysis is semantic only for references TypeScript can resolve; dynamic imports with computed paths and string-based references are not changed.");
     }
     if (renamed)
-      context.notes.push(`Renamed ${relative8(root, renamed[0])} to ${relative8(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
+      context.notes.push(`Renamed ${relative7(root, renamed[0])} to ${relative7(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
     return {
       backend: "typescript",
       version: ts3.version,
@@ -2080,12 +1871,12 @@ var init_typescript_fileops = __esm(() => {
 // src/backends/typescript.ts
 var exports_typescript = {};
 __export(exports_typescript, {
-  analyze: () => analyze2,
-  capabilities: () => capabilities2
+  analyze: () => analyze,
+  capabilities: () => capabilities
 });
 import ts4 from "typescript";
 import { statSync as statSync3 } from "node:fs";
-import { basename as basename6, dirname as dirname8, extname as extname3, isAbsolute as isAbsolute6, resolve as resolve9 } from "node:path";
+import { basename as basename5, dirname as dirname8, extname as extname3, isAbsolute as isAbsolute5, resolve as resolve9 } from "node:path";
 function fail2(code, reason) {
   throw new Error(`${code}: ${reason}`);
 }
@@ -2093,7 +1884,7 @@ function canonical(path) {
   return resolve9(path);
 }
 function assertAbsolute2(name, value) {
-  if (!isAbsolute6(value))
+  if (!isAbsolute5(value))
     fail2("INVALID_REQUEST", `${name} must be an absolute path`);
   return canonical(value);
 }
@@ -2105,7 +1896,7 @@ function configPathFor2(project) {
     fail2("PROJECT_NOT_FOUND", project);
   }
   if (stat.isFile()) {
-    if (!["tsconfig.json", "jsconfig.json"].includes(basename6(project))) {
+    if (!["tsconfig.json", "jsconfig.json"].includes(basename5(project))) {
       fail2("UNSUPPORTED_PROJECT", "project must name tsconfig.json or jsconfig.json");
     }
     return project;
@@ -2382,7 +2173,7 @@ function extraction(state, file, request) {
 function changedFiles(state, originals) {
   return [...state.overlays].filter(([path, after]) => originals.get(path) !== after).sort(([a], [b]) => a.localeCompare(b)).map(([path, after]) => ({ path, before: originals.get(path) ?? null, after }));
 }
-async function analyze2(request) {
+async function analyze(request) {
   if (request.operation === "rename-file" || request.operation === "move-type")
     return analyzeFileOperation(request);
   if (request.operation === "sync-namespace") {
@@ -2466,11 +2257,11 @@ async function analyze2(request) {
     state.service.dispose();
   }
 }
-var capabilities2, formatOptions;
+var capabilities, formatOptions;
 var init_typescript = __esm(() => {
   init_typescript_fileops();
   init_typescript_paths();
-  capabilities2 = [
+  capabilities = [
     { operation: "rename", description: "Rename a TypeScript or JavaScript symbol across its configured project." },
     { operation: "imports", modes: ["sort", "remove-unused"], description: "Sort imports or explicitly remove unused imports." },
     { operation: "format", description: "Format a source file with the TypeScript formatter." },
@@ -2496,13 +2287,221 @@ var init_typescript = __esm(() => {
   };
 });
 
+// src/backends/csharp.ts
+import { basename as basename6, dirname as dirname9, isAbsolute as isAbsolute6, join, relative as relative8, resolve as resolve10, sep as sep7 } from "node:path";
+import { access } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+async function analyze2(request, toolkitRoot) {
+  validateRequest(request);
+  const helper = await findOrBuildHelper(toolkitRoot);
+  const { stdout, stderr, exitCode, timedOut } = await runDotnet([helper], JSON.stringify(request));
+  if (timedOut) {
+    throw new Error("CSHARP_HELPER_TIMEOUT: helper exceeded 120 seconds");
+  }
+  let response;
+  try {
+    response = JSON.parse(stdout);
+  } catch {
+    const detail = stderr.trim() || stdout.trim() || `exit code ${exitCode}`;
+    throw new Error(`CSHARP_HELPER_FAILED: ${detail}`);
+  }
+  if (response.error) {
+    throw new Error(`${response.error.code}: ${response.error.message}`);
+  }
+  if (exitCode !== 0) {
+    const detail = stderr.trim() || `exit code ${exitCode}`;
+    throw new Error(`CSHARP_HELPER_FAILED: ${detail}`);
+  }
+  if (!response.result) {
+    const detail = stderr.trim() || `helper exited with code ${exitCode}`;
+    throw new Error(`CSHARP_PROTOCOL_ERROR: ${detail}`);
+  }
+  validateResult(response.result, request.root);
+  return response.result;
+}
+function validateRequest(request) {
+  for (const [name, value] of [
+    ["project", request.project],
+    ["root", request.root],
+    ["file", request.file]
+  ]) {
+    if (!isAbsolute6(value)) {
+      throw new Error(`INVALID_REQUEST: ${name} must be an absolute path`);
+    }
+  }
+  ensureWithinRoot(request.root, request.project, "project");
+  ensureWithinRoot(request.root, request.file, "file");
+  if (request.operation === "rename" && (!Number.isInteger(request.position) || request.position < 0 || !request.newName?.trim())) {
+    throw new Error("INVALID_REQUEST: rename requires a non-negative position and newName");
+  }
+  if (request.operation === "imports" && request.mode !== "remove-unused") {
+    throw new Error("UNSUPPORTED_OPERATION: C# supports only imports mode remove-unused");
+  }
+  if (request.operation === "extract-function" || request.operation === "extract-variable") {
+    throw new Error(`UNSUPPORTED_OPERATION: C# operation '${request.operation}' is not supported`);
+  }
+  if (request.position !== undefined && (!Number.isInteger(request.position) || request.position < 0)) {
+    throw new Error("INVALID_REQUEST: position must be a non-negative integer");
+  }
+  if (request.typeName !== undefined && !/^[\p{L}_][\p{L}\p{N}_]*$/u.test(request.typeName)) {
+    throw new Error("INVALID_REQUEST: typeName must be a simple C# identifier");
+  }
+  if (request.rootNamespace !== undefined && request.rootNamespace !== "" && !/^[\p{L}_][\p{L}\p{N}_]*(\.[\p{L}_][\p{L}\p{N}_]*)*$/u.test(request.rootNamespace)) {
+    throw new Error("INVALID_REQUEST: rootNamespace must be a dotted C# namespace");
+  }
+  if (request.operation === "move-type") {
+    if (!request.target || !isAbsolute6(request.target) || !request.target.endsWith(".cs")) {
+      throw new Error("INVALID_REQUEST: move-type requires an absolute target .cs file path");
+    }
+    ensureWithinRoot(request.root, request.target, "target");
+    if (request.targetProject !== undefined) {
+      if (!isAbsolute6(request.targetProject) || !request.targetProject.toLowerCase().endsWith(".csproj")) {
+        throw new Error("INVALID_REQUEST: targetProject must be an absolute .csproj path");
+      }
+      ensureWithinRoot(request.root, request.targetProject, "targetProject");
+    }
+  } else if (request.target !== undefined || request.targetProject !== undefined) {
+    throw new Error("INVALID_REQUEST: target and targetProject are only valid for move-type");
+  }
+}
+function validateResult(result, root) {
+  if (result.backend !== "roslyn" || result.version !== "4.12.0") {
+    throw new Error("CSHARP_PROTOCOL_ERROR: unexpected helper identity");
+  }
+  for (const change of result.changes) {
+    if (typeof change.path !== "string" || change.before !== null && typeof change.before !== "string" || change.after !== null && typeof change.after !== "string" || change.before === null && change.after === null) {
+      throw new Error("CSHARP_PROTOCOL_ERROR: helper returned a malformed change");
+    }
+    if (!isAbsolute6(change.path)) {
+      throw new Error("CSHARP_PROTOCOL_ERROR: helper returned a relative change path");
+    }
+    ensureWithinRoot(root, change.path, "changed file");
+  }
+}
+function ensureWithinRoot(root, path, label) {
+  const difference = relative8(resolve10(root), resolve10(path));
+  if (difference === ".." || difference.startsWith(`..${sep7}`) || isAbsolute6(difference)) {
+    throw new Error(`OUTSIDE_ROOT: ${label} is outside root: ${path}`);
+  }
+}
+async function findOrBuildHelper(toolkitRoot) {
+  const configured = toolkitRoot ?? process.env.REFACTOR_AI_HOME;
+  const directory = dirname9(fileURLToPath(import.meta.url));
+  const sourceRoot = configured ? resolve10(configured) : resolve10(directory, basename6(directory) === "backends" && basename6(dirname9(directory)) === "src" ? "../.." : "..");
+  const dll = helperDll(sourceRoot);
+  if (await exists(dll))
+    return dll;
+  const project = join(sourceRoot, "dotnet", "RefactorHelper", "RefactorHelper.csproj");
+  if (!await exists(project))
+    throw new Error("CSHARP_HELPER_NOT_FOUND: the selected toolkit root has no helper; set REFACTOR_AI_HOME to the package root");
+  const { stdout, stderr, exitCode, timedOut } = await runDotnet([
+    "build",
+    project,
+    "-c",
+    "Release",
+    "--nologo",
+    "-p:RestoreLockedMode=true"
+  ]);
+  if (timedOut)
+    throw new Error("CSHARP_HELPER_BUILD_TIMEOUT: build exceeded 120 seconds");
+  if (exitCode !== 0) {
+    throw new Error(`CSHARP_HELPER_BUILD_FAILED: ${(stderr || stdout).trim()}`);
+  }
+  return helperDll(sourceRoot);
+}
+function helperDll(root) {
+  return join(root, "dotnet", "RefactorHelper", "bin", "Release", "net8.0", "RefactorHelper.dll");
+}
+function processEnv() {
+  return { ...process.env, DOTNET_NOLOGO: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1" };
+}
+async function exists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return false;
+    throw error;
+  }
+}
+function runDotnet(args, input) {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn("dotnet", args, { stdio: ["pipe", "pipe", "pipe"], env: processEnv() });
+    let stdout = "", stderr = "", timedOut = false;
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, 120000);
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(new Error(`CSHARP_HELPER_FAILED: ${error.message}`));
+    });
+    child.stdin.on("error", (error) => {
+      if (error.code !== "EPIPE") {
+        clearTimeout(timeout);
+        child.kill("SIGKILL");
+        reject(error);
+      }
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      resolveResult({ stdout, stderr, exitCode: code ?? -1, timedOut });
+    });
+    child.stdin.end(input);
+  });
+}
+var capabilities2;
+var init_csharp = __esm(() => {
+  capabilities2 = [
+    {
+      operation: "rename",
+      description: "Solution-wide semantic symbol rename using Roslyn."
+    },
+    {
+      operation: "format",
+      description: "Document formatting using the public Roslyn Formatter API."
+    },
+    {
+      operation: "imports",
+      modes: ["remove-unused"],
+      description: "Remove unused imports identified by Roslyn's built-in compiler diagnostics."
+    },
+    {
+      operation: "rename-file",
+      description: "Rename a file to match its selected top-level type, updating explicit Compile items."
+    },
+    {
+      operation: "sync-namespace",
+      description: "Set a file's namespace from RootNamespace and folders, updating references with Roslyn binding checks."
+    },
+    {
+      operation: "move-type",
+      description: "Move a top-level type to a new file in the same or another project, updating namespaces, references and project references."
+    }
+  ];
+});
+
 // src/cli.ts
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 // src/cli-core.ts
-import { lstat as lstat4, mkdir as mkdir2, readFile as readFile4, realpath as realpath3, writeFile as writeFile2 } from "node:fs/promises";
-import { basename as basename2, dirname as dirname3, isAbsolute as isAbsolute2, relative as relative3, resolve as resolve4, sep as sep3 } from "node:path";
+import { lstat as lstat4, mkdir as mkdir2, realpath as realpath4, writeFile as writeFile2 } from "node:fs/promises";
+import { basename as basename2, dirname as dirname4, isAbsolute as isAbsolute2, relative as relative3, resolve as resolve5, sep as sep3 } from "node:path";
+
+// src/api.ts
+import { readFile as readFile4, realpath as realpath3 } from "node:fs/promises";
+import { dirname as dirname3, resolve as resolve4 } from "node:path";
 
 // src/core/apply.ts
 import { lstat as lstat3, mkdir, open, readFile as readFile3, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
@@ -3446,6 +3445,105 @@ function languageForProject(project) {
   throw new Error("UNSUPPORTED_PROJECT: use tsconfig/jsconfig.json, .csproj or .sln");
 }
 
+// src/api.ts
+function offset(text, point) {
+  const match = /^(\d+):(\d+)$/.exec(point);
+  if (!match)
+    throw new Error(`INVALID_POSITION: ${point}`);
+  const line = Number(match[1]), column = Number(match[2]);
+  const lines = text.split(`
+`);
+  if (line < 1 || line > lines.length || column < 1 || column > lines[line - 1].replace(/\r$/, "").length + 1) {
+    throw new Error(`INVALID_POSITION: ${point}`);
+  }
+  return lines.slice(0, line - 1).reduce((total, item) => total + item.length + 1, 0) + column - 1;
+}
+function createRefactorApi(context) {
+  if (Number(process.versions.node.split(".")[0]) < 22)
+    throw new Error("UNSUPPORTED_RUNTIME: Node.js 22+ is required");
+  function assertLanguage(project, backend) {
+    if (context.language && (languageForProject(project) !== context.language || backend !== undefined && backend !== (context.language === "typescript" ? "typescript" : "roslyn"))) {
+      throw new Error(`UNSUPPORTED_LANGUAGE: this tool only supports ${context.language === "typescript" ? "TypeScript/JavaScript" : "C#"}`);
+    }
+  }
+  function checkPlan(plan) {
+    assertPlanShape(plan);
+    assertLanguage(plan.request.project, plan.backend);
+  }
+  return {
+    async plan(options) {
+      const { project, request } = await resolveRequest();
+      const engine = await context.loadBackend(project, context.toolkitRoot);
+      return createPlan(request, engine.analyze);
+      async function resolveRequest() {
+        const operation = options.operation ?? context.operation;
+        if (!operation || !Object.values(languageOperations).some((items) => items.includes(operation)))
+          throw new Error(`UNSUPPORTED: ${operation}`);
+        if (context.operation && operation !== context.operation)
+          throw new Error(`UNSUPPORTED: this tool only supports ${context.operation}`);
+        assertLanguage(options.project);
+        if (options.targetProject)
+          assertLanguage(options.targetProject);
+        if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
+          throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
+        if (operation === "move-type" && !options.target)
+          throw new Error("INVALID_ARGUMENT: target required for move-type");
+        if ((options.target !== undefined || options.targetProject !== undefined) && operation !== "move-type") {
+          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type");
+        }
+        const project = await realpath3(resolve4(options.project));
+        const file = await realpath3(resolve4(options.file));
+        const root = await realpath3(resolve4(options.root ?? dirname3(project)));
+        const text = await readFile4(file, "utf8");
+        const position = (point) => {
+          if (typeof point === "string")
+            return offset(text, point);
+          if (!Number.isInteger(point) || point < 0 || point > text.length)
+            throw new Error(`INVALID_POSITION: ${point}`);
+          return point;
+        };
+        const request = {
+          project,
+          root,
+          file,
+          operation,
+          ...options.at !== undefined ? { position: position(options.at) } : {},
+          ...options.end !== undefined ? { end: position(options.end) } : {},
+          ...options.name !== undefined ? { newName: options.name } : {},
+          ...operation === "imports" ? { mode: options.mode ?? (context.language === "csharp" ? "remove-unused" : "sort") } : {},
+          ...options.target !== undefined ? { target: resolve4(options.target) } : {},
+          ...options.targetProject !== undefined ? { targetProject: await realpath3(resolve4(options.targetProject)) } : {},
+          ...options.typeName !== undefined ? { typeName: options.typeName } : {},
+          ...options.rootNamespace !== undefined ? { rootNamespace: options.rootNamespace } : {}
+        };
+        return { project, request };
+      }
+    },
+    preview(plan) {
+      checkPlan(plan);
+      return preview(plan);
+    },
+    async validate(plan) {
+      checkPlan(plan);
+      await assertFresh(plan);
+      return { status: plan.validation.status === "passed" ? "validated" : "failed", validation: plan.validation, id: plan.id };
+    },
+    async apply(plan) {
+      checkPlan(plan);
+      return applyPlan(plan);
+    },
+    async loadPlan(path) {
+      const plan = await loadPlan(resolve4(path));
+      checkPlan(plan);
+      return plan;
+    },
+    async capabilities(project) {
+      assertLanguage(project);
+      const engine = await context.loadBackend(await realpath3(resolve4(project)), context.toolkitRoot);
+      return engine.capabilities.filter((item) => !context.operation || item.operation === context.operation).map((item) => ({ ...item, ...item.modes ? { modes: [...item.modes] } : {} }));
+    }
+  };
+}
 // src/help.ts
 var operationHelp = {
   rename: {
@@ -3597,7 +3695,7 @@ var requirements = `Requirements:
   initial NuGet restore needs network access. Bun is for development builds only.
   Checkout setup: bun install --frozen-lockfile; bun run build:csharp; bun run build.
   Relocated C# runner: set REFACTOR_AI_HOME to the package directory containing
-  dotnet/RefactorHelper. Installed skill launchers set this path automatically.
+  dotnet/RefactorHelper. Installed skills locate their bundled helper automatically.
 `;
 function examples(invocation, commands) {
   return commands.map((command) => `  ${invocation} ${command}`).join(`
@@ -3752,28 +3850,11 @@ function required(flags, key) {
 }
 async function canonicalDirectory(path) {
   try {
-    return await realpath3(path);
+    return await realpath4(path);
   } catch (error) {
     if (error.code !== "ENOENT")
       throw error;
-    return resolve4(await canonicalDirectory(dirname3(path)), basename2(path));
-  }
-}
-function offset(text, point) {
-  const match = /^(\d+):(\d+)$/.exec(point);
-  if (!match)
-    throw new Error(`INVALID_POSITION: ${point}`);
-  const line = Number(match[1]), column = Number(match[2]);
-  const lines = text.split(`
-`);
-  if (line < 1 || line > lines.length || column < 1 || column > lines[line - 1].replace(/\r$/, "").length + 1) {
-    throw new Error(`INVALID_POSITION: ${point}`);
-  }
-  return lines.slice(0, line - 1).reduce((total, item) => total + item.length + 1, 0) + column - 1;
-}
-function assertLanguage(project, language, backend) {
-  if (language && (languageForProject(project) !== language || backend !== undefined && backend !== (language === "typescript" ? "typescript" : "roslyn"))) {
-    throw new Error(`UNSUPPORTED_LANGUAGE: this tool only supports ${language === "typescript" ? "TypeScript/JavaScript" : "C#"}`);
+    return resolve5(await canonicalDirectory(dirname4(path)), basename2(path));
   }
 }
 async function runCli(args, context) {
@@ -3782,67 +3863,46 @@ async function runCli(args, context) {
     return;
   }
   const { command, operation, flags } = parse([...args]);
+  const api = createRefactorApi(context);
   if (["preview", "validate", "apply"].includes(command)) {
-    const plan = await loadPlan(resolve4(required(flags, "plan")));
-    assertLanguage(plan.request.project, context.language, plan.backend);
+    const plan = await api.loadPlan(required(flags, "plan"));
     if (command === "preview") {
-      process.stdout.write(preview(plan) || `No changes.
+      process.stdout.write(api.preview(plan) || `No changes.
 `);
       return;
     }
     if (command === "apply") {
-      console.log(JSON.stringify(await applyPlan(plan), null, 2));
+      console.log(JSON.stringify(await api.apply(plan), null, 2));
       return;
     }
-    await assertFresh(plan);
-    console.log(JSON.stringify({ status: plan.validation.status === "passed" ? "validated" : "failed", validation: plan.validation, id: plan.id }, null, 2));
+    console.log(JSON.stringify(await api.validate(plan), null, 2));
     if (plan.validation.status !== "passed")
       process.exitCode = 1;
     return;
   }
-  assertLanguage(required(flags, "project"), context.language);
-  if (flags["target-project"])
-    assertLanguage(flags["target-project"], context.language);
-  const project = await realpath3(resolve4(required(flags, "project")));
-  const engine = await context.loadBackend(project);
   if (command === "capabilities") {
-    console.log(JSON.stringify(context.operation ? engine.capabilities.filter((item) => item.operation === context.operation) : engine.capabilities, null, 2));
+    console.log(JSON.stringify(await api.capabilities(required(flags, "project")), null, 2));
     return;
   }
   if (command !== "plan")
     throw new Error(`INVALID_ARGUMENT: unknown command ${command}`);
-  const operations = ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "sync-namespace", "move-type"];
-  if (!operations.includes(operation))
-    throw new Error(`UNSUPPORTED: ${operation}`);
-  if (context.operation && operation !== context.operation)
-    throw new Error(`UNSUPPORTED: this tool only supports ${context.operation}`);
-  const file = await realpath3(resolve4(required(flags, "file")));
-  const root = await realpath3(resolve4(flags.root ?? dirname3(project)));
-  const text = await readFile4(file, "utf8");
-  if (flags.mode && !["sort", "remove-unused"].includes(flags.mode))
-    throw new Error("INVALID_ARGUMENT: --mode sort|remove-unused");
-  if (operation === "move-type")
-    required(flags, "to");
-  if ((flags.to || flags["target-project"]) && operation !== "move-type") {
-    throw new Error("INVALID_ARGUMENT: --to and --target-project require move-type");
-  }
-  const request = {
-    project,
-    root,
-    file,
+  const plan = await api.plan({
+    project: required(flags, "project"),
+    file: required(flags, "file"),
     operation,
-    ...flags.at ? { position: offset(text, flags.at) } : {},
-    ...flags.end ? { end: offset(text, flags.end) } : {},
-    ...flags.name ? { newName: flags.name } : {},
-    ...operation === "imports" ? { mode: flags.mode ?? (context.language === "csharp" ? "remove-unused" : "sort") } : {},
-    ...flags.to ? { target: resolve4(flags.to) } : {},
-    ...flags["target-project"] ? { targetProject: await realpath3(resolve4(flags["target-project"])) } : {},
-    ...flags.type ? { typeName: flags.type } : {},
-    ...flags["root-namespace"] ? { rootNamespace: flags["root-namespace"] } : {}
-  };
-  const plan = await createPlan(request, engine.analyze);
-  let output = resolve4(flags.out ?? resolve4(root, ".refactor-ai", `${plan.id}.json`));
-  const stateDirectory = resolve4(root, ".refactor-ai");
+    root: flags.root,
+    at: flags.at,
+    end: flags.end,
+    name: flags.name,
+    mode: flags.mode,
+    target: flags.to,
+    targetProject: flags["target-project"],
+    typeName: flags.type,
+    rootNamespace: flags["root-namespace"]
+  });
+  const root = plan.request.root;
+  let output = resolve5(flags.out ?? resolve5(root, ".refactor-ai", `${plan.id}.json`));
+  const stateDirectory = resolve5(root, ".refactor-ai");
   const stateStat = await lstat4(stateDirectory).catch((error) => {
     if (error.code === "ENOENT")
       return;
@@ -3850,7 +3910,7 @@ async function runCli(args, context) {
   });
   if (stateStat?.isSymbolicLink())
     throw new Error("SYMLINK_UNSUPPORTED: state directory");
-  output = resolve4(await canonicalDirectory(dirname3(output)), basename2(output));
+  output = resolve5(await canonicalDirectory(dirname4(output)), basename2(output));
   const within = (directory, path) => {
     const difference = relative3(directory, path);
     return difference !== ".." && !difference.startsWith(`..${sep3}`) && !isAbsolute2(difference);
@@ -3858,8 +3918,8 @@ async function runCli(args, context) {
   if (within(root, output) && !within(stateDirectory, output)) {
     throw new Error("INVALID_ARGUMENT: store plan outside the project or in <root>/.refactor-ai to keep snapshot fresh");
   }
-  await mkdir2(dirname3(output), { recursive: true });
-  if (await realpath3(dirname3(output)) !== dirname3(output))
+  await mkdir2(dirname4(output), { recursive: true });
+  if (await realpath4(dirname4(output)) !== dirname4(output))
     throw new Error("SYMLINK_UNSUPPORTED: plan output directory changed");
   const outputStat = await lstat4(output).catch((error) => {
     if (error.code === "ENOENT")
@@ -3884,7 +3944,12 @@ async function runCli(args, context) {
 }
 
 // src/backends/load.ts
-var loadBackend = (project) => languageForProject(project) === "csharp" ? Promise.resolve().then(() => (init_csharp(), exports_csharp)) : Promise.resolve().then(() => (init_typescript(), exports_typescript));
+var loadBackend = async (project, toolkitRoot) => {
+  if (languageForProject(project) !== "csharp")
+    return Promise.resolve().then(() => (init_typescript(), exports_typescript));
+  const backend = await Promise.resolve().then(() => (init_csharp(), {}));
+  return { capabilities: capabilities2, analyze: (request) => analyze2(request, toolkitRoot) };
+};
 
 // src/cli.ts
 async function main(args, context = {}) {

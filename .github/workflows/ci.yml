@@ -33,7 +33,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run build
-      - run: bun test ./tests/portable-cli.test.ts ./tests/typescript-windows-vfs.test.ts
+      - run: bun test ./tests/portable-cli.test.ts ./tests/typescript-windows-vfs.test.ts ./tests/api.test.ts
   checks:
     name: Build, test and pack
     runs-on: ubuntu-24.04

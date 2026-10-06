@@ -160,7 +160,7 @@ const requirements = `Requirements:
   initial NuGet restore needs network access. Bun is for development builds only.
   Checkout setup: bun install --frozen-lockfile; bun run build:csharp; bun run build.
   Relocated C# runner: set REFACTOR_AI_HOME to the package directory containing
-  dotnet/RefactorHelper. Installed skill launchers set this path automatically.
+  dotnet/RefactorHelper. Installed skills locate their bundled helper automatically.
 `;
 
 function examples(invocation: string, commands: string[]): string {

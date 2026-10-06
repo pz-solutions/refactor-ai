@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,8 @@ Options:
   --help, -h   Show help without building or copying any files.
   --build      Rebuild the CLI and demo before packaging (package:skills default).
 
-Builds the Node launcher and copies dist/cli.js, pinned npm manifests/lockfiles and
+Builds the Node launcher and importable API with TypeScript declarations, and copies
+dist/cli.js, pinned npm manifests/lockfiles and
 license notices into every skills/* directory. C# skills also receive the Roslyn
 helper sources and NuGet lockfile. Successful packaging returns exit 0; failures
 return nonzero. This updates generated scripts/ and assets/ in the checkout;
@@ -41,6 +42,7 @@ After packaging, install from a target project:
 if (args.some(arg => arg !== "--build") || args.length > 1) throw new Error("INVALID_ARGUMENT: packager accepts --build or --help");
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const { apiDeclaration, buildApiDeclarations } = await import("./api-declarations.ts");
 if (args.includes("--build")) {
   const result = spawnSync("bun", ["run", "build"], { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;
@@ -54,6 +56,12 @@ if (built.error) throw built.error;
 if (built.status !== 0) throw new Error("Skill launcher build failed");
 
 const names = (await readdir(join(root, "skills"))).sort();
+const declarations = join(root, "dist", "api-types");
+await buildApiDeclarations(root, declarations);
+const apiRuntime = join(root, "dist", "skill-api-runtime.mjs");
+const apiBuilt = spawnSync("bun", ["build", "src/skill-api-runtime.ts", "--target", "node", "--format", "esm", "--external", "typescript", "--outfile", apiRuntime], { cwd: root, stdio: "inherit" });
+if (apiBuilt.error) throw apiBuilt.error;
+if (apiBuilt.status !== 0) throw new Error("Skill API runtime build failed");
 for (const name of names) {
   const skill = join(root, "skills", name);
   await readFile(join(skill, "SKILL.md"));
@@ -62,6 +70,16 @@ for (const name of names) {
   await mkdir(join(runtime, "licenses"), { recursive: true });
   await cp(launcher, join(skill, "scripts", "refactor.mjs"));
   await cp(join(root, "dist", "cli.js"), join(runtime, "cli.mjs"));
+  await cp(apiRuntime, join(runtime, "api.mjs"));
+  await rm(join(runtime, "types"), { recursive: true, force: true });
+  await cp(declarations, join(runtime, "types"), { recursive: true });
+  await cp(join(root, "docs", "api.md"), join(skill, "scripts", "API.md"));
+  await writeFile(join(skill, "scripts", "api.d.mts"), apiDeclaration.replaceAll("./types/", "../assets/runtime/types/"));
+  const entry = join(root, "dist", "skill-api-entry.ts");
+  await writeFile(entry, `import { createInstalledRefactor } from ${JSON.stringify(join(root, "scripts", "skill-api.ts"))};\nexport const createRefactor = () => createInstalledRefactor(import.meta.url, ${JSON.stringify(name.replace(/^refactor-/, ""))});\n`);
+  const sdkBuilt = spawnSync("bun", ["build", entry, "--target", "node", "--format", "esm", "--outfile", join(skill, "scripts", "api.mjs")], { cwd: root, stdio: "inherit" });
+  if (sdkBuilt.error) throw sdkBuilt.error;
+  if (sdkBuilt.status !== 0) throw new Error(`Skill API build failed: ${name}`);
   for (const file of ["package.json", "package-lock.json"]) {
     await cp(join(root, "packaging", "runtime", file), join(runtime, file));
   }

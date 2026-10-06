@@ -91,6 +91,20 @@ node dist/cli.js plan move-type --project ./Workspace.sln --root . \
 
 C# moves update namespaces that follow the project's folder convention. Custom namespaces are preserved unless you supply `--root-namespace`. Namespace synchronization affects the selected file and its references, leaving other files in their existing namespace. Moving a C# type between projects changes its assembly; dependencies on reflection and assembly-qualified names need separate verification.
 
+## Custom automation scripts
+
+npm packages also export `createRefactor` with TypeScript declarations. Installed skills include the same interface at `<skill-root>/scripts/api.mjs`. Importing a module does not execute the CLI. The returned object plans, previews, validates and applies compiler-generated changes without parsing CLI output.
+
+```js
+import { createRefactor } from "@refactor-ai/ts-rename";
+const rename = await createRefactor();
+const plan = await rename.plan({ project: "./tsconfig.json", file: "./src/math.ts", at: "1:17", name: "sum" });
+if ((await rename.validate(plan)).status !== "validated") throw new Error("Rename failed validation");
+await rename.apply(plan);
+```
+
+Read the [programmatic interface](docs/api.md) for installed-skill imports, all methods and options, requirements, errors and sequential automation. Apply each step before planning the next because plans are tied to project snapshots. Package builds include this interface; publishing a new version is required to distribute it through npm.
+
 ## npm CLI packages
 
 Build fourteen independently publishable packages: the complete `@refactor-ai/cli`, seven `@refactor-ai/ts-<operation>` tools for TypeScript/JavaScript, and six `@refactor-ai/csharp-<operation>` tools for C#. Each declares a single executable in npm's `bin` field. The author checkout remains private.

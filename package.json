@@ -1,6 +1,6 @@
 {
   "name": "refactor-ai",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "repository": {
     "type": "git",
@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "refactor": "node dist/cli.js",
-    "build": "bun build src/cli.ts --target node --format esm --outfile dist/cli.js --external typescript && bun build scripts/demo.ts --target node --format esm --outfile dist/demo.js --external typescript && bun build scripts/npm-release.ts --target node --format esm --outfile dist/npm-release.mjs && bun build scripts/version.ts --target node --format esm --outfile dist/version.mjs && bun scripts/package-skills.ts",
+    "build": "bun build src/cli.ts --target node --format esm --outfile dist/cli.js --external typescript && bun build src/api-entry.ts --target node --format esm --outfile dist/api.mjs --external typescript && bun build scripts/demo.ts --target node --format esm --outfile dist/demo.js --external typescript && bun build scripts/npm-release.ts --target node --format esm --outfile dist/npm-release.mjs && bun build scripts/version.ts --target node --format esm --outfile dist/version.mjs && bun scripts/package-skills.ts",
     "package:skills": "bun scripts/package-skills.ts --build",
     "package:npm": "bun scripts/package-npm.ts",
     "release:npm": "node dist/npm-release.mjs",

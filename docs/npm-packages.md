@@ -29,6 +29,10 @@ TS packages support TypeScript and JavaScript through the TypeScript Language Se
 
 Language packages reject foreign project configurations and foreign saved plans before invoking a compiler or writing sources. Their help and examples describe only the supported language. C# imports default to `remove-unused`; TS/JS imports default to `sort`. The language-neutral aggregate keeps the original explicit C# `--mode remove-unused` convention.
 
+## Programmatic imports
+
+Each package exports `createRefactor` from its package root with TypeScript declarations, alongside its `bin`. Imports do not execute CLI commands. See [the programmatic interface](api.md) for methods, requirements and automation examples. Language and operation restrictions match the CLI, and plan/apply protections share the same implementation.
+
 ## Build and inspect
 
 From the author checkout:

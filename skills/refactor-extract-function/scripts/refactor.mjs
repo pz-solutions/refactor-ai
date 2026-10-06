@@ -1,8 +1,5 @@
 // scripts/skill-launcher.ts
-import { existsSync as existsSync2, readFileSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
-import { dirname as dirname2, join as join2, resolve as resolve2 } from "node:path";
+import { join as join3, resolve as resolve2, dirname as dirname2 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/languages.ts
@@ -162,7 +159,7 @@ var requirements = `Requirements:
   initial NuGet restore needs network access. Bun is for development builds only.
   Checkout setup: bun install --frozen-lockfile; bun run build:csharp; bun run build.
   Relocated C# runner: set REFACTOR_AI_HOME to the package directory containing
-  dotnet/RefactorHelper. Installed skill launchers set this path automatically.
+  dotnet/RefactorHelper. Installed skills locate their bundled helper automatically.
 `;
 function examples(invocation, commands) {
   return commands.map((command) => `  ${invocation} ${command}`).join(`
@@ -294,6 +291,12 @@ ${workflow(invocation)}
 ${runtimeRequirements}`;
 }
 
+// src/runtime/skill.ts
+import { existsSync as existsSync2, readFileSync } from "node:fs";
+import { mkdir, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { join as join2 } from "node:path";
+
 // src/runtime/npm.ts
 import { existsSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -319,47 +322,52 @@ function npmCli() {
   throw new Error("NPM_NOT_FOUND: npm is required; install Node.js with npm");
 }
 
-// scripts/skill-launcher.ts
-var skillRoot = resolve2(dirname2(fileURLToPath(import.meta.url)), "..");
-var runtime = join2(skillRoot, "assets", "runtime");
-function runtimeReady() {
-  try {
-    const manifest = JSON.parse(readFileSync(join2(runtime, "node_modules", "typescript", "package.json"), "utf8"));
-    return manifest.version === "5.9.3" && existsSync2(join2(runtime, "node_modules", "typescript", "lib", "typescript.js"));
-  } catch {
-    return false;
-  }
-}
-async function ensureRuntime() {
-  if (runtimeReady())
+// src/runtime/skill.ts
+async function ensureSkillRuntime(skillRoot, quiet = false) {
+  const runtime = join2(skillRoot, "assets", "runtime");
+  const ready = () => {
+    try {
+      const manifest = JSON.parse(readFileSync(join2(runtime, "node_modules", "typescript", "package.json"), "utf8"));
+      return manifest.version === "5.9.3" && existsSync2(join2(runtime, "node_modules", "typescript", "lib", "typescript.js"));
+    } catch {
+      return false;
+    }
+  };
+  if (ready())
     return;
   const lock = join2(runtime, ".setup.lock");
   try {
     await mkdir(lock);
   } catch (error) {
-    if (error.code === "EEXIST") {
+    if (error.code === "EEXIST")
       throw new Error(`SKILL_SETUP_BUSY: another setup is running; after an interrupted setup inspect ${lock}`);
-    }
     throw error;
   }
   try {
-    if (runtimeReady())
+    if (ready())
       return;
-    process.stderr.write(`Installing the skill's locked TypeScript runtime dependency...
+    if (!quiet)
+      process.stderr.write(`Installing the skill's locked TypeScript runtime dependency...
 `);
-    const installed = spawnSync(process.execPath, [npmCli(), "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], {
+    const result = spawnSync(process.execPath, [npmCli(), "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], {
       cwd: runtime,
-      stdio: ["ignore", process.stderr, process.stderr],
-      timeout: 180000
+      stdio: quiet ? ["ignore", "pipe", "pipe"] : ["ignore", process.stderr, process.stderr],
+      timeout: 180000,
+      encoding: "utf8"
     });
-    if (installed.error)
-      throw new Error(`SKILL_SETUP_FAILED: ${installed.error.message}`);
-    if (installed.status !== 0 || !runtimeReady())
-      throw new Error("SKILL_SETUP_FAILED: npm ci did not install the locked runtime dependency");
+    if (result.error)
+      throw new Error(`SKILL_SETUP_FAILED: ${result.error.message}`);
+    if (result.status !== 0 || !ready())
+      throw new Error(`SKILL_SETUP_FAILED: npm ci did not install the locked runtime dependency${quiet ? `
+${result.stderr || result.stdout}` : ""}`);
   } finally {
     await rm(lock, { recursive: true, force: true });
   }
 }
+
+// scripts/skill-launcher.ts
+var skillRoot = resolve2(dirname2(fileURLToPath(import.meta.url)), "..");
+var runtime = join3(skillRoot, "assets", "runtime");
 try {
   if (Number(process.versions.node.split(".")[0]) < 22)
     throw new Error("UNSUPPORTED_RUNTIME: Node.js 22+ is required");
@@ -367,10 +375,9 @@ try {
     process.stdout.write(renderHelp(process.argv.slice(2), 'node "<skill-root>/scripts/refactor.mjs"'));
     process.exit(0);
   }
-  await ensureRuntime();
-  process.env.REFACTOR_AI_HOME = join2(skillRoot, "assets");
-  const { main } = await import(pathToFileURL(join2(runtime, "cli.mjs")).href);
-  await main(process.argv.slice(2));
+  await ensureSkillRuntime(skillRoot);
+  const { main } = await import(pathToFileURL(join3(runtime, "cli.mjs")).href);
+  await main(process.argv.slice(2), { toolkitRoot: join3(skillRoot, "assets") });
 } catch (error) {
   console.error(JSON.stringify({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
   process.exitCode = 1;

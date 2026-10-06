@@ -52,4 +52,4 @@ export interface RefactorBackend {
   capabilities: Capability[];
   analyze(request: RefactorRequest): Promise<BackendResult>;
 }
-export type BackendLoader = (project: string) => Promise<RefactorBackend>;
+export type BackendLoader = (project: string, toolkitRoot?: string) => Promise<RefactorBackend>;

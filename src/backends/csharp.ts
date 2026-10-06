@@ -42,9 +42,9 @@ interface HelperResponse {
   error?: HelperError;
 }
 
-export async function analyze(request: RefactorRequest): Promise<BackendResult> {
+export async function analyze(request: RefactorRequest, toolkitRoot?: string): Promise<BackendResult> {
   validateRequest(request);
-  const helper = await findOrBuildHelper();
+  const helper = await findOrBuildHelper(toolkitRoot);
   const { stdout, stderr, exitCode, timedOut } = await runDotnet([helper], JSON.stringify(request));
   if (timedOut) {
     throw new Error("CSHARP_HELPER_TIMEOUT: helper exceeded 120 seconds");
@@ -149,9 +149,9 @@ function ensureWithinRoot(root: string, path: string, label: string): void {
   }
 }
 
-async function findOrBuildHelper(): Promise<string> {
+async function findOrBuildHelper(toolkitRoot?: string): Promise<string> {
   // The target project's cwd is never a source of executable toolkit code.
-  const configured = process.env.REFACTOR_AI_HOME;
+  const configured = toolkitRoot ?? process.env.REFACTOR_AI_HOME;
   const directory = dirname(fileURLToPath(import.meta.url));
   const sourceRoot = configured ? resolve(configured) : resolve(directory,
     basename(directory) === "backends" && basename(dirname(directory)) === "src" ? "../.." : "..");

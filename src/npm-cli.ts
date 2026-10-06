@@ -40,8 +40,7 @@ export async function runNpmCli(args: string[], options: NpmCliOptions): Promise
       if (!normalized[1] || normalized[1].startsWith("-")) normalized.splice(1, 0, options.operation);
       else if (normalized[1] !== options.operation) throw new Error(`UNSUPPORTED: this tool only supports ${options.operation}`);
     }
-    process.env.REFACTOR_AI_HOME = options.packageRoot;
-    await runCli(normalized, { invocation, operation: options.operation, language: options.language, loadBackend: options.loadBackend });
+    await runCli(normalized, { invocation, operation: options.operation, language: options.language, loadBackend: options.loadBackend, toolkitRoot: options.packageRoot });
   } catch (error) {
     console.error(JSON.stringify({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
     process.exitCode = 1;
