@@ -75,3 +75,6 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 - Ground every slice brief in the source: the `/dashboard/invitations` brief described an accept/decline page from the route name; the route only redirects to `/dashboard/settings/invitations`. The implementer correctly stopped.
 - Build the CLI (`bun run build`) before integration tests that execute `dist/`; stale `dist` produced two false failures after merging branches.
 - Throughput: `move-file` on 900-file app: ~110 s per plan (two full program checks in the multi-project path; F7's affected-closure validation is single-project only so far).
+
+### F20. `inline-reexports` keeps shims reachable through dynamic `import()` — open
+- `data-table/preferences.ts` (`export * from "@uber-platform/app-features/data-table/preferences"`) stayed because two tests do `await import("@/components/data-table/preferences")`. For a pure single-origin `export *` shim, a dynamic import of the shim is equivalent to a dynamic import of the origin; the operation could retarget it (the namespace object differs only if the origin has a default export, which `export *` drops).
