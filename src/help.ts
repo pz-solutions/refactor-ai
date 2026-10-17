@@ -23,8 +23,8 @@ export const operationHelp: Record<Operation, OperationHelp> = {
   "retarget-import": {
     description: "Retarget imports and re-exports to an API-compatible module.",
     support: "TypeScript and JavaScript",
-    required: "--from <specifier> --to <specifier> [--map Old=New ...] [--only Name,Name] [--file <file|directory>]",
-    details: "Exact specifiers only; wildcards are rejected. Omit --file for the loaded project. --only selects pre-map export names and splits declarations. Unaliased mapped imports rename local references semantically, including JSX; explicit aliases stay unchanged. Re-export mappings rename the imported export. Compatible named destination imports merge and identical bindings dedupe; type-only modifiers, quotes, directives and comments are retained. Default, namespace, star exports and side-effect imports retarget only without --only; compiler diagnostics validate their compatibility. Targets must resolve from every affected file (TARGET_UNRESOLVED). Missing exports fail NEW_DIAGNOSTICS. No matches succeed with a note. Project references are unsupported. Verify runtime behavior separately.",
+    required: "--from <specifier> --to <specifier> [--map Old=New ...] [--only Name,Name] [--mocks report|add] [--file <file|directory>]",
+    details: "Exact specifiers only; wildcards are rejected. Omit --file for the loaded project. --only selects pre-map export names and splits declarations. Unaliased mapped imports rename local references semantically, including JSX; explicit aliases stay unchanged. Re-export mappings rename the imported export. Compatible named destination imports merge and identical bindings dedupe; type-only modifiers, quotes, directives and comments are retained. Default, namespace, star exports and side-effect imports retarget only without --only; compiler diagnostics validate their compatibility. Targets must resolve from every affected file (TARGET_UNRESOLVED). Missing exports fail NEW_DIAGNOSTICS. No matches succeed with a note. --mocks report (default) lists loaded test files mocking the source while transitively importing retargeted files, including callers outside --file. --mocks add copies each standalone vi/vitest/jest mock/doMock registration for the destination with the same factory text, unless that file already mocks the destination. Expression-valued calls fail UNSUPPORTED_MOCK_CALL in add mode. Project references are unsupported. Verify runtime behavior separately.",
     examples: [
       "plan retarget-import --project apps/web/tsconfig.json --root . --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider",
       "plan retarget-import --project ./tsconfig.json --from old-lib --to new-lib --only Widget,Options --file ./src/features",
@@ -169,6 +169,7 @@ ${language !== "csharp" ? "                           Named TS configurations ar
   --from <specifier>       Source module specifier for retarget-import.
   --map <Old=New>          Repeatable export mapping for retarget-import.
   --only <Name,Name>       Pre-map export names to retarget; other bindings stay.
+  --mocks <report|add>     Report affected test mocks (default), or add parallel mocks.
   --target-project <config> Destination project config; move-type or move-file.
 ${language !== "typescript" ? "  --root-namespace <name>  C# namespace convention override for sync-namespace\n                           or move-type.\n" : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
                            Within root, store plans only in .refactor-ai;

@@ -198,7 +198,9 @@ export async function createPlan(
   const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat(request.file)).mode & 0o777 : 0o600;
   const creationMode = async (path: string): Promise<number> => {
     if (request.operation !== "move-file" || !request.target) return createdMode;
-    const source = (await lstat(request.file)).isDirectory()
+    const directory = (await lstat(request.file)).isDirectory();
+    if (!directory && path !== request.target) return createdMode;
+    const source = directory
       ? resolve(request.file, relative(request.target, path)) : request.file;
     if (!changes.some(change => change.path === source && change.after === null)) return 0o600;
     return (await lstat(source)).mode & 0o777;

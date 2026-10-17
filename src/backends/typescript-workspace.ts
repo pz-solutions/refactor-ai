@@ -122,7 +122,7 @@ const mockObjects = new Set(["vi", "vitest", "jest"]);
 const mockMethods = new Set(["mock", "doMock", "unmock", "doUnmock", "importActual", "importMock", "requireActual", "requireMock", "createMockFromModule"]);
 
 /** `vi.mock("./x")` and friends: test-runner calls whose first argument is resolved like an import. */
-function isModuleMockCall(node: ts.Node): node is ts.CallExpression {
+export function isModuleMockCall(node: ts.Node): node is ts.CallExpression {
   return ts.isCallExpression(node) && node.arguments.length >= 1 && ts.isStringLiteralLike(node.arguments[0]!)
     && ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
     && mockObjects.has(node.expression.expression.text) && mockMethods.has(node.expression.name.text);

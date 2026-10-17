@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import type { RefactorRequest } from "../types";
 import { isInside } from "./typescript-paths";
 import { fail } from "./typescript-vfs";
+import { addParallelMocks, affectedMockFiles } from "./typescript-retarget-mocks";
 
 type Declaration = ts.ImportDeclaration | ts.ExportDeclaration;
 type Member = ts.ImportSpecifier | ts.ExportSpecifier;
@@ -30,6 +31,7 @@ function validate(request: RefactorRequest): void {
   if (!request.from || !request.to) fail("INVALID_REQUEST", "retarget-import requires from and to");
   if (request.from.includes("*") || request.to.includes("*")) fail("UNSUPPORTED_SPECIFIER", "retarget-import requires exact specifiers; wildcard prefixes are unsupported");
   if (request.from === request.to) fail("INVALID_REQUEST", "from and to must differ");
+  if (request.mocks !== undefined && !["report", "add"].includes(request.mocks)) fail("INVALID_REQUEST", "mocks must be report or add");
   if (request.only && (!Array.isArray(request.only) || !request.only.length || request.only.some(name => !name))) {
     fail("INVALID_REQUEST", "only must contain pre-map export names");
   }
@@ -230,11 +232,19 @@ export function retargetImports(context: Context, request: RefactorRequest): str
     }
   }
   if (unresolved.length) fail("TARGET_UNRESOLVED", [...new Set(unresolved)].sort().join(", "));
+  const mocks = affectedMockFiles(context, affected, request.from!);
   for (const source of affected) {
     const renamed = renameBindings(context, source.fileName, request);
     const current = context.service.getProgram()!.getSourceFile(source.fileName)!;
     context.setText(source.fileName, transformFile(current, request, renamed));
   }
-  return affected.length ? ["Retargeted imports/re-exports; compiler validation does not prove runtime API compatibility."]
+  const notes = affected.length ? ["Retargeted imports/re-exports; compiler validation does not prove runtime API compatibility."]
     : ["No matching imports or re-exports; no changes."];
+  if (request.mocks === "add") {
+    const added = addParallelMocks(context, mocks, request);
+    if (added.length) notes.push(`Added parallel mocks for ${request.to} in: ${added.join(", ")}. Review factory runtime compatibility.`);
+  } else if (mocks.length) {
+    notes.push(`Tests mocking ${request.from} import retargeted files: ${mocks.join(", ")}. Review mocks or use --mocks add.`);
+  }
+  return notes;
 }

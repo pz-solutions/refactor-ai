@@ -12,7 +12,7 @@ function parse(args: string[]): { command: string; operation?: string; flags: Re
   const command = args.shift() ?? "help";
   const operation = args[0] && !args[0].startsWith("--") ? args.shift() : undefined;
   const flags: Record<string, string> = {};
-  const allowed = new Set(["project", "file", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only"]);
+  const allowed = new Set(["project", "file", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks"]);
   const mappings: string[] = [];
   while (args.length) {
     const key = args.shift()!;
@@ -79,6 +79,7 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
     mode: flags.mode as "sort" | "remove-unused" | undefined, target: operation === "retarget-import" ? undefined : flags.to,
     from: flags.from, to: operation === "retarget-import" ? flags.to : undefined,
     map: flags.map === undefined ? undefined : parseMap(flags.map), only: flags.only?.split(","),
+    mocks: flags.mocks as "report" | "add" | undefined,
     targetProject: flags["target-project"], typeName: flags.type, rootNamespace: flags["root-namespace"],
   });
   const root = plan.request.root;

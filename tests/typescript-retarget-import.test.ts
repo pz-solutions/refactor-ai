@@ -232,3 +232,99 @@ test("CLI accepts repeated mappings, optional file scope, preview and duplicate-
   expect(duplicate.status).toBe(1);
   expect(duplicate.stderr).toContain("INVALID_ARGUMENT");
 }, 15000);
+
+const mockApi = 'declare const vi: { mock(path: string, factory?: () => unknown): void; doMock(path: string, factory?: () => unknown): void; unmock(path: string): void }; declare const jest: typeof vi; declare const vitest: typeof vi;\n';
+
+test("default mock reporting follows transitive callers outside selection without changing test files", async () => {
+  const p = await fixture({
+    "src/feature.ts": 'export { x } from "old-lib";',
+    "src/bridge.ts": 'export { x } from "./feature";',
+    "src/feature.test.ts": mockApi + 'vi.doMock("old-lib", () => ({ x: 0 })); import { x } from "./bridge"; export const seen = x;',
+    "src/unrelated.test.ts": mockApi + 'vi.mock("old-lib"); export const seen = 0;',
+    "src/not-mocked.test.ts": mockApi + 'vi.unmock("old-lib"); import { x } from "./bridge"; export const seen = x;',
+  });
+  const plan = await p.plan({ file: p.path("src/feature.ts") });
+  expect(plan.validation.status).toBe("passed");
+  expect(plan.changes.map(change => change.path)).toEqual([p.path("src/feature.ts")]);
+  expect(plan.notes.join(" ")).toContain(p.path("src/feature.test.ts"));
+  expect(plan.notes.join(" ")).not.toContain(p.path("src/unrelated.test.ts"));
+  expect(plan.notes.join(" ")).not.toContain(p.path("src/not-mocked.test.ts"));
+  const explicit = await p.plan({ file: p.path("src/feature.ts"), mocks: "report" });
+  expect(explicit.notes).toEqual(plan.notes);
+});
+
+for (const runner of ["vi", "vitest", "jest"]) test(`--mocks add clones every ${runner} registration with its factory and callee`, async () => {
+  const testFile = mockApi + `import { x } from "./feature";\r\n${runner}.mock('old-lib', () => ({ x: 0 })); // retain comment\r\nfunction test() {\r\n  ${runner}.doMock("old-lib", factory)\r\n}\r\nconst factory = () => ({ x: 1 });\r\nexport const seen = x;\r\n`;
+  const p = await fixture({ "src/feature.ts": 'export { x } from "old-lib";', "src/feature.test.ts": testFile });
+  const plan = await p.plan({ file: p.path("src/feature.ts"), mocks: "add" });
+  expect(plan.validation.status).toBe("passed");
+  const after = plan.changes.find(change => change.path === p.path("src/feature.test.ts"))!.after!;
+  expect(after).toContain(`${runner}.mock('old-lib', () => ({ x: 0 })); // retain comment\r\n${runner}.mock('new-lib', () => ({ x: 0 }));`);
+  expect(after).toContain(`  ${runner}.doMock("old-lib", factory)\r\n  ${runner}.doMock("new-lib", factory);`);
+  expect(plan.notes.join(" ")).toContain("Added parallel mocks");
+  expect(await readFile(p.path("src/feature.test.ts"), "utf8")).toBe(testFile);
+});
+
+test("mock addition handles no factory and skips a whole file that already mocks the destination", async () => {
+  const p = await fixture({
+    "src/feature.ts": 'export { x } from "old-lib";',
+    "src/covered.test.ts": mockApi + 'vi.mock("old-lib"); jest.doMock("new-lib"); import { x } from "./feature"; export const seen = x;',
+    "src/uncovered.test.ts": mockApi + 'vi.mock("old-lib"); import { x } from "./feature"; export const seen = x;',
+    "src/actual.test.ts": mockApi + 'vi.mock("old-lib"); vi.unmock("new-lib"); import { x } from "./feature"; export const seen = x;',
+  });
+  const plan = await p.plan({ file: p.path("src/feature.ts"), mocks: "add" });
+  expect(plan.validation.status).toBe("passed");
+  expect(plan.changes.some(change => change.path === p.path("src/covered.test.ts"))).toBe(false);
+  for (const name of ["uncovered", "actual"]) expect(plan.changes.find(change => change.path === p.path(`src/${name}.test.ts`))!.after).toContain('vi.mock("old-lib");\nvi.mock("new-lib");');
+});
+
+test("mock callers include dynamic imports and cycles but exclude unselected and mock-only edges", async () => {
+  const p = await fixture({
+    "src/feature.ts": 'export { x } from "old-lib"; export { other } from "./bridge";',
+    "src/bridge.ts": 'import { x } from "./feature"; export const other = () => x;',
+    "src/dynamic.test.ts": mockApi + 'vi.mock("old-lib"); export const load = () => import("./bridge");',
+    "src/mocks-only.test.ts": mockApi + 'vi.mock("old-lib"); vi.mock("./feature"); export {};',
+    "src/unselected.ts": 'export { x } from "old-lib";',
+    "src/unselected.test.ts": mockApi + 'vi.mock("old-lib"); import { x } from "./unselected"; export const seen = x;',
+  });
+  const plan = await p.plan({ file: p.path("src/feature.ts") });
+  expect(plan.notes.join(" ")).toContain(p.path("src/dynamic.test.ts"));
+  expect(plan.notes.join(" ")).not.toContain(p.path("src/mocks-only.test.ts"));
+  expect(plan.notes.join(" ")).not.toContain(p.path("src/unselected.test.ts"));
+});
+
+test("mock addition stays compiler validated and rejects expression-valued calls", async () => {
+  const p = await fixture({
+    "src/feature.ts": 'export { x } from "old-lib";',
+    "src/feature.test.ts": 'declare const vi: { mock(path: "old-lib", factory: () => unknown): void };\nvi.mock("old-lib", () => ({})); import { x } from "./feature"; export const seen = x;',
+  });
+  await expect(p.plan({ mocks: "add" })).rejects.toThrow("NEW_DIAGNOSTICS");
+  await writeFile(p.path("src/feature.test.ts"), mockApi + 'const call = vi.mock("old-lib"); import { x } from "./feature"; export const seen = x;');
+  await expect(p.plan({ mocks: "add" })).rejects.toThrow("UNSUPPORTED_MOCK_CALL");
+  expect((await p.plan()).notes.join(" ")).toContain("Tests mocking");
+});
+
+test("test-runner module-loading calls count as imports without treating registrations as imports", async () => {
+  const p = await fixture({
+    "src/feature.ts": 'export { x } from "old-lib";',
+    "src/actual.test.ts": 'declare const vi: { mock(path: string): void; importActual(path: string): Promise<unknown> };\nvi.mock("old-lib"); export const load = () => vi.importActual("./feature");',
+  });
+  const plan = await p.plan({ file: p.path("src/feature.ts"), mocks: "add" });
+  expect(plan.validation.status).toBe("passed");
+  expect(plan.changes.find(change => change.path === p.path("src/actual.test.ts"))!.after).toContain('vi.mock("new-lib");');
+});
+
+test("--mocks validates values and operation scope through API and CLI", async () => {
+  const p = await fixture({ "src/a.ts": 'export { x } from "old-lib";' });
+  await expect(p.plan({ mocks: "invalid" as "add" })).rejects.toThrow("INVALID_ARGUMENT");
+  await expect(p.plan({ operation: "format", file: p.path("src/a.ts"), from: undefined, to: undefined, mocks: "add" })).rejects.toThrow("mocks require retarget-import");
+  const cli = join(import.meta.dir, "../src/cli.ts");
+  const args = [cli, "plan", "retarget-import", "--project", p.path("tsconfig.json"), "--from", "old-lib", "--to", "new-lib", "--mocks", "add"];
+  const result = spawnSync("bun", args, { encoding: "utf8" });
+  expect(result.status).toBe(0);
+  const output = JSON.parse(result.stdout);
+  expect((await p.api.loadPlan(output.plan)).request.mocks).toBe("add");
+  const invalid = spawnSync("bun", [...args.slice(0, -1), "invalid"], { encoding: "utf8" });
+  expect(invalid.status).toBe(1);
+  expect(invalid.stderr).toContain("mocks report|add");
+});

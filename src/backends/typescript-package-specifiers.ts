@@ -11,7 +11,7 @@ interface Package {
   json: Record<string, unknown>;
 }
 
-function packageFor(ws: Workspace, file: string): Package | undefined {
+export function packageFor(ws: Workspace, file: string): Package | undefined {
   for (let directory = dirname(file); isInside(ws.root, directory); directory = dirname(directory)) {
     const path = resolve(directory, "package.json");
     const text = ws.vfs.readFile(path);
@@ -23,6 +23,13 @@ function packageFor(ws: Workspace, file: string): Package | undefined {
     if (ws.vfs.samePath(directory, ws.root)) break;
   }
   return undefined;
+}
+
+/** A bare self-import can become relative only when its resolved target belongs to the same package. */
+export function packageSelfImport(ws: Workspace, importer: string, target: string, specifier: string): boolean {
+  const pkg = packageFor(ws, importer);
+  return !!pkg && (specifier === pkg.name || specifier.startsWith(`${pkg.name}/`))
+    && packageFor(ws, target)?.path === pkg.path;
 }
 
 function strings(value: unknown): string[] {
