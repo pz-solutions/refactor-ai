@@ -12,6 +12,6 @@ export async function createInstalledRefactor(moduleUrl: string, operation: Oper
   // The compiler-backed module resolves dependencies inside the installed skill,
   // independently of the importing custom script's location.
   const { loadBackend } = await import(pathToFileURL(join(skillRoot, "assets", "runtime", "api.mjs")).href);
-  return createRefactorApi({ loadBackend, operation, language: operation.startsWith("extract-") ? "typescript" : operation === "sync-namespace" ? "csharp" : undefined,
+  return createRefactorApi({ loadBackend, operation, language: (operation.startsWith("extract-") || operation === "retarget-import") ? "typescript" : operation === "sync-namespace" ? "csharp" : undefined,
     toolkitRoot: join(skillRoot, "assets") });
 }

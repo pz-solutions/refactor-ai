@@ -139,7 +139,7 @@ async function canonicalRequest(request: RefactorRequest): Promise<RefactorReque
   const root = await realpath(request.root);
   const result: RefactorRequest = { ...request, root, project: await realpath(request.project), file: await realpath(request.file) };
   await assertRegularPath(root, result.project);
-  await assertRegularPath(root, result.file);
+  await assertRegularPath(root, result.file, false, request.operation === "retarget-import");
   if (request.targetProject !== undefined) {
     result.targetProject = await realpath(request.targetProject);
     await assertRegularPath(root, result.targetProject);

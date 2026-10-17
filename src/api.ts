@@ -11,11 +11,16 @@ export type { Capability, Diagnostic, FileChange, Operation } from "./types.ts";
 
 export interface PlanOptions {
   project: string;
-  file: string;
+  file?: string;
   /** Defaults to the project configuration's directory. Must cover all changed files. */
   root?: string;
   /** Required for the aggregate API; operation packages select their own operation. */
   operation?: Operation;
+  /** Exact source/destination module specifiers for retarget-import. */
+  from?: string;
+  to?: string;
+  map?: Record<string, string>;
+  only?: string[];
   /** A 1-based UTF-16 line:column string or a zero-based UTF-16 offset. */
   at?: string | number;
   /** Exclusive extraction end, using the same coordinates as at. */
@@ -93,10 +98,15 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         if ((options.target !== undefined || options.targetProject !== undefined) && operation !== "move-type") {
           throw new Error("INVALID_ARGUMENT: target and targetProject require move-type");
         }
+        if (operation === "retarget-import" && (!options.from || !options.to)) throw new Error("INVALID_ARGUMENT: from and to required for retarget-import");
+        if (operation !== "retarget-import" && [options.from, options.to, options.map, options.only].some(value => value !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: from, to, map and only require retarget-import");
+        }
+        if (!options.file && operation !== "retarget-import") throw new Error("INVALID_ARGUMENT: file required");
         const project = await realpath(resolve(options.project));
-        const file = await realpath(resolve(options.file));
+        const file = await realpath(resolve(options.file ?? dirname(project)));
         const root = await realpath(resolve(options.root ?? dirname(project)));
-        const text = await readFile(file, "utf8");
+        const text = operation === "retarget-import" ? "" : await readFile(file, "utf8");
         const position = (point: string | number): number => {
           if (typeof point === "string") return offset(text, point);
           if (!Number.isInteger(point) || point < 0 || point > text.length) throw new Error(`INVALID_POSITION: ${point}`);
@@ -104,6 +114,9 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         };
         const request: RefactorRequest = {
           project, root, file, operation,
+          ...(operation === "retarget-import" ? { from: options.from, to: options.to,
+            ...(options.map ? { map: options.map } : {}), ...(options.only ? { only: options.only } : {}),
+            ...(!options.file ? { projectScope: true } : {}) } : {}),
           ...(options.at !== undefined ? { position: position(options.at) } : {}),
           ...(options.end !== undefined ? { end: position(options.end) } : {}),
           ...(options.name !== undefined ? { newName: options.name } : {}),

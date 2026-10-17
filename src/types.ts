@@ -1,10 +1,18 @@
-export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type";
+export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "retarget-import";
 
 export interface RefactorRequest {
   project: string;
   root: string;
   file: string;
   operation: Operation;
+  /** Module specifiers for retarget-import; exact matches only. */
+  from?: string;
+  to?: string;
+  /** Imported export names, before mapping, to their destination names. */
+  map?: Record<string, string>;
+  only?: string[];
+  /** Internal marker: file defaults to project directory when scope is omitted. */
+  projectScope?: boolean;
   position?: number;
   end?: number;
   newName?: string;

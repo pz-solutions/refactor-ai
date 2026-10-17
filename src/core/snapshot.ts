@@ -27,7 +27,8 @@ export function inside(root: string, file: string): string {
   return result;
 }
 
-export async function assertRegularPath(root: string, file: string, allowMissing = false): Promise<void> {
+export async function assertRegularPath(root: string, file: string, allowMissing = false, allowDirectory = false): Promise<void> {
+  if (allowDirectory && resolve(file) === root && (await lstat(root)).isDirectory()) return;
   const target = inside(root, file);
   const parts = relative(root, target).split(sep);
   let current = root;
@@ -42,7 +43,7 @@ export async function assertRegularPath(root: string, file: string, allowMissing
       throw error;
     }
     if (stat.isSymbolicLink()) throw new Error(`SYMLINK_UNSUPPORTED: ${current}`);
-    if (i === parts.length - 1 && !stat.isFile()) throw new Error(`NOT_A_FILE: ${current}`);
+    if (i === parts.length - 1 && !stat.isFile() && !(allowDirectory && stat.isDirectory())) throw new Error(`NOT_A_FILE: ${current}`);
     if (i < parts.length - 1 && !stat.isDirectory()) throw new Error(`NOT_A_DIRECTORY: ${current}`);
   }
 }
