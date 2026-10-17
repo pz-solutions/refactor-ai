@@ -12,7 +12,7 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 - Also: the snapshot walked ignored build caches (`.next`, `.wrangler`, `test-results`, …) on every plan/validate/apply.
 - Fix (`fix: snapshot monorepos…`): inside Git, fingerprint tracked + unignored files only; record symlinks by link text. Writes through symlinks are still rejected (plan-time `assertRegularPath`, apply-time staleness).
 
-### F2. Monorepo scope needs `--root <repo>` — open (UX)
+### F2. Monorepo scope needs `--root <repo>` — fixed (hint)
 - `plan rename --project apps/web/tsconfig.json` fails with `PROJECT_SCOPE_INCOMPLETE` listing ~100 files from sibling packages (resolved through workspace symlinks). The fix is `--root .`, but the error does not say so.
 - Proposal: when out-of-root files come from workspace packages, suggest the workspace root (nearest `package.json` with `workspaces`) in the error.
 

@@ -12,17 +12,7 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
-var __esm = (fn, res, err) => () => {
-  if (fn)
-    try {
-      res = fn(fn = 0);
-    } catch (e) {
-      err = [e];
-    }
-  if (err)
-    throw err[0];
-  return res;
-};
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // src/backends/typescript-paths.ts
 import { isAbsolute, relative, sep } from "node:path";
@@ -902,7 +892,7 @@ class Workspace {
     const vfs = this.vfs;
     return {
       getSourceFile: (fileName, settings) => this.sourceFile(fileName, settings, options),
-      getDefaultLibFileName: (options) => ts2.getDefaultLibFilePath(options),
+      getDefaultLibFileName: (options2) => ts2.getDefaultLibFilePath(options2),
       writeFile: () => {},
       getCurrentDirectory: () => dirname2(configPath),
       getCanonicalFileName: (fileName) => vfs.caseSensitive ? fileName : fileName.toLowerCase(),
@@ -1195,7 +1185,7 @@ function selectType(context, request) {
   const { sourceFile, isJs } = context;
   const types = declaredTypes(sourceFile, isJs);
   const namespaced = namespaceMembers(sourceFile);
-  const named = (name) => types.filter((declaration) => declaration.name?.getText(sourceFile) === name);
+  const named = (name2) => types.filter((declaration) => declaration.name?.getText(sourceFile) === name2);
   let name = request.typeName;
   if (request.position !== undefined) {
     if (!Number.isInteger(request.position) || request.position < 0 || request.position > sourceFile.text.length) {
@@ -1661,13 +1651,13 @@ function moveType(context, request) {
     if (owners.length !== 1 || !ws.vfs.samePath(owners[0], ws.targetConfig)) {
       fail("TARGET_NOT_IN_PROJECT", `${target} must belong to exactly ${ws.targetConfig}; owners: ${owners.join(", ") || "none"}`);
     }
-    const targetSource = program.getSourceFile(target);
-    if (!ts3.isExternalModule(targetSource))
+    const targetSource2 = program.getSourceFile(target);
+    if (!ts3.isExternalModule(targetSource2))
       fail("MODULE_REQUIRED", `${target} is not an ES module`);
-    if (isJs && usesCommonJs(targetSource))
+    if (isJs && usesCommonJs(targetSource2))
       fail("COMMONJS_UNSUPPORTED", `${target} uses CommonJS`);
-    const existing = topLevelNames(targetSource).get(name);
-    const importsMoved = existing && ts3.isImportDeclaration(existing) && ts3.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource)?.resolvedFileName ?? "", file);
+    const existing = topLevelNames(targetSource2).get(name);
+    const importsMoved = existing && ts3.isImportDeclaration(existing) && ts3.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource2)?.resolvedFileName ?? "", file);
     if (existing && !importsMoved)
       fail("TARGET_CONFLICT", `${target} already declares ${name}`);
   }
@@ -2011,7 +2001,7 @@ function diagnosticRecord(diagnostic, fallback) {
 `)
   };
 }
-function diagnostics(state) {
+function diagnostics(state, only) {
   const records = [];
   const add = (diagnostic) => {
     if (diagnostic.category !== ts4.DiagnosticCategory.Error)
@@ -2021,13 +2011,80 @@ function diagnostics(state) {
   for (const item of state.service.getCompilerOptionsDiagnostics())
     add(item);
   const programFiles = state.service.getProgram()?.getSourceFiles().map((source) => canonical(source.fileName)).filter((path) => isInside(state.root, path) && !path.includes("/node_modules/")) ?? state.fileNames;
-  for (const file of [...new Set(programFiles)].sort()) {
+  for (const file of [...new Set(programFiles)].filter((path) => !only || only.has(path)).sort()) {
     for (const item of state.service.getSyntacticDiagnostics(file))
       add(item);
     for (const item of state.service.getSemanticDiagnostics(file))
       add(item);
   }
   return records.sort((a, b) => a.file.localeCompare(b.file) || a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
+}
+function importersByFile(state) {
+  const program = state.service.getProgram();
+  const host = ts4.sys;
+  const cache = ts4.createModuleResolutionCache(dirname4(state.configPath), (name) => host.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
+  const importers2 = new Map;
+  const link = (target, importer) => {
+    if (!isInside(state.root, target) || target.includes("/node_modules/"))
+      return;
+    const set = importers2.get(target) ?? new Set;
+    set.add(importer);
+    importers2.set(target, set);
+  };
+  for (const source of program.getSourceFiles()) {
+    const file = canonical(source.fileName);
+    if (!isInside(state.root, file) || file.includes("/node_modules/"))
+      continue;
+    for (const specifier of moduleSpecifiers(source)) {
+      const mode = program.getModeForUsageLocation(source, specifier);
+      const resolved = ts4.resolveModuleName(specifier.text, file, state.options, host, cache, undefined, mode).resolvedModule;
+      if (resolved)
+        link(canonical(resolved.resolvedFileName), file);
+    }
+    for (const reference of source.referencedFiles)
+      link(canonical(resolve4(dirname4(file), reference.fileName)), file);
+  }
+  return importers2;
+}
+function hasGlobalEffect(text, path) {
+  const source = ts4.createSourceFile(path, text, ts4.ScriptTarget.Latest, false);
+  if (!ts4.isExternalModule(source))
+    return true;
+  return source.statements.some((statement) => ts4.isModuleDeclaration(statement) && (ts4.isStringLiteral(statement.name) || (statement.flags & ts4.NodeFlags.GlobalAugmentation) !== 0));
+}
+function affectedFiles(state, importers2, originals) {
+  const changed = [...state.overlays.keys()].filter((path) => originals.get(path) !== state.overlays.get(path));
+  for (const path of changed) {
+    if (!/\.[cm]?[jt]sx?$/i.test(path) || /\.d\.[cm]?ts$/i.test(path))
+      return;
+    for (const text of [originals.get(path), state.overlays.get(path)])
+      if (text !== undefined && hasGlobalEffect(text, path))
+        return;
+  }
+  const affected = new Set;
+  const pending = [...changed];
+  while (pending.length) {
+    const path = pending.pop();
+    if (affected.has(path))
+      continue;
+    affected.add(path);
+    pending.push(...importers2.get(path) ?? []);
+  }
+  return affected;
+}
+function originalDiagnostics(state, only) {
+  const saved = new Map(state.overlays);
+  for (const path of saved.keys()) {
+    state.overlays.delete(path);
+    state.versions.set(path, (state.versions.get(path) ?? 0) + 1);
+  }
+  state.bumpProjectVersion();
+  try {
+    return diagnostics(state, only);
+  } finally {
+    for (const [path, text] of saved)
+      setOverlay(state, path, text);
+  }
 }
 function validatePosition(text, position, label = "position") {
   if (!Number.isInteger(position) || position < 0 || position > text.length) {
@@ -2166,8 +2223,8 @@ function extraction(state, file, request) {
   applyFileEdits(state, result.edits);
   if (result.renameLocation === undefined)
     fail2("REFACTOR_UNAVAILABLE", "TypeScript did not provide a semantic rename location for the extraction");
-  const renameFile = canonical(result.renameFilename ?? file);
-  rename(state, renameFile, { ...request, operation: "rename", file: renameFile, position: result.renameLocation });
+  const renameFile2 = canonical(result.renameFilename ?? file);
+  rename(state, renameFile2, { ...request, operation: "rename", file: renameFile2, position: result.renameLocation });
 }
 function changedFiles(state, originals) {
   return [...state.overlays].filter(([path, after]) => originals.get(path) !== after).sort(([a], [b]) => a.localeCompare(b)).map(([path, after]) => ({ path, before: originals.get(path) ?? null, after }));
@@ -2197,7 +2254,7 @@ async function analyze(request) {
     if (outsideUserSources.length) {
       fail2("PROJECT_SCOPE_INCOMPLETE", `program contains user source outside ${state.root}: ${outsideUserSources.join(", ")}`);
     }
-    const diagnosticsBefore = diagnostics(state);
+    const importers2 = importersByFile(state);
     const originals = new Map;
     for (const path of state.fileNames)
       originals.set(path, sourceText(state, path));
@@ -2221,7 +2278,9 @@ async function analyze(request) {
     for (const path of state.overlays.keys())
       if (!originals.has(path))
         originals.set(path, ts4.sys.readFile(path));
-    const diagnosticsAfter = diagnostics(state);
+    const affected = affectedFiles(state, importers2, originals);
+    const diagnosticsBefore = originalDiagnostics(state, affected);
+    const diagnosticsAfter = diagnostics(state, affected);
     const beforeCounts = new Map;
     for (const item of diagnosticsBefore) {
       const key = `${item.file}\x00${item.code}\x00${item.message}`;
@@ -2238,6 +2297,8 @@ async function analyze(request) {
     if (introduced.length)
       fail2("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.message}`).join("; "));
     const notes = [];
+    if (affected)
+      notes.push(`Validated ${affected.size} affected file(s): the changed files and their transitive importers.`);
     if (request.operation === "imports") {
       notes.push(request.mode === "sort" ? "Sorting imports can reorder module initialization; verify application behavior." : "Removing unused value imports can remove module initialization; bare side-effect imports are retained.");
     }
@@ -2259,6 +2320,7 @@ async function analyze(request) {
 var capabilities, formatOptions;
 var init_typescript = __esm(() => {
   init_typescript_fileops();
+  init_typescript_workspace();
   init_typescript_paths();
   capabilities = [
     { operation: "rename", description: "Rename a TypeScript or JavaScript symbol across its configured project." },
@@ -2287,6 +2349,11 @@ var init_typescript = __esm(() => {
 });
 
 // src/backends/csharp.ts
+var exports_csharp = {};
+__export(exports_csharp, {
+  analyze: () => analyze2,
+  capabilities: () => capabilities2
+});
 import { basename as basename4, dirname as dirname5, isAbsolute as isAbsolute4, join, relative as relative5, resolve as resolve5, sep as sep4 } from "node:path";
 import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -2505,8 +2572,8 @@ function languageForProject(project) {
 var loadBackend = async (project, toolkitRoot) => {
   if (languageForProject(project) !== "csharp")
     return Promise.resolve().then(() => (init_typescript(), exports_typescript));
-  const backend = await Promise.resolve().then(() => (init_csharp(), {}));
-  return { capabilities: capabilities2, analyze: (request) => analyze2(request, toolkitRoot) };
+  const backend = await Promise.resolve().then(() => (init_csharp(), exports_csharp));
+  return { capabilities: backend.capabilities, analyze: (request) => backend.analyze(request, toolkitRoot) };
 };
 export {
   loadBackend
