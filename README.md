@@ -13,6 +13,7 @@ Deterministic refactorings exposed through skills and a CLI written in TypeScrip
 | Extract function | Yes, engine-provided action | Not yet |
 | Extract variable / constant | Yes, engine-provided action | Not yet |
 | Move a type between directories / projects | Yes, TypeScript's “Move to file” action | Yes, Roslyn with planned `.csproj` edits |
+| Move whole modules or directories between workspace packages | Yes, including package exports and import updates | Not yet |
 | Match a filename to its declared type | Yes, including import updates | Yes, including explicit `Compile` entries |
 | Match a namespace to the project structure | Not applicable to ES modules | Yes, including semantic reference updates |
 
@@ -87,6 +88,8 @@ node dist/cli.js plan move-type --project ./Workspace.sln --root . \
   --target-project ./Destination/Destination.csproj
 ```
 
+`move-file` moves a whole file or directory, including non-source text files, with `--to` and optional `--target-project`. Cross-package callers use declared package exports; missing exact entries are planned in package.json. Importer packages must already declare the target dependency. Source-project aliases between moved files become relative imports; unresolved aliases fail with a diagnostic hint. Directory moves preserve relative layout and file modes. Symlinks and non-UTF-8 assets are rejected.
+
 `--to` specifies the destination file, including one in a directory that does not exist yet. For cross-project moves, `--target-project` identifies the destination `.csproj` or TS/JS configuration; `--root` must cover all changes. Plans that create or delete files use schemaVersion 2; legacy version 1 edit plans remain supported. `preview` also shows created and deleted files, and apply records a journal and rolls back its own changes on failure.
 
 C# moves update namespaces that follow the project's folder convention. Custom namespaces are preserved unless you supply `--root-namespace`. Namespace synchronization affects the selected file and its references, leaving other files in their existing namespace. Moving a C# type between projects changes its assembly; dependencies on reflection and assembly-qualified names need separate verification.
@@ -107,7 +110,7 @@ Read the [programmatic interface](docs/api.md) for installed-skill imports, all 
 
 ## npm CLI packages
 
-Build fourteen independently publishable packages: the complete `@refactor-ai/cli`, seven `@refactor-ai/ts-<operation>` tools for TypeScript/JavaScript, and six `@refactor-ai/csharp-<operation>` tools for C#. Each declares a single executable in npm's `bin` field. The author checkout remains private.
+Build fifteen independently publishable packages: the complete `@refactor-ai/cli`, eight `@refactor-ai/ts-<operation>` tools for TypeScript/JavaScript, and six `@refactor-ai/csharp-<operation>` tools for C#. Each declares a single executable in npm's `bin` field. The author checkout remains private.
 
 ```sh
 bun run package:npm
@@ -136,7 +139,7 @@ npx --yes file:/tmp/refactor-ai-ts-rename-0.1.3.tgz --help
 
 See [npm packaging and publishing](docs/npm-packages.md) for package names, local installation, publication and versioning. `bun run test:npm` tests actual packed archives through npx, including complete TS, JS and C# workflows.
 
-All fourteen npm packages share the version in the author `package.json`. After building, use `bun run version:packages patch --dry-run` to preview a bump, or `bun run version:packages --help` for minor/major and beta/RC examples. Release tags must match `v<version>`; stable releases use `latest` and prereleases use `next`. The publisher checks registry versions and refuses to move those channels backwards. See the [release procedure](docs/github-actions.md#release-a-version).
+All fifteen npm packages share the version in the author `package.json`. After building, use `bun run version:packages patch --dry-run` to preview a bump, or `bun run version:packages --help` for minor/major and beta/RC examples. Release tags must match `v<version>`; stable releases use `latest` and prereleases use `next`. The publisher checks registry versions and refuses to move those channels backwards. See the [release procedure](docs/github-actions.md#release-a-version).
 
 ## Skills
 
@@ -150,6 +153,7 @@ Ready-to-use runner instructions are included in the repository:
 - [refactor-rename-file](skills/refactor-rename-file/SKILL.md)
 - [refactor-sync-namespace](skills/refactor-sync-namespace/SKILL.md)
 - [refactor-move-type](skills/refactor-move-type/SKILL.md)
+- [refactor-move-file](skills/refactor-move-file/SKILL.md)
 
 Each skill is a self-contained directory with `SKILL.md`, a Node launcher in `scripts/refactor.mjs`, and the built CLI and npm lockfile in `assets/runtime/`. Skills supporting C# also include Roslyn helper sources in `assets/dotnet/`. They depend on files within their own directory and can run independently of the original checkout.
 
@@ -171,16 +175,16 @@ You can also invoke an installed skill directly:
 node .agents/skills/refactor-rename/scripts/refactor.mjs capabilities --project ./tsconfig.json
 ```
 
-For authors: `bun run package:skills` rebuilds the CLI and refreshes the resources for all eight skills. Include the generated `scripts/` and `assets/` directories in each distributed skill, excluding local caches such as `node_modules`, `bin`, `obj` and `.setup.lock`. `SKILL.md` alone cannot execute a refactoring. `bun run build` also refreshes these resources.
+For authors: `bun run package:skills` rebuilds the CLI and refreshes the resources for all nine skills. Include the generated `scripts/` and `assets/` directories in each distributed skill, excluding local caches such as `node_modules`, `bin`, `obj` and `.setup.lock`. `SKILL.md` alone cannot execute a refactoring. `bun run build` also refreshes these resources.
 
 ## MVP guarantees and limitations
 
 - Planning transforms code in memory and compares compiler errors before and after the change. `validate` checks snapshot freshness and the stored analysis result; it does not automatically run an arbitrary project's tests. The demo and regression tests separately verify example behavior.
 - Apply executes the exact stored plan and rejects changed snapshots and new errors. The snapshot covers regular files under the root, excluding `.git`, `node_modules`, `bin`, `obj`, `dist` and `.refactor-ai`. Dependencies are represented by manifests and lockfiles; changes to libraries outside the root are not fully fingerprinted.
 - Rename uses symbols and references. Comments and strings remain unchanged; API consumers outside the loaded project, reflection and dynamic JS references are not automatically updated.
-- TS `rename-file` and `move-type` validate the source and destination configurations and the loaded project-reference graph, with declarations built in memory. Other TS operations still reject project references. C# analyzes the loaded MSBuild configuration rather than every possible compilation condition; select a `.sln` to include dependent projects.
+- TS `rename-file`, `move-type` and `move-file` validate the source and destination configurations and the loaded project-reference graph, with declarations built in memory. Other TS operations still reject project references. C# analyzes the loaded MSBuild configuration rather than every possible compilation condition; select a `.sln` to include dependent projects.
 - Additional TS/JS configurations beside a participating project, such as `tsconfig.build.json`, are updated and validated when they cover the affected file. Discovered callers importing that file also join the analysis. Other configurations covering it cause rejection rather than leaving unchecked changes.
-- TS/JS moves support declarations in ES modules; CommonJS source code, merged declarations and types inside namespaces are rejected. Compiling ES modules to CommonJS is supported. Projects in the shared analysis must have compatible module-resolution options.
+- TS/JS type moves support declarations in ES modules; CommonJS source code, merged declarations and types inside namespaces are rejected. Compiling ES modules to CommonJS is supported. Projects in the shared analysis must have compatible module-resolution options.
 - C# type moves and namespace changes reject, among other cases, partial declarations spread across files, conditional compilation, and multiple or nested namespaces. `.csproj` edits support standard SDK globbing or explicit, unconditional `Compile` entries; unknown MSBuild rules, dependency cycles and new compiler errors cause plan rejection.
 - C# type moves retain source-project global using directives, including when the moved type was the file's only declaration. Required new project references are inserted unconditionally. Helper discovery uses the selected toolkit directory; it never executes a helper found in the analyzed project's working directory.
 - TS/JS type moves reject effectful static initializers, static blocks, decorators, computed members, evaluated base-class expressions, nonconstant enum initializers and new module cycles for runtime classes. Simple identifier base classes and primitive constant initializers are supported. Compiler checks do not prove whole-program behavior equivalence; run application tests after a move.

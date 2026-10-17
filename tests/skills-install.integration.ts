@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let workspace: string;
-const names = ["refactor-rename", "refactor-imports", "refactor-format", "refactor-extract-function", "refactor-extract-variable", "refactor-rename-file", "refactor-sync-namespace", "refactor-move-type"];
+const names = ["refactor-rename", "refactor-imports", "refactor-format", "refactor-extract-function", "refactor-extract-variable", "refactor-rename-file", "refactor-sync-namespace", "refactor-move-type", "refactor-move-file"];
 
 function run(command: string, args: string[], cwd = workspace): string {
   const result = spawnSync(command, args, {
@@ -40,7 +40,7 @@ afterAll(async () => {
   if (workspace) await rm(workspace, { recursive: true, force: true });
 });
 
-test("npx skills copies all eight independent skills and each launcher sets up a locked Node runtime", async () => {
+test("npx skills copies all nine independent skills and each launcher sets up a locked Node runtime", async () => {
   for (const name of names) {
     const skill = join(workspace, ".agents", "skills", name);
     const instructions = await readFile(join(skill, "SKILL.md"), "utf8");

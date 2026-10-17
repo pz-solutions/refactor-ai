@@ -1,12 +1,14 @@
 import ts from "typescript";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { BackendResult, Capability, Diagnostic, RefactorRequest } from "../types";
 import { eolOf, fail, isInside, withEol } from "./typescript-vfs";
 import { Workspace, applyTextChanges, baseFormatOptions, configPathFor, moduleSpecifiers, scriptKindFor } from "./typescript-workspace";
+import { packageSpecifier, relativeStyle } from "./typescript-package-specifiers";
 import { portablePath } from "./typescript-paths";
 
 export const fileCapabilities: Capability[] = [
+  { operation: "move-file", description: "Move whole TS/JS modules or directories within or between workspace packages, updating imports, exports and project file lists." },
   {
     operation: "rename-file",
     description: "Rename a TS/JS file after its declared type (TS class, interface, type alias or enum; JS class), updating imports in all projects that reference it.",
@@ -46,6 +48,8 @@ interface Context {
   sourceFile: ts.SourceFile;
   isJs: boolean;
   notes: string[];
+  verify?: () => void;
+  aliasHints?: string[];
 }
 
 function assertAbsolute(name: string, value: string | undefined): string {
@@ -182,16 +186,17 @@ interface Gains {
   may: string[];
 }
 
-function assertMembership(ws: Workspace, before: Map<string, string[]>, renames: [string, string][], deletions: string[], gains?: Gains): void {
+function assertMembership(ws: Workspace, before: Map<string, string[]>, renames: [string, string][], deletions: string[], gains?: Gains | Gains[]): void {
   const vfs = ws.vfs;
   const renameMap = new Map(renames.map(([from, to]) => [vfs.key(from), vfs.key(to)]));
   const deleted = new Set(deletions.map((path) => vfs.key(path)));
   for (const [config, files] of before) {
     const expected = files.filter((key) => !deleted.has(key)).map((key) => renameMap.get(key) ?? key);
     const actual = ws.fileNames(config).map((path) => vfs.key(path)).sort();
-    if (gains && !expected.includes(vfs.key(gains.path))) {
-      const must = gains.must.some((item) => vfs.samePath(item, config));
-      if (must || (gains.may.some((item) => vfs.samePath(item, config)) && actual.includes(vfs.key(gains.path)))) expected.push(vfs.key(gains.path));
+    for (const gain of gains ? Array.isArray(gains) ? gains : [gains] : []) {
+      if (expected.includes(vfs.key(gain.path))) continue;
+      const must = gain.must.some((item) => vfs.samePath(item, config));
+      if (must || (gain.may.some((item) => vfs.samePath(item, config)) && actual.includes(vfs.key(gain.path)))) expected.push(vfs.key(gain.path));
     }
     expected.sort();
     const added = actual.filter((key) => !expected.includes(key));
@@ -206,20 +211,25 @@ function assertMembership(ws: Workspace, before: Map<string, string[]>, renames:
 }
 
 /** Importer multiset (by importing file) of module specifiers and reference paths that resolve to path. */
-function importers(ws: Workspace, path: string): string[] {
-  const found: string[] = [];
+function importerMap(ws: Workspace, paths: string[]): Map<string, string[]> {
+  const found = new Map(paths.map(path => [ws.vfs.key(path), [] as string[]]));
   for (const file of userFiles(ws)) {
     const sourceFile = parseFile(ws, file);
     if (!sourceFile) continue;
     for (const specifier of moduleSpecifiers(sourceFile)) {
       const resolved = ws.resolveModule(specifier, sourceFile);
-      if (resolved && ws.vfs.samePath(resolved.resolvedFileName, path)) found.push(ws.vfs.key(file));
+      if (resolved) found.get(ws.vfs.key(resolved.resolvedFileName))?.push(ws.vfs.key(file));
     }
     for (const reference of sourceFile.referencedFiles) {
-      if (ws.vfs.samePath(resolve(dirname(file), reference.fileName), path)) found.push(ws.vfs.key(file));
+      found.get(ws.vfs.key(resolve(dirname(file), reference.fileName)))?.push(ws.vfs.key(file));
     }
   }
-  return found.sort();
+  for (const files of found.values()) files.sort();
+  return found;
+}
+
+function importers(ws: Workspace, path: string): string[] {
+  return importerMap(ws, [path]).get(ws.vfs.key(path))!;
 }
 
 function nodeAt(sourceFile: ts.SourceFile, position: number): ts.Node {
@@ -288,6 +298,10 @@ function specifierLike(from: string, to: string, original: string, originalTarge
   }
   const written = extname(original);
   const targetExtension = extname(to);
+  if (![...tsExtensions, ...jsExtensions].includes(targetExtension)) {
+    const path = portablePath(relative(dirname(from), to));
+    return path.startsWith(".") ? path : `./${path}`;
+  }
   let extension = "";
   if ([...tsExtensions, ...jsExtensions].includes(written)) {
     extension = written === extname(originalTarget) ? targetExtension
@@ -359,7 +373,7 @@ function moduleEdges(ws: Workspace, files: string[], owners: (path: string) => s
     const options = ws.participant(from[0]!).parsed.options;
     for (const specifier of moduleSpecifiers(sourceFile)) {
       const resolved = ws.resolveModule(specifier, sourceFile, options);
-      if (!resolved || resolved.isExternalLibraryImport) continue;
+      if (!resolved) continue;
       const target = resolve(resolved.resolvedFileName);
       if (!isInside(ws.root, target) || target.split(sep).includes("node_modules") || ws.vfs.isHidden(target)) continue;
       edges.push({ file, target, from, to: owners(target) });
@@ -654,6 +668,177 @@ function moveType(context: Context, request: RefactorRequest): void {
   }
 }
 
+/** Enumerate actual files, including assets; unsupported encodings and symlinks fail before any overlay edits. */
+function movePaths(root: string, file: string, target: string): [string, string][] {
+  if (!isInside(root, target)) fail("OUTSIDE_ROOT", `target is outside ${root}`);
+  let stat;
+  try { stat = lstatSync(file); } catch { fail("FILE_NOT_FOUND", file); }
+  if (stat.isSymbolicLink()) fail("SYMLINK_UNSUPPORTED", file);
+  if (stat.isFile()) {
+    if (extname(file) !== extname(target)) fail("UNSUPPORTED_TARGET", "move-file must retain the file extension");
+    return [[file, target]];
+  }
+  if (!stat.isDirectory()) fail("UNSUPPORTED_FILE", file);
+  if (isInside(file, target) || isInside(target, file)) fail("INVALID_REQUEST", "source and destination directories must not overlap");
+  const paths: [string, string][] = [];
+  const visit = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = resolve(directory, entry.name);
+      if (entry.isSymbolicLink()) fail("SYMLINK_UNSUPPORTED", path);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.isFile()) paths.push([path, resolve(target, relative(file, path))]);
+      else fail("UNSUPPORTED_FILE", path);
+    }
+  };
+  visit(file);
+  if (!paths.length) fail("EMPTY_DIRECTORY", `${file} contains no files`);
+  return paths;
+}
+
+interface RelocatedImport {
+  file: string;
+  index: number;
+  target: string;
+  original: string;
+  alias: boolean;
+}
+
+/** Resolve before relocation, using each importer's own config rather than the union service's paths aliases. */
+function relocationImports(ws: Workspace, renames: [string, string][]): RelocatedImport[] {
+  const moved = new Set(renames.map(([from]) => ws.vfs.key(from)));
+  const imports: RelocatedImport[] = [];
+  for (const file of userFiles(ws)) {
+    const source = parseFile(ws, file);
+    if (!source) continue;
+    const owner = ws.ownersOf(file)[0];
+    const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
+    moduleSpecifiers(source).forEach((specifier, index) => {
+      const resolved = ws.resolveModule(specifier, source, options);
+      if (!resolved) return;
+      const target = resolve(resolved.resolvedFileName);
+      if (!moved.has(ws.vfs.key(file)) && !moved.has(ws.vfs.key(target))) return;
+      const alias = Object.keys(options.paths ?? {}).some(pattern => {
+        const [prefix, suffix] = pattern.split("*");
+        return pattern.includes("*") ? specifier.text.startsWith(prefix!) && specifier.text.endsWith(suffix!) : pattern === specifier.text;
+      });
+      imports.push({ file, index, target, original: specifier.text, alias });
+    });
+  }
+  return imports;
+}
+
+function moveFile(context: Context, request: RefactorRequest, renames: [string, string][]): void {
+  const { ws, root, file } = context;
+  const target = assertAbsolute("target", request.target);
+  const directory = lstatSync(file).isDirectory();
+  if (ws.vfs.samePath(file, target)) fail("INVALID_REQUEST", "target must differ from the source");
+  if (ws.vfs.fileExists(target) || (!directory && ws.vfs.directoryExists(target))) fail("TARGET_EXISTS", target);
+  for (const [from, to] of renames) {
+    if (ws.vfs.fileExists(to) || ws.vfs.directoryExists(to)) fail("TARGET_EXISTS", to);
+    assertCaseSafe(root, to);
+    const bytes = readFileSync(from);
+    if (!Buffer.from(bytes.toString("utf8")).equals(bytes)) fail("UNSUPPORTED_ENCODING", `${from}: move-file plans require UTF-8 text`);
+  }
+  const before = membership(ws);
+  const beforeOwners = new Map<string, string[]>();
+  for (const [config, keys] of before) {
+    if (ws.isObserver(config)) continue;
+    for (const key of keys) beforeOwners.set(key, [...(beforeOwners.get(key) ?? []), config]);
+  }
+  const graphBefore = projectGraph(ws, userFiles(ws), path => ws.ownersOf(path));
+  const imports = relocationImports(ws, renames);
+  const mapping = new Map(renames.map(([from, to]) => [ws.vfs.key(from), to]));
+  const relocated = (path: string) => mapping.get(ws.vfs.key(path)) ?? path;
+  const styleCache = new Map<string, string | null>();
+  const styles = new Map(imports.filter(edge => mapping.has(ws.vfs.key(edge.target)))
+    .map(edge => [edge, relativeStyle(ws, relocated(edge.target), edge.original, styleCache)]));
+  const beforeImporters = importerMap(ws, renames.map(([from]) => from));
+  const expectedImporters = new Map(renames.map(([from, to]) => [to, beforeImporters.get(ws.vfs.key(from))!.map(relocated).map(path => ws.vfs.key(path)).sort()]));
+  applyEdits(context, ws.service.getEditsForFileRename(file, target, formatFor(context.sourceFile.text), preferencesFor(ws)));
+  for (const [from, to] of renames) {
+    const text = ws.vfs.readFile(from)!;
+    const bom = ws.vfs.hasBom(from);
+    ws.vfs.write(from, null);
+    ws.vfs.write(to, text, bom);
+  }
+
+  const sameProject = ws.vfs.samePath(ws.sourceConfig, ws.targetConfig);
+  const configRenames: [string, string][] = directory ? [[file, target], ...renames] : renames;
+  const substitutions = new Map<string, [string, string][]>();
+  // A source config loses moved files across projects; target variants retain explicit lists via substitutions.
+  if (!sameProject) for (const item of ws.participants.values()) {
+    if (ws.vfs.samePath(dirname(item.configPath), dirname(ws.targetConfig))) substitutions.set(ws.vfs.key(item.configPath), configRenames);
+  }
+  ws.updateConfigLists(sameProject ? configRenames : [], sameProject ? [] : configRenames.map(([from]) => from), substitutions);
+  ws.reparse();
+  const sourceRenames = renames.filter(([from]) => [...before.values()].some(files => files.includes(ws.vfs.key(from))));
+  const siblings = ws.observers().filter(config => ws.vfs.samePath(dirname(config), dirname(ws.targetConfig)));
+  for (const [, to] of sourceRenames) {
+    if (!ws.fileNames(ws.targetConfig).some(path => ws.vfs.samePath(path, to))) {
+      if (!ws.addToFiles(ws.targetConfig, to)) fail("TARGET_NOT_IN_PROJECT", `${to} is not matched by the include patterns of ${ws.targetConfig}`);
+      ws.reparse();
+    }
+    const owners = ws.ownersOf(to);
+    if (owners.length !== 1 || !ws.vfs.samePath(owners[0]!, ws.targetConfig)) fail("TARGET_NOT_IN_PROJECT", `${to} must belong to exactly ${ws.targetConfig}; owners: ${owners.join(", ") || "none"}`);
+  }
+  assertMembership(ws, before, sameProject ? sourceRenames : [], sameProject ? [] : sourceRenames.map(([from]) => from),
+    sameProject ? undefined : sourceRenames.map(([, path]) => ({ path, must: [ws.targetConfig], may: siblings })));
+
+  const changes = new Map<string, ts.TextChange[]>();
+  for (const edge of imports) {
+    if (!mapping.has(ws.vfs.key(edge.target))) continue;
+    const from = relocated(edge.file), to = relocated(edge.target);
+    const source = parseFile(ws, from)!;
+    const specifier = moduleSpecifiers(source)[edge.index];
+    if (!specifier) fail("REFERENCES_NOT_PRESERVED", `module specifier disappeared in ${from}`);
+    const owner = ws.ownersOf(from)[0];
+    const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
+    const bare = packageSpecifier(ws, from, to, ts.getModeForUsageLocation(source, specifier, options));
+    const style = styles.get(edge)!;
+    const name = bare ?? specifierLike(from, to, style, edge.target);
+    const start = specifier.getStart(source) + 1;
+    const list = changes.get(from) ?? [];
+    list.push({ span: { start, length: specifier.end - start - 1 }, newText: JSON.stringify(name).slice(1, -1) });
+    changes.set(from, list);
+  }
+  for (const [path, edits] of changes) ws.vfs.write(path, applyTextChanges(ws.vfs.readFile(path)!, edits));
+  ws.reparse();
+  context.aliasHints = imports.filter(edge => edge.alias && mapping.has(ws.vfs.key(edge.file)) && !mapping.has(ws.vfs.key(edge.target)))
+    .filter(edge => {
+      const source = parseFile(ws, relocated(edge.file))!;
+      const specifier = moduleSpecifiers(source)[edge.index];
+      return specifier && !ws.resolveModule(specifier, source, ws.participant(ws.targetConfig).parsed.options);
+    }).map(edge => `${edge.original} (${relocated(edge.file)})`);
+
+  const changed = ws.vfs.changes().filter(change => change.after !== null && /\.[cm]?[jt]sx?$/.test(change.path)).map(change => change.path);
+  const afterViolations = accessViolations(ws, changed, path => ws.ownersOf(path));
+  const originals = new Map(renames.map(([from, to]) => [ws.vfs.key(to), from]));
+  const originalPaths = changed.map(path => originals.get(ws.vfs.key(path)) ?? path);
+  const beforeViolations = ws.vfs.original(() => accessViolations(ws, originalPaths.filter(path => ws.vfs.diskText(path) !== null), path => beforeOwners.get(ws.vfs.key(path)) ?? []));
+  const priorKeys = new Set([...beforeViolations.keys()].map(key => key.split("\0").map(relocated).map(path => ws.vfs.key(path)).join("\0")));
+  const introduced = [...afterViolations].filter(([key]) => !priorKeys.has(key)).map(([, message]) => message);
+  if (introduced.length) fail("INACCESSIBLE_DEPENDENCY", `${introduced.join("; ")}; add a project reference or move dependencies first`);
+  const cycles = introducedCycles(graphBefore, projectGraph(ws, userFiles(ws), path => ws.ownersOf(path)));
+  if (cycles.length) fail("PROJECT_DEPENDENCY_CYCLE", `the move introduces project cycles (${cycles.join("; ")}); move dependencies first`);
+  context.verify = () => {
+    for (const edge of imports) {
+      const from = relocated(edge.file), to = relocated(edge.target);
+      const source = parseFile(ws, from)!;
+      const specifier = moduleSpecifiers(source)[edge.index];
+      const resolved = specifier && ws.resolveModule(specifier, source);
+      if (!resolved || !ws.vfs.samePath(resolved.resolvedFileName, to)) {
+        fail("REFERENCES_NOT_PRESERVED", `${edge.original} in ${from} must still resolve to ${to}`);
+      }
+    }
+    const afterImporters = importerMap(ws, renames.map(([, to]) => to));
+    for (const [to, expected] of expectedImporters) {
+      const actual = afterImporters.get(ws.vfs.key(to))!;
+      if (JSON.stringify(expected) !== JSON.stringify(actual)) fail("REFERENCES_NOT_PRESERVED", `${expected.length} module references expected for ${to}, found ${actual.length}`);
+    }
+  };
+  context.notes.push(`Moved ${renames.length} file(s) from ${relative(root, file)} to ${relative(root, target)}; validated source and target project membership.`);
+}
+
 function newDiagnostics(before: Diagnostic[], after: Diagnostic[]): Diagnostic[] {
   const key = (item: Diagnostic) => `${item.file}\0${item.code}\0${item.message}`;
   const counts = new Map<string, number>();
@@ -670,21 +855,25 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
   const root = assertAbsolute("root", request.root);
   const file = assertAbsolute("file", request.file);
   if (!isInside(root, file)) fail("OUTSIDE_ROOT", `file is outside ${root}`);
-  const extension = sourceExtension(file);
+  const movingFiles = request.operation === "move-file" ? movePaths(root, file, assertAbsolute("target", request.target)) : undefined;
+  const extension = movingFiles ? extname(file) : sourceExtension(file);
   const sourceConfig = configPathFor(assertAbsolute("project", request.project));
-  const targetConfig = request.operation === "move-type" && request.targetProject
+  const targetConfig = ["move-type", "move-file"].includes(request.operation) && request.targetProject
     ? configPathFor(assertAbsolute("targetProject", request.targetProject))
     : sourceConfig;
-  const affected = [file];
+  const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
   if (request.operation === "move-type" && request.target && isAbsolute(request.target) && existsSync(request.target)) affected.push(resolve(request.target));
-  const ws = new Workspace(root, sourceConfig, targetConfig, affected);
+  const ws = new Workspace(root, sourceConfig, targetConfig, affected, !!movingFiles);
   try {
-    if (!ws.vfs.fileExists(file)) fail("FILE_NOT_FOUND", file);
-    const owners = ws.ownersOf(file);
-    if (!owners.some((owner) => ws.vfs.samePath(owner, sourceConfig))) fail("FILE_NOT_IN_PROJECT", `${file} is not included by ${sourceConfig}`);
-    if (owners.length > 1) fail("OWNERSHIP_AMBIGUOUS", `${file} is included by several projects: ${owners.join(", ")}`);
-    ws.assertNoUnhandledProjects([file], true, false);
-    const sourceFile = ws.program().getSourceFile(file);
+    if (!movingFiles && !ws.vfs.fileExists(file)) fail("FILE_NOT_FOUND", file);
+    const selected = movingFiles ? movingFiles.map(([from]) => from).filter(path => /\.[cm]?[jt]sx?$/.test(path)) : [file];
+    for (const file of selected) {
+      const owners = ws.ownersOf(file);
+      if (!owners.some((owner) => ws.vfs.samePath(owner, sourceConfig))) fail("FILE_NOT_IN_PROJECT", `${file} is not included by ${sourceConfig}`);
+      if (owners.length > 1) fail("OWNERSHIP_AMBIGUOUS", `${file} is included by several projects: ${owners.join(", ")}`);
+    }
+    ws.assertNoUnhandledProjects(selected, true, false);
+    const sourceFile = ws.program().getSourceFile(selected[0] ?? file) ?? (movingFiles ? ts.createSourceFile(file, "", ts.ScriptTarget.Latest) : undefined);
     if (!sourceFile) fail("FILE_NOT_IN_PROJECT", file);
     const isJs = jsExtensions.includes(extension);
     const context: Context = { ws, root, file, sourceFile, isJs, notes: [] };
@@ -693,17 +882,21 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     let renamed: [string, string] | undefined;
     if (request.operation === "rename-file") renamed = renameFile(context, request).renamed;
     else if (request.operation === "move-type") moveType(context, request);
+    else if (movingFiles) moveFile(context, request, movingFiles);
     else fail("UNSUPPORTED_OPERATION", String(request.operation));
 
     const written = ws.vfs.changes().filter((change) => change.after !== null && !/\.json$/i.test(change.path)).map((change) => change.path);
     if (written.length) ws.assertNoUnhandledProjects(written, false);
     const layoutsBefore = new Map(ws.layouts);
     const diagnosticsAfter = ws.diagnostics();
-    const comparable = renamed
+    const renameMap = new Map((movingFiles ?? (renamed ? [renamed] : [])).map(([from, to]) => [ws.vfs.key(from), to]));
+    const comparable = movingFiles ? diagnosticsBefore.map(item => ({ ...item, file: renameMap.get(ws.vfs.key(item.file)) ?? item.file })) : renamed
       ? diagnosticsBefore.map((item) => ws.vfs.samePath(item.file, renamed[0]) ? { ...item, file: renamed[1] } : item)
       : diagnosticsBefore;
     const introduced = newDiagnostics(comparable, diagnosticsAfter);
-    if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; "));
+    if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ")
+      + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : ""));
+    context.verify?.();
     for (const [key, layout] of layoutsBefore) {
       const after = ws.layouts.get(key);
       if (after !== undefined && after !== layout) {

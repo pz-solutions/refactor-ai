@@ -61,17 +61,19 @@ Paths resolve against the custom script process's current working directory. Ret
 
 | Option | Meaning |
 | --- | --- |
-| `project`, `file` | Required project configuration and source file. TS/JS uses tsconfig/jsconfig JSON; C# uses `.csproj` or `.sln`. |
+| `project`, `file` | Required project configuration and source file (or directory for move-file). TS/JS uses tsconfig/jsconfig JSON; C# uses `.csproj` or `.sln`. |
 | `root` | Directory covering the project and all changed files; defaults to the project configuration's directory. Set a shared root for cross-project changes. |
 | `operation` | Required for aggregate APIs; optional for operation APIs. |
 | `at` | A 1-based `"line:column"` string or zero-based character offset, both measured in UTF-16 code units. Required for rename and extraction. |
 | `end` | Exclusive extraction end, with the same coordinate formats as `at`. |
 | `name` | New symbol, function or variable name, as required by the operation. |
 | `mode` | Imports mode: `"sort"` or `"remove-unused"`. TS/JS defaults to sort; C# operation APIs default to remove-unused. The aggregate API retains the CLI convention: request remove-unused explicitly for C#. |
-| `target` | Destination file path for move-type, including a new parent directory if needed. |
-| `targetProject` | Destination project configuration for a cross-project move. Valid only for move-type. |
+| `target` | Destination file/directory path for move-type or move-file, including a new parent directory if needed. |
+| `targetProject` | Destination project configuration for a cross-project move. Valid for move-type or move-file. |
 | `typeName` | Select a declared type when a file has several declarations. |
 | `rootNamespace` | Override the C# project's namespace convention. |
+
+Example: `await refactor.plan({ operation: "move-file", project: "./apps/web/tsconfig.json", root: ".", file: "./apps/web/src/components", target: "./packages/feature/src/components", targetProject: "./packages/feature/tsconfig.json" })`. The `@refactor-ai/ts-move-file` package and `refactor-move-file` skill select this operation automatically. Directory moves include non-source UTF-8 files. Cross-package importers use package exports (missing exact entries become planned manifest edits) and must declare the destination dependency. Unresolved source-project aliases fail with `NEW_DIAGNOSTICS` and an alias hint.
 
 Read the operation's CLI `--help` for engine-specific support and limitations. TypeScript consumers can import `RefactorApi`, `PlanOptions`, `Plan`, `ValidationResult`, `ApplyResult`, `Capability`, `Diagnostic`, `FileChange` and `Operation` as types from the same entry point.
 

@@ -10,6 +10,16 @@ interface OperationHelp {
 }
 
 export const operationHelp: Record<Operation, OperationHelp> = {
+  "move-file": {
+    description: "Move a whole module or directory within or between workspace packages.",
+    support: "TypeScript and JavaScript",
+    required: "--to <destination> [--target-project <config>] [--root <directory>]",
+    details: "--file accepts a file or directory. A directory moves every file below it in one plan, preserving relative layout. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Aliases between moved files become relative imports; unresolved source-project aliases cause NEW_DIAGNOSTICS with a hint. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
+    examples: [
+      "plan move-file --project ./tsconfig.json --file ./src/components/button.tsx --to ./src/ui/button.tsx",
+      "plan move-file --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/components --to ./packages/feature/src/components --target-project ./packages/feature/tsconfig.json",
+    ],
+  },
   rename: {
     description: "Rename a symbol and its semantic references.",
     support: "TypeScript, JavaScript and C#",
@@ -125,7 +135,7 @@ function optionsText(language?: Language): string {
   const project = language === "typescript" ? "tsconfig.json or jsconfig.json"
     : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln";
   return `  --project <config>       Required for capabilities and plan; ${project}.
-${language !== "csharp" ? "                           Named TS configurations are supported by file/type operations.\n" : ""}  --file <source>          Required for plan; file included by the selected project.
+${language !== "csharp" ? "                           Named TS configurations are supported by file/type operations.\n" : ""}  --file <source>          Required for plan; source file (or directory for move-file).
   --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
   --at <line:column>       Symbol/type position or extraction start, 1-based UTF-16.
@@ -134,8 +144,8 @@ ${language !== "csharp" ? "                           Named TS configurations ar
   --mode <mode>            imports: ${language === "csharp" ? "remove-unused (default); sorting is unsupported" : "sort (default) or remove-unused"}.
   --type <identifier>      Declared type for rename-file or move-type; select when
                            several types exist, or use --at.
-  --to <file>              Required destination for move-type; relative to cwd.
-  --target-project <config> Destination project config; move-type only.
+  --to <path>              Required destination for move-type or move-file; relative to cwd.
+  --target-project <config> Destination project config; move-type or move-file.
 ${language !== "typescript" ? "  --root-namespace <name>  C# namespace convention override for sync-namespace\n                           or move-type.\n" : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
                            Within root, store plans only in .refactor-ai;
                            an output path outside root is also allowed.

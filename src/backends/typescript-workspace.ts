@@ -17,7 +17,8 @@ import { portablePath, workspaceRootHint } from "./typescript-paths";
  * validated, but they do not own files. Other variants that list an affected
  * file are rejected; base configs only used through `extends` are skipped. Edits are computed by one language
  * service over the union of the
- * participants' files (they must agree on module-resolution options); results
+ * participants' files (they must agree on module-resolution options, except paths/baseUrl
+ * for whole-module moves, whose edges resolve per project); results
  * are validated per project like `tsc -b`, with referenced projects'
  * declarations emitted in memory instead of read from stale disk outputs.
  */
@@ -161,7 +162,7 @@ export class Workspace {
   private extendedConfigs: Set<string> | undefined;
 
   /** `affected` are the files whose module shape the operation changes (renamed, moved from or into). */
-  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = []) {
+  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = [], private readonly relocateModules = false) {
     this.vfs = new VirtualFs(root);
     this.sourceConfig = sourceConfig;
     this.targetConfig = targetConfig;
@@ -336,13 +337,14 @@ export class Workspace {
     const first = this.participant(this.sourceConfig);
     for (const item of withFiles) {
       for (const option of sharedOptionKeys) {
+        if (this.relocateModules && (option === "paths" || option === "baseUrl")) continue;
         if (!sameValue(item.parsed.options[option], first.parsed.options[option])) {
           fail("PROJECT_OPTIONS_INCOMPATIBLE", `${item.configPath} and ${first.configPath} differ in compiler option '${option}'; cross-project planning requires identical module resolution settings`);
         }
       }
     }
     const configDirectories = new Set(withFiles.map((item) => vfs.key(dirname(item.configPath))));
-    if (configDirectories.size > 1 && first.parsed.options.paths && !first.parsed.options.baseUrl) {
+    if (!this.relocateModules && configDirectories.size > 1 && first.parsed.options.paths && !first.parsed.options.baseUrl) {
       fail("PROJECT_OPTIONS_INCOMPATIBLE", "'paths' without 'baseUrl' resolves relative to each config; set baseUrl to plan across projects");
     }
     this.indexOwners();
@@ -398,7 +400,8 @@ export class Workspace {
     return program;
   }
 
-  resolveModule(specifier: ts.StringLiteralLike, sourceFile: ts.SourceFile, options = this.editOptions): ts.ResolvedModuleFull | undefined {
+  resolveModule(specifier: ts.StringLiteralLike, sourceFile: ts.SourceFile, options?: ts.CompilerOptions): ts.ResolvedModuleFull | undefined {
+    options ??= this.ownersOf(sourceFile.fileName)[0] ? this.participant(this.ownersOf(sourceFile.fileName)[0]!).parsed.options : this.editOptions;
     const mode = ts.getModeForUsageLocation(sourceFile, specifier, options);
     return ts.resolveModuleName(specifier.text, sourceFile.fileName, options, this.vfs.moduleResolutionHost(), undefined, undefined, mode).resolvedModule;
   }
@@ -641,6 +644,7 @@ export class Workspace {
         if (!ts.isPropertyAssignment(property) || !ts.isStringLiteral(property.name)) continue;
         if (!["files", "include"].includes(property.name.text) || !ts.isArrayLiteralExpression(property.initializer)) continue;
         const elements = property.initializer.elements;
+        const removed = new Set<number>();
         elements.forEach((element, index) => {
           if (!ts.isStringLiteral(element) || /[*?]/.test(element.text)) return;
           const absolute = resolve(directory, element.text);
@@ -652,14 +656,21 @@ export class Workspace {
             const quote = text[start]!;
             changes.push({ span: { start, length: element.end - start }, newText: `${quote}${JSON.stringify(spec).slice(1, -1)}${quote}` });
           } else if (deletions.some((path) => vfs.samePath(path, absolute))) {
-            const span = index < elements.length - 1
-              ? { start, length: elements[index + 1]!.getStart(json) - start }
-              : index > 0
-                ? { start: elements[index - 1]!.end, length: element.end - elements[index - 1]!.end }
-                : { start, length: element.end - start };
-            changes.push({ span, newText: "" });
+            removed.add(index);
           }
         });
+        // Delete contiguous runs together, so moving a directory cannot produce overlapping list edits.
+        for (let index = 0; index < elements.length; index++) {
+          if (!removed.has(index)) continue;
+          const first = index;
+          while (removed.has(index + 1)) index += 1;
+          const all = first === 0 && index === elements.length - 1;
+          const start = all ? property.initializer.getStart(json) + 1
+            : first === 0 ? elements[first]!.getStart(json) : elements[first - 1]!.end;
+          const end = all ? property.initializer.end - 1
+            : first === 0 ? elements[index + 1]!.getStart(json) : elements[index]!.end;
+          changes.push({ span: { start, length: end - start }, newText: "" });
+        }
       }
       if (changes.length) vfs.write(item.configPath, applyTextChanges(text, changes));
     }
