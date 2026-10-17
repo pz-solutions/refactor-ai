@@ -61,7 +61,7 @@ Paths resolve against the custom script process's current working directory. Ret
 
 | Option | Meaning |
 | --- | --- |
-| `project`, `file` | Required project configuration and source file (or directory for move-file). TS/JS uses tsconfig/jsconfig JSON; C# uses `.csproj` or `.sln`. |
+| `project`, `file` | Required project configuration and source file (a directory for move-file; optional for retarget-import, which accepts a file or directory). TS/JS uses tsconfig/jsconfig JSON; C# uses `.csproj` or `.sln`. |
 | `root` | Directory covering the project and all changed files; defaults to the project configuration's directory. Set a shared root for cross-project changes. |
 | `operation` | Required for aggregate APIs; optional for operation APIs. |
 | `at` | A 1-based `"line:column"` string or zero-based character offset, both measured in UTF-16 code units. Required for rename and extraction. |
@@ -72,11 +72,31 @@ Paths resolve against the custom script process's current working directory. Ret
 | `targetProject` | Destination project configuration for a cross-project move. Valid for move-type or move-file. |
 | `typeName` | Select a declared type when a file has several declarations. |
 | `keep` | Boolean, valid only for `inline-reexports`; retain the shim after retargeting its callers. Defaults to false. |
+| `from`, `to` | Exact source and destination module specifiers; required for retarget-import. Wildcard prefixes are rejected. |
+| `map` | retarget-import export mapping object, e.g. `{ NextIntlClientProvider: "IntlProvider" }`. Unaliased bindings and semantic usages rename; explicit local aliases remain unchanged. |
+| `only` | retarget-import array of pre-map export names. Other bindings stay on the source module; declarations split as needed. Default/namespace imports require this option absent. |
 | `rootNamespace` | Override the C# project's namespace convention. |
 
 Example: `await refactor.plan({ operation: "move-file", project: "./apps/web/tsconfig.json", root: ".", file: "./apps/web/src/components", target: "./packages/feature/src/components", targetProject: "./packages/feature/tsconfig.json" })`. The `@refactor-ai/ts-move-file` package and `refactor-move-file` skill select this operation automatically. Directory moves include non-source UTF-8 files. Cross-package importers use package exports (missing exact entries become planned manifest edits) and must declare the destination dependency. Unresolved source-project aliases fail with `NEW_DIAGNOSTICS` and an alias hint.
 
 Read the operation's CLI `--help` for engine-specific support and limitations. TypeScript consumers can import `RefactorApi`, `PlanOptions`, `Plan`, `ValidationResult`, `ApplyResult`, `Capability`, `Diagnostic`, `FileChange` and `Operation` as types from the same entry point.
+
+## Retarget imports
+
+```js
+const plan = await refactor.plan({
+  operation: "retarget-import", // omit in @refactor-ai/ts-retarget-import
+  project: "./apps/web/tsconfig.json",
+  root: ".",
+  from: "next-intl",
+  to: "use-intl",
+  map: { NextIntlClientProvider: "IntlProvider" },
+  // file: "./apps/web/src/features", // optional file or directory scope
+  // only: ["useTranslations", "NextIntlClientProvider"],
+});
+```
+
+Scope defaults to every user source in the loaded TS/JS project. Compatible named destination imports merge and identical bindings dedupe, preserving quote style, type-only modifiers, directives and comments. Explicit re-export aliases stay unchanged; an unaliased re-export takes its mapped name. Default/namespace imports, star re-exports and side-effect imports move only without `only`; compiler diagnostics check member compatibility. Unresolvable destination modules throw `TARGET_UNRESOLVED` listing affected files; missing exports throw `NEW_DIAGNOSTICS` naming the binding. No matches succeed with a note. Project references and wildcard module matching are unsupported. Compiler checks do not establish runtime API compatibility.
 
 ## Sequential automation
 

@@ -4,6 +4,7 @@ import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
 import type { BackendResult, Capability, Diagnostic, FileChange, RefactorRequest } from "../types";
 import { analyzeFileOperation, fileCapabilities } from "./typescript-fileops";
 import { moduleSpecifiers } from "./typescript-workspace";
+import { retargetImports } from "./typescript-retarget-import";
 import { isInside, workspaceRootHint } from "./typescript-paths";
 
 export const capabilities: Capability[] = [
@@ -12,6 +13,7 @@ export const capabilities: Capability[] = [
   { operation: "format", description: "Format a source file with the TypeScript formatter." },
   { operation: "extract-function", description: "Extract the selected statements or expression to a named function." },
   { operation: "extract-variable", description: "Extract the selected expression to a named variable." },
+  { operation: "retarget-import", description: "Retarget imports and re-exports to an API-compatible module, with optional export mapping." },
   ...fileCapabilities,
 ];
 
@@ -442,14 +444,14 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
   try {
     const file = assertAbsolute("file", request.file);
     if (!isInside(state.root, file)) fail("OUTSIDE_ROOT", `file is outside ${state.root}`);
-    const text = sourceText(state, file);
+    const text = request.operation === "retarget-import" ? "" : sourceText(state, file);
     if (text === undefined) fail("FILE_NOT_FOUND", file);
     const extension = extname(file).toLowerCase();
-    if (![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].includes(extension)) {
+    if (request.operation !== "retarget-import" && ![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].includes(extension)) {
       fail("UNSUPPORTED_FILE", extension || "file has no extension");
     }
     const program = state.service.getProgram();
-    if (!program?.getSourceFile(file)) fail("FILE_NOT_IN_PROJECT", file);
+    if (!program || (request.operation !== "retarget-import" && !program.getSourceFile(file))) fail("FILE_NOT_IN_PROJECT", file);
     const outsideUserSources = program.getSourceFiles()
       .filter((source) => !isInside(state.root, canonical(source.fileName)) && !source.isDeclarationFile)
       .map((source) => canonical(source.fileName))
@@ -462,7 +464,12 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
     const originals = new Map<string, string | undefined>();
     for (const path of state.fileNames) originals.set(path, sourceText(state, path));
 
+    let operationNotes: string[] = [];
     switch (request.operation) {
+      case "retarget-import": operationNotes = retargetImports({ service: state.service, options: state.options, root: state.root,
+        setText: (path, text) => setOverlay(state, path, text),
+        rename: (path, position, newName) => rename(state, path, { ...request, operation: "rename", file: path, position, newName }),
+      }, request); break;
       case "rename": rename(state, file, request); break;
       case "imports": imports(state, file, request); break;
       case "format": format(state, file); break;
@@ -490,7 +497,7 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
     });
     if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.message}`).join("; "));
 
-    const notes: string[] = [];
+    const notes: string[] = operationNotes;
     if (affected) notes.push(`Validated ${affected.size} affected file(s): the changed files and their transitive importers.`);
     if (request.operation === "imports") {
       notes.push(request.mode === "sort"

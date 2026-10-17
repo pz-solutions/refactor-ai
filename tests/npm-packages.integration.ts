@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 const repo = resolve(import.meta.dir, "..");
 let workspace: string;
 const tarballs = new Map<string, string>();
-const tsOperations = ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports"];
+const tsOperations = ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import"];
 const csharpOperations = ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"];
 const distributions = [
   { name: "cli", language: "all" },

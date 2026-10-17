@@ -28,6 +28,7 @@ export function inside(root: string, file: string): string {
 }
 
 export async function assertRegularPath(root: string, file: string, allowMissing = false, allowDirectory = false): Promise<void> {
+  if (allowDirectory && resolve(file) === root && (await lstat(root)).isDirectory()) return;
   const target = inside(root, file);
   const parts = relative(root, target).split(sep);
   let current = root;

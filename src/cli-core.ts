@@ -11,7 +11,8 @@ function parse(args: string[]): { command: string; operation?: string; flags: Re
   const command = args.shift() ?? "help";
   const operation = args[0] && !args[0].startsWith("--") ? args.shift() : undefined;
   const flags: Record<string, string> = {};
-  const allowed = new Set(["project", "file", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace"]);
+  const allowed = new Set(["project", "file", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only"]);
+  const mappings: string[] = [];
   while (args.length) {
     const key = args.shift()!;
     if (key === "--keep" && flags.keep === undefined) { flags.keep = "true"; continue; }
@@ -19,9 +20,21 @@ function parse(args: string[]): { command: string; operation?: string; flags: Re
     if (!key.startsWith("--") || !allowed.has(key.slice(2)) || !value || value.startsWith("--") || flags[key.slice(2)] !== undefined) {
       throw new Error(`INVALID_ARGUMENT: ${key}`);
     }
+    if (key === "--map") { mappings.push(value); continue; }
     flags[key.slice(2)] = value;
   }
+  if (mappings.length) flags.map = mappings.join("\n");
   return { command, operation, flags };
+}
+
+function parseMap(value: string): Record<string, string> {
+  const map: Record<string, string> = Object.create(null);
+  for (const item of value.split("\n")) {
+    const parts = item.split("=");
+    if (parts.length !== 2 || !parts[0] || !parts[1] || Object.hasOwn(map, parts[0])) throw new Error(`INVALID_ARGUMENT: --map ${item}`);
+    map[parts[0]] = parts[1];
+  }
+  return map;
 }
 
 function required(flags: Record<string, string>, key: string): string {
@@ -59,10 +72,12 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
   }
   if (command !== "plan") throw new Error(`INVALID_ARGUMENT: unknown command ${command}`);
   const plan = await api.plan({
-    project: required(flags, "project"), file: required(flags, "file"), operation: operation as Operation,
+    project: required(flags, "project"), file: operation === "retarget-import" ? flags.file : required(flags, "file"), operation: operation as Operation,
     keep: flags.keep === "true" ? true : undefined,
     root: flags.root, at: flags.at, end: flags.end, name: flags.name,
-    mode: flags.mode as "sort" | "remove-unused" | undefined, target: flags.to,
+    mode: flags.mode as "sort" | "remove-unused" | undefined, target: operation === "retarget-import" ? undefined : flags.to,
+    from: flags.from, to: operation === "retarget-import" ? flags.to : undefined,
+    map: flags.map === undefined ? undefined : parseMap(flags.map), only: flags.only?.split(","),
     targetProject: flags["target-project"], typeName: flags.type, rootNamespace: flags["root-namespace"],
   });
   const root = plan.request.root;

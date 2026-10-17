@@ -71,7 +71,7 @@ export async function packRelease(packages: string, artifacts: string, ref?: str
 async function verifyRelease(artifacts: string, ref?: string): Promise<Release> {
   const release: Release = JSON.parse(await readFile(join(artifacts, "release.json"), "utf8"));
   assertReleaseRef(release.version, ref);
-  if (!Array.isArray(release.archives) || release.archives.length !== names.length) throw new Error("INVALID_RELEASE: expected fifteen archives");
+  if (!Array.isArray(release.archives) || release.archives.length !== names.length) throw new Error("INVALID_RELEASE: expected all distribution archives");
   const expected = new Set(names.map(name => `@${npmScope}/${name}`));
   for (const archive of release.archives) {
     if (!expected.delete(archive.name) || archive.version !== release.version || typeof archive.filename !== "string" ||
@@ -130,7 +130,7 @@ Options:
   --dry-run                publish only; validate archives and run npm publish --dry-run.
   --help, -h               Show help without reading packages or calling npm.
 
-Pack requires exactly fifteen @refactor-ai packages with the same semantic version and
+Pack requires all configured @refactor-ai packages with the same semantic version and
 pz-solutions/refactor-ai repository metadata. Writes .tgz files and release.json with
 SHA-512 integrity. Publish checks all archives before contacting the registry;
 matching published versions are skipped, differing content or registry errors
@@ -139,7 +139,7 @@ Stable versions use latest; prereleases use next. Incomplete releases check all
 packages' registry tags before uploading and refuse to move latest or next to an
 older version. Prereleases must also be newer than latest. Completed retries
 skip every upload and preserve tags. Dry run does not query existing
-versions or reserve names. Publication across fifteen packages is not atomic.
+versions or reserve names. Publication across packages is not atomic.
 
 Requirements: Node.js 22+, npm and previously built packages. GitHub OIDC needs
 Node >=22.14, npm >=11.5.1, id-token: write and per-package Trusted Publisher setup;

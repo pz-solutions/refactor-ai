@@ -1,4 +1,4 @@
-export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "move-file" | "inline-reexports";
+export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "move-file" | "inline-reexports" | "retarget-import";
 
 export interface RefactorRequest {
   project: string;
@@ -7,6 +7,14 @@ export interface RefactorRequest {
   operation: Operation;
   /** Retain the source shim after inline-reexports. */
   keep?: boolean;
+  /** Module specifiers for retarget-import; exact matches only. */
+  from?: string;
+  to?: string;
+  /** Imported export names, before mapping, to their destination names. */
+  map?: Record<string, string>;
+  only?: string[];
+  /** Internal marker: file defaults to project directory when scope is omitted. */
+  projectScope?: boolean;
   position?: number;
   end?: number;
   newName?: string;

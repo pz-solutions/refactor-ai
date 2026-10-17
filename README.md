@@ -8,6 +8,7 @@ Deterministic refactorings exposed through skills and a CLI written in TypeScrip
 | --- | --- | --- |
 | Rename a symbol and its references | Yes | Yes, including across projects in a `.sln` |
 | Remove unused imports / using directives | Yes, explicit mode | Yes, Roslyn `CS8019` diagnostics |
+| Retarget imports / re-exports (`retarget-import`) | Yes, partial selection, export mapping and compiler validation | Not yet |
 | Sort imports | Yes, without removing unused imports | Not yet |
 | Format a file | TypeScript formatter | Roslyn Formatter |
 | Extract function | Yes, engine-provided action | Not yet |
@@ -77,6 +78,15 @@ node dist/cli.js plan extract-variable --project examples/typescript/tsconfig.js
   --file examples/typescript/math.ts --at 2:10 --end 2:22 --name total
 ```
 
+Retarget API-compatible TS/JS modules across the loaded project, or narrow to a file/directory with `--file`:
+
+```sh
+node dist/cli.js plan retarget-import --project apps/web/tsconfig.json --root . \
+  --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider
+```
+
+`--map` renames unaliased local bindings and semantic references (including JSX); explicit aliases stay unchanged. `--only Name,Name` selects pre-map names and splits declarations. Compatible destination named imports merge; quotes, type-only modifiers, comments and directives are retained. Default/namespace imports require `--only` absent and pass compiler validation. Exact specifiers only; missing target modules fail `TARGET_UNRESOLVED`, missing exports fail `NEW_DIAGNOSTICS`. No matches produce a successful no-op. Runtime compatibility still needs application tests.
+
 The default root is the project configuration's directory. Supply `--root` for a wider scope; use a `.sln` for C# rename operations with callers in several projects. Plans default to `<root>/.refactor-ai/`; `--out` may point outside the project or into that directory. `node dist/cli.js` lists these commands. When relocating the CLI, set `REFACTOR_AI_HOME` to this package's directory so it can locate the C# helper.
 
 Type refactoring examples (replace paths and type names with your own):
@@ -111,7 +121,7 @@ Read the [programmatic interface](docs/api.md) for installed-skill imports, all 
 
 ## npm CLI packages
 
-Build fifteen independently publishable packages: the complete `@refactor-ai/cli`, eight `@refactor-ai/ts-<operation>` tools for TypeScript/JavaScript, and six `@refactor-ai/csharp-<operation>` tools for C#. Each declares a single executable in npm's `bin` field. The author checkout remains private.
+Build independently publishable packages: the complete `@refactor-ai/cli`, `@refactor-ai/ts-<operation>` tools for TypeScript/JavaScript, and six `@refactor-ai/csharp-<operation>` tools for C#. Each declares a single executable in npm's `bin` field. The author checkout remains private.
 
 ```sh
 bun run package:npm
@@ -140,7 +150,7 @@ npx --yes file:/tmp/refactor-ai-ts-rename-0.1.3.tgz --help
 
 See [npm packaging and publishing](docs/npm-packages.md) for package names, local installation, publication and versioning. `bun run test:npm` tests actual packed archives through npx, including complete TS, JS and C# workflows.
 
-All fifteen npm packages share the version in the author `package.json`. After building, use `bun run version:packages patch --dry-run` to preview a bump, or `bun run version:packages --help` for minor/major and beta/RC examples. Release tags must match `v<version>`; stable releases use `latest` and prereleases use `next`. The publisher checks registry versions and refuses to move those channels backwards. See the [release procedure](docs/github-actions.md#release-a-version).
+All generated npm packages share the version in the author `package.json`. After building, use `bun run version:packages patch --dry-run` to preview a bump, or `bun run version:packages --help` for minor/major and beta/RC examples. Release tags must match `v<version>`; stable releases use `latest` and prereleases use `next`. The publisher checks registry versions and refuses to move those channels backwards. See the [release procedure](docs/github-actions.md#release-a-version).
 
 ## Skills
 
@@ -156,6 +166,7 @@ Ready-to-use runner instructions are included in the repository:
 - [refactor-move-type](skills/refactor-move-type/SKILL.md)
 - [refactor-move-file](skills/refactor-move-file/SKILL.md)
 - [refactor-inline-reexports](skills/refactor-inline-reexports/SKILL.md)
+- [refactor-retarget-import](skills/refactor-retarget-import/SKILL.md)
 
 Each skill is a self-contained directory with `SKILL.md`, a Node launcher in `scripts/refactor.mjs`, and the built CLI and npm lockfile in `assets/runtime/`. Skills supporting C# also include Roslyn helper sources in `assets/dotnet/`. They depend on files within their own directory and can run independently of the original checkout.
 
@@ -177,7 +188,7 @@ You can also invoke an installed skill directly:
 node .agents/skills/refactor-rename/scripts/refactor.mjs capabilities --project ./tsconfig.json
 ```
 
-For authors: `bun run package:skills` rebuilds the CLI and refreshes the resources for all nine skills. Include the generated `scripts/` and `assets/` directories in each distributed skill, excluding local caches such as `node_modules`, `bin`, `obj` and `.setup.lock`. `SKILL.md` alone cannot execute a refactoring. `bun run build` also refreshes these resources.
+For authors: `bun run package:skills` rebuilds the CLI and refreshes the resources for all skills. Include the generated `scripts/` and `assets/` directories in each distributed skill, excluding local caches such as `node_modules`, `bin`, `obj` and `.setup.lock`. `SKILL.md` alone cannot execute a refactoring. `bun run build` also refreshes these resources.
 
 ## MVP guarantees and limitations
 

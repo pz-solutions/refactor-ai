@@ -20,6 +20,16 @@ export const operationHelp: Record<Operation, OperationHelp> = {
       "plan move-file --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/components --to ./packages/feature/src/components --target-project ./packages/feature/tsconfig.json",
     ],
   },
+  "retarget-import": {
+    description: "Retarget imports and re-exports to an API-compatible module.",
+    support: "TypeScript and JavaScript",
+    required: "--from <specifier> --to <specifier> [--map Old=New ...] [--only Name,Name] [--file <file|directory>]",
+    details: "Exact specifiers only; wildcards are rejected. Omit --file for the loaded project. --only selects pre-map export names and splits declarations. Unaliased mapped imports rename local references semantically, including JSX; explicit aliases stay unchanged. Re-export mappings rename the imported export. Compatible named destination imports merge and identical bindings dedupe; type-only modifiers, quotes, directives and comments are retained. Default, namespace, star exports and side-effect imports retarget only without --only; compiler diagnostics validate their compatibility. Targets must resolve from every affected file (TARGET_UNRESOLVED). Missing exports fail NEW_DIAGNOSTICS. No matches succeed with a note. Project references are unsupported. Verify runtime behavior separately.",
+    examples: [
+      "plan retarget-import --project apps/web/tsconfig.json --root . --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider",
+      "plan retarget-import --project ./tsconfig.json --from old-lib --to new-lib --only Widget,Options --file ./src/features",
+    ],
+  },
   rename: {
     description: "Rename a symbol and its semantic references.",
     support: "TypeScript, JavaScript and C#",
@@ -145,7 +155,7 @@ function optionsText(language?: Language): string {
   const project = language === "typescript" ? "tsconfig.json or jsconfig.json"
     : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln";
   return `  --project <config>       Required for capabilities and plan; ${project}.
-${language !== "csharp" ? "                           Named TS configurations are supported by file/type operations.\n" : ""}  --file <source>          Required for plan; source file (or directory for move-file).
+${language !== "csharp" ? "                           Named TS configurations are supported by file/type operations.\n" : ""}  --file <source>          Required for plan except retarget-import; a file, or a directory for move-file/retarget-import.
   --keep                   Retain the shim for inline-reexports.
   --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
@@ -155,7 +165,10 @@ ${language !== "csharp" ? "                           Named TS configurations ar
   --mode <mode>            imports: ${language === "csharp" ? "remove-unused (default); sorting is unsupported" : "sort (default) or remove-unused"}.
   --type <identifier>      Declared type for rename-file or move-type; select when
                            several types exist, or use --at.
-  --to <path>              Required destination for move-type or move-file; relative to cwd.
+  --to <path|specifier>    Destination for move-type/move-file (path) or retarget-import (specifier).
+  --from <specifier>       Source module specifier for retarget-import.
+  --map <Old=New>          Repeatable export mapping for retarget-import.
+  --only <Name,Name>       Pre-map export names to retarget; other bindings stay.
   --target-project <config> Destination project config; move-type or move-file.
 ${language !== "typescript" ? "  --root-namespace <name>  C# namespace convention override for sync-namespace\n                           or move-type.\n" : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
                            Within root, store plans only in .refactor-ai;
@@ -247,7 +260,7 @@ export function renderHelp(args: string[], invocation = "node dist/cli.js", runt
     return `${title}\ncapabilities: List implemented operations and modes as JSON for the selected backend.\n\nUsage:\n  ${invocation} capabilities --project <config>\n\nOptions:\n  --project <config>  Required ${language === "typescript" ? "tsconfig.json or jsconfig.json" : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln"}.\n  --help, -h          Show this help.\n\nExamples:\n${examples(invocation, (["capabilities --project examples/typescript/tsconfig.json", "capabilities --project examples/javascript/jsconfig.json", "capabilities --project examples/csharp/Caller.csproj"]).filter(example => !language || (language === "csharp" ? example.includes("csharp/") : !example.includes("csharp/"))))}\n\nThe configuration must exist. This command reports implemented backend capabilities,\nnot whether a particular source selection can be refactored. It does not load or\nchange source files.\n\n${runtimeRequirements}`;
   }
   if (operation) {
-    return `${title}\nUsage:\n  ${invocation} plan ${operation} --project <config> --file <source> [operation options]\n\n${operationText(operation as Operation, invocation, language)}\nOptions and defaults:\n${options}\n${context}\n${workflow(invocation)}\n${runtimeRequirements}`;
+    return `${title}\nUsage:\n  ${invocation} plan ${operation} --project <config> ${operation === "retarget-import" ? "[--file <file|directory>]" : "--file <source>"} [operation options]\n\n${operationText(operation as Operation, invocation, language)}\nOptions and defaults:\n${options}\n${context}\n${workflow(invocation)}\n${runtimeRequirements}`;
   }
   const commands = command === "plan"
     ? `Usage:\n  ${invocation} plan <operation> --project <config> --file <source> [options]\n`

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let workspace: string;
-const names = ["refactor-rename", "refactor-imports", "refactor-format", "refactor-extract-function", "refactor-extract-variable", "refactor-rename-file", "refactor-sync-namespace", "refactor-move-type", "refactor-move-file", "refactor-inline-reexports"];
+const names = ["refactor-rename", "refactor-imports", "refactor-format", "refactor-extract-function", "refactor-extract-variable", "refactor-rename-file", "refactor-sync-namespace", "refactor-move-type", "refactor-move-file", "refactor-inline-reexports", "refactor-retarget-import"];
 
 function run(command: string, args: string[], cwd = workspace): string {
   const result = spawnSync(command, args, {
