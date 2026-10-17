@@ -190,6 +190,17 @@ node .agents/skills/refactor-rename/scripts/refactor.mjs capabilities --project 
 
 For authors: `bun run package:skills` rebuilds the CLI and refreshes the resources for all skills. Include the generated `scripts/` and `assets/` directories in each distributed skill, excluding local caches such as `node_modules`, `bin`, `obj` and `.setup.lock`. `SKILL.md` alone cannot execute a refactoring. `bun run build` also refreshes these resources.
 
+## Recipe: extracting framework-free code into a workspace package
+
+Field-tested on a Next.js → TanStack Start migration of a ~900-file Bun monorepo ([dogfood log](docs/dogfood/2026-10-17-tanstack-start-migration.md)). Each step is one plan; run them in this order so every plan validates cleanly:
+
+1. **Retarget framework imports** in the files you will move: `retarget-import --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider --file <dir> --mocks add`, and app aliases that re-export shared code (`--from @/lib/formatters --to @scope/shared/formatters`).
+2. **Inline shims** that only re-export the target package: `inline-reexports --file <shim>`. Dynamic `import()` of a shim keeps it alive; retarget those by hand.
+3. **Move** the module or directory: `move-file --file <dir> --to packages/<pkg>/src/<dir> --target-project packages/<pkg>/tsconfig.json`. Importers get the package's `exports` subpath (entries are added, index modules publish the directory), `vi.mock` paths follow, same-package imports become relative, ESLint bulk-suppression entries move with their files.
+4. If the move fails with `NEW_DIAGNOSTICS`, read the first errors: an unresolved `@/…` alias means a dependency still lives in the app (retarget or move it first); `Cannot find module 'x'` means the destination package must declare `x` (add it with the app's version and install).
+
+Always pass the workspace root as `--root`, run the project's formatter and linter on changed files after `apply` (the engine uses the TypeScript formatter), and run the application tests. Lint rules that depend on per-package configuration (for example shadcn's `components.json`) do not move with the code; compare the destination package's lint setup.
+
 ## MVP guarantees and limitations
 
 - Planning transforms code in memory and compares compiler errors before and after the change. `validate` checks snapshot freshness and the stored analysis result; it does not automatically run an arbitrary project's tests. The demo and regression tests separately verify example behavior.
