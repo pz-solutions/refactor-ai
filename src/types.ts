@@ -1,4 +1,4 @@
-export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type";
+export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "move-file";
 
 export interface RefactorRequest {
   project: string;
@@ -9,7 +9,7 @@ export interface RefactorRequest {
   end?: number;
   newName?: string;
   mode?: "sort" | "remove-unused";
-  /** Absolute destination file path for move-type. */
+  /** Absolute destination file/directory path for move-type or move-file. */
   target?: string;
   /** Absolute destination .csproj or TS/JS config for cross-project moves. */
   targetProject?: string;

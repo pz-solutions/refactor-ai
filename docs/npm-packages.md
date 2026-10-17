@@ -13,6 +13,7 @@ The npm distribution complements self-contained agent skills. It uses the same T
 | `@refactor-ai/ts-extract-function` | `refactor-ts-extract-function` | `plan` |
 | `@refactor-ai/ts-extract-variable` | `refactor-ts-extract-variable` | `plan` |
 | `@refactor-ai/ts-rename-file` | `refactor-ts-rename-file` | `plan` |
+| `@refactor-ai/ts-move-file` | `refactor-ts-move-file` | `plan` |
 | `@refactor-ai/ts-move-type` | `refactor-ts-move-type` | `plan` |
 | `@refactor-ai/csharp-rename` | `refactor-csharp-rename` | `plan` |
 | `@refactor-ai/csharp-imports` | `refactor-csharp-imports` | `plan` |
@@ -66,7 +67,7 @@ npm install --save-dev /tmp/refactor-ai-ts-rename-0.1.3.tgz
 npx --no-install refactor-ts-rename --help
 ```
 
-`bun run test:npm` builds and packs all fourteen packages in a temporary workspace, invokes their inferred binaries through npx, checks scoped names and operation restrictions, and executes plan/preview/validate/apply on copied TS, JS and C# projects. It also verifies that C# can build its packaged helper with no source-checkout lookup. Tests require network access for initial npm/NuGet downloads and .NET SDK for C#.
+`bun run test:npm` builds and packs all fifteen packages in a temporary workspace, invokes their inferred binaries through npx, checks scoped names and operation restrictions, and executes plan/preview/validate/apply on copied TS, JS and C# projects. It also verifies that C# can build its packaged helper with no source-checkout lookup. Tests require network access for initial npm/NuGet downloads and .NET SDK for C#.
 
 ## Use after publication
 
@@ -91,11 +92,11 @@ Consumers require Node.js 22+ and npm. For TS/JS and aggregate packages, npm ins
 
 ## Publish
 
-For automatic tagged releases, see [GitHub Actions setup and publication](github-actions.md). The repository includes CI verification and a separate OIDC publishing workflow for all fourteen packages.
+For automatic tagged releases, see [GitHub Actions setup and publication](github-actions.md). The repository includes CI verification and a separate OIDC publishing workflow for all fifteen packages.
 
 The distribution scope changed from `@pz-solutions` to `@refactor-ai`. The complete CLI is `@refactor-ai/cli`; language tools use `ts-` or `csharp-` names and matching executable prefixes. Previously published language-neutral packages remain separate registry entries. npm treats the new scoped names as separate packages: they require an initial publication and their own Trusted Publisher connections. The GitHub repository remains `pz-solutions/refactor-ai`.
 
-The default organization scope is `@refactor-ai`. All fourteen generated manifests use one common version from the author `package.json`. Run `bun run version:packages --help` after building to choose a SemVer increment, prepare a beta/RC release or preview a bump with `--dry-run`. Stable packages declare `publishConfig.tag: latest`; prereleases declare `next`.
+The default organization scope is `@refactor-ai`. All fifteen generated manifests use one common version from the author `package.json`. Run `bun run version:packages --help` after building to choose a SemVer increment, prepare a beta/RC release or preview a bump with `--dry-run`. Stable packages declare `publishConfig.tag: latest`; prereleases declare `next`.
 
 For the default organization, use the verified release runner so version/ref matching, registry integrity and distribution-tag advancement are checked before uploading:
 
@@ -111,7 +112,7 @@ node dist/npm-release.mjs publish --ref v0.1.3 --dry-run
 node dist/npm-release.mjs publish --ref v0.1.3
 ```
 
-Replace `v0.1.3` with the selected version's Git tag. The release runner targets the fourteen `@refactor-ai` packages and refuses partial releases that would move `latest` or `next` backwards. Identical already-published versions are skipped; different content requires a new version. See the [release procedure](github-actions.md#release-a-version) for increments, prerelease promotion and retries.
+Replace `v0.1.3` with the selected version's Git tag. The release runner targets the fifteen `@refactor-ai` packages and refuses partial releases that would move `latest` or `next` backwards. Identical already-published versions are skipped; different content requires a new version. See the [release procedure](github-actions.md#release-a-version) for increments, prerelease promotion and retries.
 
 Use `--scope` to generate packages for another organization. The integration tests regenerate the default scope; regenerate any custom release afterwards. Individual packages can still be published with `npm publish ./dist/npm/ts-rename --access public`, but direct npm publication bypasses the runner's cross-package/version checks. A dry run inspects publication content and does not reserve a registry name/version or check channel advancement. npm account permissions and registry authentication remain the publisher's responsibility. Builds and tests never publish packages or change registry state.
 

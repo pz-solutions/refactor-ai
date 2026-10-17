@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import type { FileChange } from "../types";
 import { isInside, portablePath } from "./typescript-paths";
@@ -124,6 +124,7 @@ function includeBasePath(absolute: string): string {
 
 export class VirtualFs {
   readonly caseSensitive: boolean;
+  private readonly readPaths = new Map<string, string>();
   private readonly disk = new Map<string, string | undefined>();
   private readonly overlays = new Map<string, Overlay>();
   private readonly generated = new Map<string, { path: string; text: string }>();
@@ -166,6 +167,23 @@ export class VirtualFs {
     finally { this.suspended = previous; this.version += 1; }
   }
 
+  /** Workspace package symlinks must observe canonical overlays, including newly exported files. */
+  private readPath(path: string): string {
+    path = resolve(path);
+    if (!path.split(sep).includes("node_modules")) return path;
+    const cached = this.readPaths.get(path);
+    if (cached) return cached;
+    let ancestor = path;
+    while (!existsSync(ancestor) && dirname(ancestor) !== ancestor) ancestor = dirname(ancestor);
+    let canonical = path;
+    try {
+      const real = resolve(realpathSync(ancestor), relative(ancestor, path));
+      if (isInside(this.root, real) && !real.split(sep).includes("node_modules")) canonical = real;
+    } catch { /* unresolved dependency stays on disk */ }
+    this.readPaths.set(path, canonical);
+    return canonical;
+  }
+
   private rawDisk(path: string): string | undefined {
     const key = this.key(path);
     if (!this.disk.has(key)) {
@@ -185,12 +203,14 @@ export class VirtualFs {
   }
 
   hasBom(path: string): boolean {
+    path = this.readPath(path);
     const overlay = this.suspended ? undefined : this.overlays.get(this.key(path));
     if (overlay) return overlay.bom;
     return this.diskText(path)?.startsWith(BOM) ?? false;
   }
 
   readFile(path: string): string | undefined {
+    path = this.readPath(path);
     const key = this.key(path);
     const generated = this.generated.get(key);
     if (generated) return generated.text;
@@ -255,7 +275,7 @@ export class VirtualFs {
   }
 
   entries(directory: string): Entries {
-    directory = resolve(directory);
+    directory = this.readPath(directory);
     const hidden = this.isHidden(directory);
     const files = new Map<string, string>();
     const directories = new Map<string, string>();
@@ -281,7 +301,7 @@ export class VirtualFs {
   }
 
   directoryExists(path: string): boolean {
-    path = resolve(path);
+    path = this.readPath(path);
     if (this.virtualPaths().some((item) => this.contains(path, item) && !this.samePath(path, item))) return true;
     if (this.isHidden(path)) return false;
     try { return statSync(path).isDirectory(); } catch { return false; }
@@ -292,6 +312,7 @@ export class VirtualFs {
   }
 
   realpath(path: string): string {
+    path = this.readPath(path);
     const key = this.key(path);
     if (this.generated.has(key) || (!this.suspended && this.overlays.has(key))) return resolve(path);
     try { return ts.sys.realpath?.(path) ?? path; } catch { return path; }

@@ -89,14 +89,14 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         assertLanguage(options.project);
         if (options.targetProject) assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode)) throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
-        if (operation === "move-type" && !options.target) throw new Error("INVALID_ARGUMENT: target required for move-type");
-        if ((options.target !== undefined || options.targetProject !== undefined) && operation !== "move-type") {
-          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type");
+        if (["move-type", "move-file"].includes(operation) && !options.target) throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
+        if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file"].includes(operation)) {
+          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type or move-file");
         }
         const project = await realpath(resolve(options.project));
         const file = await realpath(resolve(options.file));
         const root = await realpath(resolve(options.root ?? dirname(project)));
-        const text = await readFile(file, "utf8");
+        const text = options.at !== undefined || options.end !== undefined ? await readFile(file, "utf8") : "";
         const position = (point: string | number): number => {
           if (typeof point === "string") return offset(text, point);
           if (!Number.isInteger(point) || point < 0 || point > text.length) throw new Error(`INVALID_POSITION: ${point}`);

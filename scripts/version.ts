@@ -15,7 +15,7 @@ export async function bumpVersion(manifestPath: string, change: string, options:
 
 async function main(args: string[]): Promise<void> {
   if (!args.length || args.includes("--help") || args.includes("-h") || args[0] === "help") {
-    console.log(`refactor-ai package versioning — one shared SemVer version for fourteen npm tools
+    console.log(`refactor-ai package versioning — one shared SemVer version for fifteen npm tools
 
 Usage:
   node dist/version.mjs <increment | exact-version> [--preid <identifier>] [--dry-run] [--manifest <file>]
@@ -32,7 +32,7 @@ Options:
   --manifest <file>    Author package.json path; default: this checkout/package.json.
   --help, -h           Show help without reading or changing files.
 
-Only the private author package.json is updated. All fourteen generated packages
+Only the private author package.json is updated. All fifteen generated packages
 inherit its version on the next package:npm build. bun.lock has no root version
 field and needs no update. No Git commits/tags, builds or publications are made.
 Stable releases publish to latest; all prereleases publish to next. Before 1.0,

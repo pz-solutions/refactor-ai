@@ -36,7 +36,7 @@ describe("CLI", () => {
     expect(unknown.stderr).toContain("UNSUPPORTED");
   }, 30_000); // Multiple Node startups can exceed Bun's 5-second default on CI.
 
-  test("all eight relocated launchers show help with no assets or setup tools", async () => {
+  test("all nine relocated launchers show help with no assets or setup tools", async () => {
     const root = await mkdtemp(join(tmpdir(), "refactor-ai-help-offline-"));
     roots.push(root);
     const node = Bun.which("node")!;

@@ -139,14 +139,15 @@ async function canonicalRequest(request: RefactorRequest): Promise<RefactorReque
   const root = await realpath(request.root);
   const result: RefactorRequest = { ...request, root, project: await realpath(request.project), file: await realpath(request.file) };
   await assertRegularPath(root, result.project);
-  await assertRegularPath(root, result.file);
+  const directoryMove = request.operation === "move-file" && (await lstat(result.file)).isDirectory();
+  await assertRegularPath(root, result.file, false, directoryMove);
   if (request.targetProject !== undefined) {
     result.targetProject = await realpath(request.targetProject);
     await assertRegularPath(root, result.targetProject);
   }
   if (request.target !== undefined) {
     result.target = inside(root, await canonicalMissing(request.target));
-    await assertRegularPath(root, result.target, true);
+    await assertRegularPath(root, result.target, true, directoryMove);
   }
   return result;
 }
@@ -195,9 +196,16 @@ export async function createPlan(
   changes.sort(byPath);
   const fileModes: NonNullable<Plan["fileModes"]> = {};
   const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat(request.file)).mode & 0o777 : 0o600;
+  const creationMode = async (path: string): Promise<number> => {
+    if (request.operation !== "move-file" || !request.target) return createdMode;
+    const source = (await lstat(request.file)).isDirectory()
+      ? resolve(request.file, relative(request.target, path)) : request.file;
+    if (!changes.some(change => change.path === source && change.after === null)) return 0o600;
+    return (await lstat(source)).mode & 0o777;
+  };
   for (const change of changes) {
     const beforeMode = change.before === null ? null : (await lstat(change.path)).mode & 0o777;
-    fileModes[change.path] = { before: beforeMode, after: change.after === null ? null : beforeMode ?? createdMode };
+    fileModes[change.path] = { before: beforeMode, after: change.after === null ? null : beforeMode ?? await creationMode(change.path) };
   }
   const conflict = caseConflict(root, before.files, changes);
   if (conflict) throw new Error(`CASE_CONFLICT: ${conflict} differs only by case from another path`);

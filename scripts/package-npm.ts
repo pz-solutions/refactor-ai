@@ -10,7 +10,7 @@ import { apiDeclaration, buildApiDeclarations } from "./api-declarations.ts";
 const defaultScope = npmScope;
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h") || args[0] === "help") {
-  console.log(`refactor-ai npm packager — build fourteen independently publishable CLI packages
+  console.log(`refactor-ai npm packager — build fifteen independently publishable CLI packages
 
 Usage:
   bun run package:npm [--scope <name>] [--out <directory>]
@@ -23,10 +23,10 @@ Options:
                     directories containing hand-written package content.
   --help, -h        Show help without building, copying or publishing files.
 
-Produces @${defaultScope}/cli (both backends), seven @${defaultScope}/ts-<operation>
+Produces @${defaultScope}/cli (both backends), eight @${defaultScope}/ts-<operation>
 packages for TypeScript/JavaScript, and six @${defaultScope}/csharp-<operation> packages.
 TS operations: rename, imports, format, extract-function, extract-variable,
-rename-file and move-type. C# operations: rename, imports, format, rename-file,
+rename-file, move-type and move-file. C# operations: rename, imports, format, rename-file,
 sync-namespace and move-type. Each package declares one executable and exports createRefactor with TypeScript
 declarations for custom scripts. Imports do not execute the CLI or load a project.
 
