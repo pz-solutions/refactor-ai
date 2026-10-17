@@ -539,6 +539,37 @@ function assertSafeInitialization(declaration: ts.DeclarationStatement): void {
   }
 }
 
+/** Identity of an imported binding, independent of its local name or specifier spelling. */
+function importedTarget(ws: Workspace, binding: ts.Declaration): string | undefined {
+  const imported = ts.isImportSpecifier(binding) ? (binding.propertyName ?? binding.name).text
+    : ts.isImportClause(binding) ? "default" : ts.isNamespaceImport(binding) ? "*" : undefined;
+  if (imported === undefined) return undefined;
+  let parent: ts.Node = binding;
+  while (parent.parent && !ts.isImportDeclaration(parent)) parent = parent.parent;
+  if (!ts.isImportDeclaration(parent) || !ts.isStringLiteralLike(parent.moduleSpecifier)) return undefined;
+  const resolved = ws.resolveModule(parent.moduleSpecifier, parent.getSourceFile());
+  return resolved ? `${ws.vfs.key(resolved.resolvedFileName)}\0${imported}` : undefined;
+}
+
+/** Imported bindings used by a declaration, resolved with the containing project's options. */
+function typeImportTargets(ws: Workspace, declaration: ts.Node): Set<string> {
+  const checker = ws.program().getTypeChecker();
+  const targets = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) for (const binding of checker.getSymbolAtLocation(node)?.declarations ?? []) {
+      const target = importedTarget(ws, binding);
+      if (target) targets.add(target);
+    }
+    if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteralLike(node.argument.literal)) {
+      const resolved = ws.resolveModule(node.argument.literal, node.getSourceFile());
+      if (resolved) targets.add(`${ws.vfs.key(resolved.resolvedFileName)}\0import-type:${node.qualifier?.getText() ?? "*"}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(declaration);
+  return targets;
+}
+
 function moveType(context: Context, request: RefactorRequest): void {
   const { ws, file, root, sourceFile, isJs } = context;
   const target = assertAbsolute("target", request.target);
@@ -562,6 +593,7 @@ function moveType(context: Context, request: RefactorRequest): void {
   if (!symbol || (symbol.declarations?.length ?? 0) !== 1) {
     fail("MERGED_DECLARATION_UNSUPPORTED", `${name} merges with other declarations (namespace, interface or global augmentation)`);
   }
+  const importedTargets = typeImportTargets(ws, declaration);
   const exported = (ts.getCombinedModifierFlags(declaration) & ts.ModifierFlags.Export) !== 0;
 
   const targetExists = ws.vfs.fileExists(target);
@@ -648,6 +680,12 @@ function moveType(context: Context, request: RefactorRequest): void {
   const movedDeclaration = targetSource && declaredTypes(targetSource, isJs).find((item) => item.name?.getText(targetSource) === name);
   if (!targetSource || !movedDeclaration) fail("REFACTOR_UNAVAILABLE", `${name} was not found in ${target} after the move`);
   assertSameCounts(countsBefore, referenceCounts(ws, target, movedDeclaration.name!.getStart(targetSource)), name);
+  context.verify = () => {
+    const actual = typeImportTargets(ws, movedDeclaration);
+    for (const dependency of importedTargets) {
+      if (!actual.has(dependency)) fail("REFERENCES_NOT_PRESERVED", `${name} in ${target} no longer imports ${dependency.replace("\0", " export ")}`);
+    }
+  };
 
   const changed = ws.vfs.changes().filter((change) => change.after !== null && !/\.json$/i.test(change.path)).map((change) => change.path);
   const afterViolations = accessViolations(ws, changed, (path) => ws.ownersOf(path));
@@ -865,7 +903,7 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     : sourceConfig;
   const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
   if (request.operation === "move-type" && request.target && isAbsolute(request.target) && existsSync(request.target)) affected.push(resolve(request.target));
-  const ws = new Workspace(root, sourceConfig, targetConfig, affected, !!movingFiles);
+  const ws = new Workspace(root, sourceConfig, targetConfig, affected);
   try {
     if (!movingFiles && !ws.vfs.fileExists(file)) fail("FILE_NOT_FOUND", file);
     const selected = movingFiles ? movingFiles.map(([from]) => from).filter(path => /\.[cm]?[jt]sx?$/.test(path)) : [file];
@@ -880,7 +918,7 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     const isJs = jsExtensions.includes(extension);
     const context: Context = { ws, root, file, sourceFile, isJs, notes: [] };
 
-    const diagnosticsBefore = ws.diagnostics();
+    const validate = ws.prepareValidation();
     let renamed: [string, string] | undefined;
     if (request.operation === "rename-file") renamed = renameFile(context, request).renamed;
     else if (request.operation === "move-type") moveType(context, request);
@@ -895,7 +933,7 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     const written = ws.vfs.changes().filter((change) => change.after !== null && !/\.json$/i.test(change.path)).map((change) => change.path);
     if (written.length) ws.assertNoUnhandledProjects(written, false);
     const layoutsBefore = new Map(ws.layouts);
-    const diagnosticsAfter = ws.diagnostics();
+    const { before: diagnosticsBefore, after: diagnosticsAfter, affected: validatedFiles, affectedProjects: validatedProjects = ws.participants.size } = validate();
     const renameMap = new Map((movingFiles ?? (renamed ? [renamed] : [])).map(([from, to]) => [ws.vfs.key(from), to]));
     const comparable = movingFiles ? diagnosticsBefore.map(item => ({ ...item, file: renameMap.get(ws.vfs.key(item.file)) ?? item.file })) : renamed
       ? diagnosticsBefore.map((item) => ws.vfs.samePath(item.file, renamed[0]) ? { ...item, file: renamed[1] } : item)
@@ -917,7 +955,9 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     for (const config of ws.observers()) {
       context.notes.push(`Updated and validated ${relative(root, config)}, a variant config that also compiles the affected files.`);
     }
-    if (ws.participants.size > 1) {
+    if (validatedFiles !== undefined) {
+      context.notes.push(`Validated ${validatedFiles} affected file(s) across ${validatedProjects} project(s): the changed files and their transitive importers in the original and planned module graphs.${validatedProjects < ws.participants.size ? ` Fully checked ${ws.participants.size - validatedProjects} other project(s).` : ""}`);
+    } else if (ws.participants.size > 1) {
       context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
     }
     if (isJs) {

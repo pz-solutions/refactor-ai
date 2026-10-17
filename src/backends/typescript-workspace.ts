@@ -17,8 +17,8 @@ import { portablePath, workspaceRootHint } from "./typescript-paths";
  * validated, but they do not own files. Other variants that list an affected
  * file are rejected; base configs only used through `extends` are skipped. Edits are computed by one language
  * service over the union of the
- * participants' files (they must agree on module-resolution options, except paths/baseUrl
- * for whole-module moves, whose edges resolve per project); results
+ * participants' files (syntax and emit settings must agree; resolution-only
+ * settings may differ and each program validates its own imports); results
  * are validated per project like `tsc -b`, with referenced projects'
  * declarations emitted in memory instead of read from stale disk outputs.
  */
@@ -52,11 +52,10 @@ export interface Participant {
 const configName = /^(tsconfig|jsconfig)(\..+)?\.json$/;
 const editorConfigName = /^(tsconfig|jsconfig)\.json$/;
 
-/** Options that change how specifiers resolve or how files parse; participants must agree on them. */
+/** Syntax, emit and extension rules shared by the editing language service. See README for the list. */
 const sharedOptionKeys = [
-  "module", "moduleResolution", "moduleDetection", "baseUrl", "paths", "rootDirs", "allowJs", "jsx",
+  "module", "moduleResolution", "moduleDetection", "allowJs", "jsx",
   "jsxImportSource", "esModuleInterop", "allowSyntheticDefaultImports", "resolveJsonModule",
-  "resolvePackageJsonExports", "resolvePackageJsonImports", "customConditions", "moduleSuffixes",
   "allowImportingTsExtensions", "rewriteRelativeImportExtensions", "allowArbitraryExtensions",
   "verbatimModuleSyntax", "preserveSymlinks", "experimentalDecorators", "typeRoots",
 ] as const;
@@ -155,6 +154,14 @@ export function moduleSpecifiers(sourceFile: ts.SourceFile): ts.StringLiteralLik
   return found.sort((a, b) => a.getStart(sourceFile) - b.getStart(sourceFile));
 }
 
+/** Ambient declarations can affect files with no import edge to this module. */
+function hasAmbientEffect(source: ts.SourceFile): boolean {
+  const visit = (node: ts.Node): boolean => (ts.isModuleDeclaration(node)
+    && (ts.isStringLiteral(node.name) || (node.flags & ts.NodeFlags.GlobalAugmentation) !== 0))
+    || !!ts.forEachChild(node, visit);
+  return visit(source);
+}
+
 export class Workspace {
   readonly vfs: VirtualFs;
   readonly participants = new Map<string, Participant>();
@@ -174,7 +181,7 @@ export class Workspace {
   private extendedConfigs: Set<string> | undefined;
 
   /** `affected` are the files whose module shape the operation changes (renamed, moved from or into). */
-  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = [], private readonly relocateModules = false) {
+  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = []) {
     this.vfs = new VirtualFs(root);
     this.sourceConfig = sourceConfig;
     this.targetConfig = targetConfig;
@@ -349,15 +356,10 @@ export class Workspace {
     const first = this.participant(this.sourceConfig);
     for (const item of withFiles) {
       for (const option of sharedOptionKeys) {
-        if (this.relocateModules && (option === "paths" || option === "baseUrl")) continue;
         if (!sameValue(item.parsed.options[option], first.parsed.options[option])) {
-          fail("PROJECT_OPTIONS_INCOMPATIBLE", `${item.configPath} and ${first.configPath} differ in compiler option '${option}'; cross-project planning requires identical module resolution settings`);
+          fail("PROJECT_OPTIONS_INCOMPATIBLE", `${item.configPath} and ${first.configPath} differ in compiler option '${option}'; cross-project planning requires compatible syntax, emit and extension settings`);
         }
       }
-    }
-    const configDirectories = new Set(withFiles.map((item) => vfs.key(dirname(item.configPath))));
-    if (!this.relocateModules && configDirectories.size > 1 && first.parsed.options.paths && !first.parsed.options.baseUrl) {
-      fail("PROJECT_OPTIONS_INCOMPATIBLE", "'paths' without 'baseUrl' resolves relative to each config; set baseUrl to plan across projects");
     }
     this.indexOwners();
   }
@@ -524,7 +526,7 @@ export class Workspace {
     const key = `${this.vfs.key(fileName)}|${detail}|${options.moduleDetection}|${options.jsx}`;
     const cached = this.sourceFiles.get(key);
     if (cached?.text === text) return cached.file;
-    const file = ts.createSourceFile(fileName, text, settings, false, scriptKindFor(fileName));
+    const file = ts.createSourceFile(fileName, text, settings, true, scriptKindFor(fileName));
     this.sourceFiles.set(key, { text, file });
     return file;
   }
@@ -549,6 +551,129 @@ export class Workspace {
     };
   }
 
+  private validationPrograms(): Map<string, ts.Program> {
+    return new Map(this.order.map((key) => {
+      const item = this.participants.get(key)!;
+      return [key, ts.createProgram({
+        rootNames: item.parsed.fileNames,
+        options: item.parsed.options,
+        projectReferences: item.parsed.projectReferences,
+        host: this.compilerHost(item.configPath, item.parsed.options),
+      })];
+    }));
+  }
+
+  /** Capture the original graphs before editing, without type-checking unrelated modules. */
+  prepareValidation(): () => { before: Diagnostic[]; after: Diagnostic[]; affected?: number; affectedProjects?: number } {
+    // Reference emission needs full checking and must precede edits: dependents and
+    // the editing service consume those in-memory declarations.
+    if ([...this.participants.values()].some((item) => item.references.length)) {
+      const before = this.diagnostics();
+      return () => ({ before, after: this.diagnostics() });
+    }
+    const beforePrograms = this.validationPrograms();
+    const beforeGraphs = new Map([...beforePrograms].map(([key, program]) => [key, this.validationGraph(program)]));
+    for (const [key, program] of beforePrograms) {
+      const layout = this.computedOutputRoot(this.participant(key), program);
+      if (layout !== undefined) this.layouts.set(key, layout);
+    }
+    return () => {
+      const afterPrograms = this.validationPrograms();
+      const only = new Map<string, Set<string>>();
+      let affected = 0;
+      for (const [key, before] of beforePrograms) {
+        const after = afterPrograms.get(key)!;
+        const closure = this.validationClosure(before, after, beforeGraphs.get(key)!, this.validationGraph(after));
+        if (closure) { only.set(key, closure); affected += closure.size; }
+      }
+      return {
+        before: this.vfs.original(() => this.diagnostics(beforePrograms, only)),
+        after: this.diagnostics(afterPrograms, only),
+        affected: only.size ? affected : undefined,
+        affectedProjects: only.size,
+      };
+    };
+  }
+
+  /** Resolved dependencies per source, including unresolved edges (resolution can change). */
+  private validationGraph(program: ts.Program): Map<string, (string | undefined)[]> {
+    const options = program.getCompilerOptions();
+    const host = this.vfs.moduleResolutionHost();
+    const cache = ts.createModuleResolutionCache(this.root, (path) => this.vfs.key(path), options);
+    const graph = new Map<string, (string | undefined)[]>();
+    for (const source of program.getSourceFiles()) {
+      if (!this.validationSource(source)) continue;
+      const dependencies = moduleSpecifiers(source).map((specifier) => {
+        const mode = program.getModeForUsageLocation(source, specifier);
+        const resolved = ts.resolveModuleName(specifier.text, source.fileName, options, host, cache, undefined, mode).resolvedModule;
+        return resolved ? this.vfs.key(resolved.resolvedFileName) : undefined;
+      });
+      for (const reference of source.referencedFiles) dependencies.push(this.vfs.key(resolve(dirname(source.fileName), reference.fileName)));
+      graph.set(this.vfs.key(source.fileName), dependencies);
+    }
+    return graph;
+  }
+
+  private validationSource(source: ts.SourceFile): boolean {
+    const path = resolve(source.fileName);
+    if (!isInside(this.root, path)) {
+      if (!source.isDeclarationFile) fail("PROJECT_SCOPE_INCOMPLETE", `user source outside ${this.root}: ${path}${workspaceRootHint(this.root, [path])}`);
+      return false;
+    }
+    return !portablePath(path).split("/").includes("node_modules") && !this.vfs.isHidden(path);
+  }
+
+  private validationClosure(before: ts.Program, after: ts.Program, oldGraph: Map<string, (string | undefined)[]>, newGraph: Map<string, (string | undefined)[]>): Set<string> | undefined {
+    const changes = this.vfs.changes();
+    const changed = new Set(changes.map((change) => this.vfs.key(change.path)));
+    const options = (program: ts.Program) => Object.fromEntries(Object.entries(program.getCompilerOptions()).filter(([key]) => key !== "configFile"));
+    if (!sameValue(options(before), options(after))) return undefined;
+    const oldRoots = new Set(before.getRootFileNames().map((path) => this.vfs.key(path)));
+    const newRoots = new Set(after.getRootFileNames().map((path) => this.vfs.key(path)));
+    if ([...oldRoots, ...newRoots].some((path) => oldRoots.has(path) !== newRoots.has(path) && !changed.has(path))) return undefined;
+    // Explicit configuration edits may alter roots and automatic type inclusion.
+    if (changes.some((change) => configName.test(basename(change.path)))) return undefined;
+    for (const change of changes.filter((change) => basename(change.path) === "package.json")) {
+      if (change.before === null || change.after === null) return undefined;
+      const withoutExports = (text: string | null) => {
+        try { const { exports: _exports, ...rest } = JSON.parse(text ?? "{}"); return rest; }
+        catch { return undefined; }
+      };
+      const oldShape = withoutExports(change.before), newShape = withoutExports(change.after);
+      if (oldShape === undefined || newShape === undefined || !sameValue(oldShape, newShape)) return undefined;
+    }
+    const importers = new Map<string, Set<string>>();
+    const pending = [...changed];
+    for (const graph of [oldGraph, newGraph]) for (const [file, dependencies] of graph) {
+      for (const target of dependencies) {
+        if (!target) continue;
+        const callers = importers.get(target) ?? new Set<string>();
+        callers.add(file);
+        importers.set(target, callers);
+      }
+    }
+    for (const file of new Set([...oldGraph.keys(), ...newGraph.keys()])) {
+      if (!sameValue(oldGraph.get(file), newGraph.get(file))) pending.push(file);
+    }
+    // Both versions matter: deleting a global declaration changes unrelated files
+    // too. Also cover newly reached, unedited global files after resolution changes.
+    const oldFiles = new Set(before.getSourceFiles().map((source) => this.vfs.key(source.fileName)));
+    const newFiles = new Set(after.getSourceFiles().map((source) => this.vfs.key(source.fileName)));
+    for (const program of [before, after]) for (const source of program.getSourceFiles()) {
+      const key = this.vfs.key(source.fileName);
+      if (!changed.has(key) && oldFiles.has(key) === newFiles.has(key)) continue;
+      if (!/\.json$/i.test(source.fileName) && ((changed.has(key) && source.isDeclarationFile) || !ts.isExternalModule(source) || hasAmbientEffect(source))) return undefined;
+    }
+    const closure = new Set<string>();
+    while (pending.length) {
+      const file = pending.pop()!;
+      if (closure.has(file)) continue;
+      closure.add(file);
+      pending.push(...(importers.get(file) ?? []));
+    }
+    return new Set([...closure].filter((file) => oldGraph.has(file) || newGraph.has(file)));
+  }
+
   /**
    * Type-check every participant in reference order, emitting declarations of
    * referenced projects in memory so dependents see the planned state. Like
@@ -556,7 +681,7 @@ export class Workspace {
    * including files of other projects it imports directly; a diagnostic seen
    * by several programs is reported with its highest per-program multiplicity.
    */
-  diagnostics(): Diagnostic[] {
+  diagnostics(programs?: Map<string, ts.Program>, only?: Map<string, Set<string>>): Diagnostic[] {
     const vfs = this.vfs;
     vfs.clearGenerated();
     this.layouts = new Map();
@@ -564,7 +689,7 @@ export class Workspace {
     const merged = new Map<string, { record: Diagnostic; count: number }>();
     for (const key of this.order) {
       const item = this.participants.get(key)!;
-      const program = ts.createProgram({
+      const program = programs?.get(key) ?? ts.createProgram({
         rootNames: item.parsed.fileNames,
         options: item.parsed.options,
         projectReferences: item.parsed.projectReferences,
@@ -592,9 +717,10 @@ export class Workspace {
           continue;
         }
         if (portablePath(path).split("/").includes("node_modules") || vfs.isHidden(path)) continue;
+        if (only?.has(key) && !only.get(key)!.has(vfs.key(path))) continue;
         program.getSyntacticDiagnostics(sourceFile).forEach(add);
         program.getSemanticDiagnostics(sourceFile).forEach(add);
-        if (item.parsed.options.declaration || item.parsed.options.composite) program.getDeclarationDiagnostics(sourceFile).forEach(add);
+        if (program.getCompilerOptions().declaration || program.getCompilerOptions().composite) program.getDeclarationDiagnostics(sourceFile).forEach(add);
       }
       for (const [recordKey, entry] of counts) {
         if ((merged.get(recordKey)?.count ?? 0) < entry.count) merged.set(recordKey, entry);
