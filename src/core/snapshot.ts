@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { lstat, readdir, readFile, readlink, realpath } from "node:fs/promises";
+import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 const excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
@@ -77,20 +79,59 @@ export async function missingDirectories(root: string, file: string): Promise<st
   return missing;
 }
 
+/**
+ * Fingerprint every regular file and symlink under the root. Symlinks are recorded
+ * by their link text, never followed; writes through them are still rejected by
+ * assertRegularPath. Inside a Git work tree only tracked and unignored files count,
+ * so build caches and ignored artifacts neither slow planning nor make plans stale.
+ */
 export async function snapshot(rootPath: string): Promise<Snapshot> {
   const root = await realpath(rootPath);
   const files: Record<string, string> = {};
-  async function walk(directory: string): Promise<void> {
-    const entries = await readdir(directory, { withFileTypes: true });
-    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    for (const entry of entries) {
-      if (excluded.has(entry.name)) continue;
-      const file = resolve(directory, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(`SYMLINK_UNSUPPORTED: ${file}`);
-      if (entry.isDirectory()) await walk(file);
-      else if (entry.isFile()) files[relative(root, file)] = sha256(await readFile(file));
+  const record = async (file: string, kind: "file" | "symlink") => {
+    files[relative(root, file)] = kind === "symlink" ? `symlink:${await readlink(file)}` : sha256(await readFile(file));
+  };
+  const listed = await gitFiles(root);
+  if (listed) {
+    for (const name of listed) {
+      if (name.split("/").some(part => excluded.has(part))) continue;
+      const file = resolve(root, name);
+      const stat = await lstat(file).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      });
+      if (stat?.isSymbolicLink()) await record(file, "symlink");
+      else if (stat?.isFile()) await record(file, "file");
     }
+  } else {
+    async function walk(directory: string): Promise<void> {
+      const entries = await readdir(directory, { withFileTypes: true });
+      entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      for (const entry of entries) {
+        if (excluded.has(entry.name)) continue;
+        const file = resolve(directory, entry.name);
+        if (entry.isSymbolicLink()) await record(file, "symlink");
+        else if (entry.isDirectory()) await walk(file);
+        else if (entry.isFile()) await record(file, "file");
+      }
+    }
+    await walk(root);
   }
-  await walk(root);
   return { files, hash: sha256(JSON.stringify(files)) };
+}
+
+const run = promisify(execFile);
+
+/** Tracked and unignored untracked files below root, sorted; null outside a Git work tree. */
+async function gitFiles(root: string): Promise<string[] | null> {
+  try {
+    // Without --full-name, paths are relative to cwd (the root); -z disables quoting.
+    const { stdout } = await run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."], {
+      cwd: root, maxBuffer: 1 << 28, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    });
+    const names = [...new Set(stdout.split("\0").filter(Boolean))].map(name => name.split(sep).join("/"));
+    return names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+  } catch {
+    return null;
+  }
 }
