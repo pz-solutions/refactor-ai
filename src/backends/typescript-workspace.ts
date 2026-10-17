@@ -3,7 +3,7 @@ import { readdirSync, statSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import type { Diagnostic } from "../types";
 import { VirtualFs, fail, isInside } from "./typescript-vfs";
-import { portablePath } from "./typescript-paths";
+import { portablePath, workspaceRootHint } from "./typescript-paths";
 
 /**
  * A set of TS/JS projects ("participants") loaded over a VirtualFs.
@@ -573,7 +573,7 @@ export class Workspace {
       for (const sourceFile of program.getSourceFiles()) {
         const path = resolve(sourceFile.fileName);
         if (!isInside(this.root, path)) {
-          if (!sourceFile.isDeclarationFile) fail("PROJECT_SCOPE_INCOMPLETE", `${item.configPath} uses user source outside ${this.root}: ${path}`);
+          if (!sourceFile.isDeclarationFile) fail("PROJECT_SCOPE_INCOMPLETE", `${item.configPath} uses user source outside ${this.root}: ${path}${workspaceRootHint(this.root, [path])}`);
           continue;
         }
         if (portablePath(path).split("/").includes("node_modules") || vfs.isHidden(path)) continue;

@@ -4,7 +4,7 @@ import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
 import type { BackendResult, Capability, Diagnostic, FileChange, RefactorRequest } from "../types";
 import { analyzeFileOperation, fileCapabilities } from "./typescript-fileops";
 import { moduleSpecifiers } from "./typescript-workspace";
-import { isInside } from "./typescript-paths";
+import { isInside, workspaceRootHint } from "./typescript-paths";
 
 export const capabilities: Capability[] = [
   { operation: "rename", description: "Rename a TypeScript or JavaScript symbol across its configured project." },
@@ -455,7 +455,7 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
       .map((source) => canonical(source.fileName))
       .sort();
     if (outsideUserSources.length) {
-      fail("PROJECT_SCOPE_INCOMPLETE", `program contains user source outside ${state.root}: ${outsideUserSources.join(", ")}`);
+      fail("PROJECT_SCOPE_INCOMPLETE", `program contains user source outside ${state.root}: ${outsideUserSources.slice(0, 5).join(", ")}${outsideUserSources.length > 5 ? ` and ${outsideUserSources.length - 5} more` : ""}${workspaceRootHint(state.root, outsideUserSources)}`);
     }
 
     const importers = importersByFile(state);
