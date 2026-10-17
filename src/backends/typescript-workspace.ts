@@ -118,7 +118,17 @@ export function scriptKindFor(path: string): ts.ScriptKind {
   return ts.ScriptKind.TS;
 }
 
-/** String literals naming modules: imports, exports, require, import(), import types, JSDoc import types. */
+const mockObjects = new Set(["vi", "vitest", "jest"]);
+const mockMethods = new Set(["mock", "doMock", "unmock", "doUnmock", "importActual", "importMock", "requireActual", "requireMock", "createMockFromModule"]);
+
+/** `vi.mock("./x")` and friends: test-runner calls whose first argument is resolved like an import. */
+function isModuleMockCall(node: ts.Node): node is ts.CallExpression {
+  return ts.isCallExpression(node) && node.arguments.length >= 1 && ts.isStringLiteralLike(node.arguments[0]!)
+    && ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
+    && mockObjects.has(node.expression.expression.text) && mockMethods.has(node.expression.name.text);
+}
+
+/** String literals naming modules: imports, exports, require, import(), import types, JSDoc import types, test-runner module mocks. */
 export function moduleSpecifiers(sourceFile: ts.SourceFile): ts.StringLiteralLike[] {
   const found: ts.StringLiteralLike[] = [];
   const seen = new Set<ts.Node>();
@@ -132,6 +142,8 @@ export function moduleSpecifiers(sourceFile: ts.SourceFile): ts.StringLiteralLik
       found.push(node.expression);
     } else if (ts.isCallExpression(node) && node.arguments.length >= 1 && ts.isStringLiteralLike(node.arguments[0]!)
       && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
+      found.push(node.arguments[0] as ts.StringLiteralLike);
+    } else if (isModuleMockCall(node)) {
       found.push(node.arguments[0] as ts.StringLiteralLike);
     } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteralLike(node.argument.literal)) {
       found.push(node.argument.literal);

@@ -121,6 +121,16 @@ describe("move-file", () => {
     expect(await readFile(w.path("packages/feature/src/ui/component.ts"), "utf8")).toContain("component");
   });
 
+  test("rewrites test-runner module mocks that name a moved module", async () => {
+    const w = await packages({
+      "apps/web/src/use.test.ts": 'declare const vi: { mock(path: string, factory?: () => unknown): void; doMock(path: string): void };\nvi.mock("./component", () => ({ component: () => 0 }));\nvi.doMock("./component");\nimport { value } from "./use";\nexport const seen = value;\n',
+    });
+    const result = await analyze(packageRequest(w));
+    const test = changed(result, w.path("apps/web/src/use.test.ts"));
+    expect(test).toContain('vi.mock("@scope/feature/ui/component", () => ({ component: () => 0 }));');
+    expect(test).toContain('vi.doMock("@scope/feature/ui/component");');
+  });
+
   test("publishes a moved directory's index module under the directory key", async () => {
     const w = await packages({
       "apps/web/src/hooks/index.ts": 'export { hook } from "./hook";\n',
