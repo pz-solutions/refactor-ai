@@ -34,3 +34,44 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 - `plan imports --mode sort` on one file of `apps/web`: 37 s wall / 52 s CPU. The engine computes semantic diagnostics for every program file before and after, although only one file changed.
 - Proposal: validate the **affected closure** — changed files plus their transitive importers (reverse module graph of the original program) — and fall back to the whole program when a changed file is a script, declares `declare global`/module augmentation, or edits a config. Same guarantee for module code, typically a 10–100× smaller check for leaf files.
 - Fix (`perf: validate only the affected closure`): single-project operations check the changed files plus their transitive importers; scripts, `.d.ts`, `declare global` and ambient module declarations fall back to the whole program. uber-platform: imports sort 37 s → 12 s, rename 30 s → 12 s (8 affected files each).
+
+### F8. Cross-project `move-type` rejects monorepo packages with different `paths` — open (blocker)
+- Slice agent (profile): `plan move-type … --target-project packages/app-features/tsconfig.json` → `PROJECT_OPTIONS_INCOMPATIBLE: … differ in compiler option 'paths'`. Apps and packages in a monorepo almost always differ in `paths` (`@/*` in the app only). The check should compare the options that affect how the *moved declaration's* imports and its importers resolve, not require identical configs.
+
+### F9. Rename keeps the old public name behind an alias — open (UX)
+- Renaming `ProfileContent` → `ProfileView` produced `export { ProfileView as ProfileContent }` in the barrel; the agent removed the alias by hand. Useful default for libraries, wrong during a migration where all consumers are in the workspace. Proposal: `--public` (rename re-exported names too when every consumer is loaded).
+
+### F10. TypeScript formatter ≠ repository formatter — open (docs/hook)
+- Agents ran `vp check --fix` (oxfmt) after every apply; refactor-ai's edits use the TS formatter's style. Proposal: skills tell the agent to run the project's formatter on changed files after `apply`; optionally `--format-command`.
+
+### F11. Positions (`--at line:col`) are error-prone for agents — open (UX)
+- Two failed renames before the right one: wrong column hit `useLocale` (`RENAME_UNAVAILABLE`). Proposal: `--symbol <name>` (top-level declaration by name, error if ambiguous) as an alternative to `--at`.
+
+### F12. Slice agents still moved modules by hand
+- Profile slice: whole module + function moved into the shared package, next-intl → use-intl, `@/lib/formatters` → relative shared path, package `exports` entry, tests adapted — all manual. `move-file` + `retarget-import` + `inline-reexports` now cover the first three; the next slices must be briefed to use them.
+
+### F13. Index modules exported as `…/index` — fixed
+- First real `move-file` (apps/web/src/lib/hooks → app-features/src/shared/data, 61 files) planned `@uber-platform/app-features/shared/data/index`. Index modules now publish the directory key (`./shared/data`, `.` for `src/index`).
+
+### F14. `.refactor-ai/` showed up as untracked in the user's repo — fixed
+- The state directory now carries its own `*` `.gitignore`.
+
+### F15. Test mocks name modules by string — fixed
+- After the hooks move 21 Vitest cases failed: `vi.doMock("@/lib/hooks", …)` still named the old path, so the mock silently stopped applying. `vi|vitest|jest` `.mock/doMock/unmock/importActual/requireActual/…` first arguments are now module specifiers for every operation. Redoing the move with the fix rewrote all mocks; frontend suite back to green (except F16).
+
+### F16. Retargeting a module leaves tests mocking the old one — open
+- `next-intl` → `use-intl` in the data table broke 8 tests that `vi.doMock("next-intl", …)`: the code under test now reads `use-intl`. `retarget-import` should list test files that mock `--from` while (transitively) importing a retargeted file, or offer `--mocks` to add the parallel mock.
+
+### F17. Moves inside a package keep package self-imports — open
+- After retarget (`@/contexts/organization-context` → `@uber-platform/app-features/shell/organization-context`) and the move into app-features, the moved hooks imported their own package by name. Should become relative (`../../shell/organization-context`) like other same-package imports. Fixed by hand.
+
+### F18. Moves must carry lint-suppression ledgers — open
+- ESLint bulk suppressions (`eslint-suppressions.json`) are keyed by file path per package. Moving `profile-content` into app-features moved 17 suppressed violations into an unsuppressed location; the entry had to be pruned from the Next ledger and re-added to the package ledger by hand. `move-file` could move matching ledger entries (ESLint native ledger format) and report it in notes.
+
+### F19. Changed-file gates flag untouched complexity — process
+- Fallow's changed-file audit treated two components whose only change was a rewritten import as new findings. Mass import rewrites widen "changed files" for every gate; expect it and keep such moves in dedicated commits.
+
+### Coordinator lessons (for the migration skills)
+- Ground every slice brief in the source: the `/dashboard/invitations` brief described an accept/decline page from the route name; the route only redirects to `/dashboard/settings/invitations`. The implementer correctly stopped.
+- Build the CLI (`bun run build`) before integration tests that execute `dist/`; stale `dist` produced two false failures after merging branches.
+- Throughput: `move-file` on 900-file app: ~110 s per plan (two full program checks in the multi-project path; F7's affected-closure validation is single-project only so far).
