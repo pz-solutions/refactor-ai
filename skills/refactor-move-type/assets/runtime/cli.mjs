@@ -13,17 +13,7 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
-var __esm = (fn, res, err) => () => {
-  if (fn)
-    try {
-      res = fn(fn = 0);
-    } catch (e) {
-      err = [e];
-    }
-  if (err)
-    throw err[0];
-  return res;
-};
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // src/backends/typescript-paths.ts
 import { isAbsolute as isAbsolute3, relative as relative4, sep as sep4 } from "node:path";
@@ -250,10 +240,10 @@ class VirtualFs {
     }
     for (const name of names) {
       try {
-        const stat = statSync(resolve6(directory, name));
-        if (stat.isFile())
+        const stat2 = statSync(resolve6(directory, name));
+        if (stat2.isFile())
           files.push(name);
-        else if (stat.isDirectory())
+        else if (stat2.isDirectory())
           directories.push(name);
       } catch {}
     }
@@ -421,18 +411,18 @@ import ts2 from "typescript";
 import { readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
 import { basename as basename4, dirname as dirname6, relative as relative6, resolve as resolve7 } from "node:path";
 function configPathFor(project) {
-  let stat;
+  let stat2;
   try {
-    stat = statSync2(project);
+    stat2 = statSync2(project);
   } catch {
     fail("PROJECT_NOT_FOUND", project);
   }
-  if (stat.isFile()) {
+  if (stat2.isFile()) {
     if (!configName.test(basename4(project)))
       fail("UNSUPPORTED_PROJECT", "project must name a tsconfig*.json or jsconfig*.json file");
     return resolve7(project);
   }
-  if (!stat.isDirectory())
+  if (!stat2.isDirectory())
     fail("UNSUPPORTED_PROJECT", "project must be a config file or directory");
   const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve7(project, name)).filter((path) => {
     try {
@@ -458,16 +448,16 @@ function discoverConfigs(root) {
     }
     for (const name of names) {
       const path = resolve7(directory, name);
-      let stat;
+      let stat2;
       try {
-        stat = statSync2(path);
+        stat2 = statSync2(path);
       } catch {
         continue;
       }
-      if (stat.isDirectory()) {
+      if (stat2.isDirectory()) {
         if (name !== "node_modules" && !name.startsWith("."))
           visit(path);
-      } else if (stat.isFile() && configName.test(name)) {
+      } else if (stat2.isFile() && configName.test(name)) {
         found.push(path);
       }
     }
@@ -903,7 +893,7 @@ class Workspace {
     const vfs = this.vfs;
     return {
       getSourceFile: (fileName, settings) => this.sourceFile(fileName, settings, options),
-      getDefaultLibFileName: (options) => ts2.getDefaultLibFilePath(options),
+      getDefaultLibFileName: (options2) => ts2.getDefaultLibFilePath(options2),
       writeFile: () => {},
       getCurrentDirectory: () => dirname6(configPath),
       getCanonicalFileName: (fileName) => vfs.caseSensitive ? fileName : fileName.toLowerCase(),
@@ -1019,9 +1009,9 @@ class Workspace {
             return;
           const absolute = resolve7(directory, element.text);
           const start = element.getStart(json);
-          const rename = configRenames.find(([from]) => vfs.samePath(from, absolute));
-          if (rename) {
-            const relativePath = portablePath(relative6(directory, rename[1]));
+          const rename2 = configRenames.find(([from]) => vfs.samePath(from, absolute));
+          if (rename2) {
+            const relativePath = portablePath(relative6(directory, rename2[1]));
             const spec = element.text.startsWith("./") && !relativePath.startsWith("../") ? `./${relativePath}` : relativePath;
             const quote = text[start];
             changes.push({ span: { start, length: element.end - start }, newText: `${quote}${JSON.stringify(spec).slice(1, -1)}${quote}` });
@@ -1196,7 +1186,7 @@ function selectType(context, request) {
   const { sourceFile, isJs } = context;
   const types = declaredTypes(sourceFile, isJs);
   const namespaced = namespaceMembers(sourceFile);
-  const named = (name) => types.filter((declaration) => declaration.name?.getText(sourceFile) === name);
+  const named = (name2) => types.filter((declaration) => declaration.name?.getText(sourceFile) === name2);
   let name = request.typeName;
   if (request.position !== undefined) {
     if (!Number.isInteger(request.position) || request.position < 0 || request.position > sourceFile.text.length) {
@@ -1662,13 +1652,13 @@ function moveType(context, request) {
     if (owners.length !== 1 || !ws.vfs.samePath(owners[0], ws.targetConfig)) {
       fail("TARGET_NOT_IN_PROJECT", `${target} must belong to exactly ${ws.targetConfig}; owners: ${owners.join(", ") || "none"}`);
     }
-    const targetSource = program.getSourceFile(target);
-    if (!ts3.isExternalModule(targetSource))
+    const targetSource2 = program.getSourceFile(target);
+    if (!ts3.isExternalModule(targetSource2))
       fail("MODULE_REQUIRED", `${target} is not an ES module`);
-    if (isJs && usesCommonJs(targetSource))
+    if (isJs && usesCommonJs(targetSource2))
       fail("COMMONJS_UNSUPPORTED", `${target} uses CommonJS`);
-    const existing = topLevelNames(targetSource).get(name);
-    const importsMoved = existing && ts3.isImportDeclaration(existing) && ts3.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource)?.resolvedFileName ?? "", file);
+    const existing = topLevelNames(targetSource2).get(name);
+    const importsMoved = existing && ts3.isImportDeclaration(existing) && ts3.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource2)?.resolvedFileName ?? "", file);
     if (existing && !importsMoved)
       fail("TARGET_CONFLICT", `${target} already declares ${name}`);
   }
@@ -1889,19 +1879,19 @@ function assertAbsolute2(name, value) {
   return canonical(value);
 }
 function configPathFor2(project) {
-  let stat;
+  let stat2;
   try {
-    stat = statSync3(project);
+    stat2 = statSync3(project);
   } catch {
     fail2("PROJECT_NOT_FOUND", project);
   }
-  if (stat.isFile()) {
+  if (stat2.isFile()) {
     if (!["tsconfig.json", "jsconfig.json"].includes(basename5(project))) {
       fail2("UNSUPPORTED_PROJECT", "project must name tsconfig.json or jsconfig.json");
     }
     return project;
   }
-  if (!stat.isDirectory())
+  if (!stat2.isDirectory())
     fail2("UNSUPPORTED_PROJECT", "project must be a config file or directory");
   const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve9(project, name)).filter(ts4.sys.fileExists);
   if (candidates.length === 0)
@@ -2167,8 +2157,8 @@ function extraction(state, file, request) {
   applyFileEdits(state, result.edits);
   if (result.renameLocation === undefined)
     fail2("REFACTOR_UNAVAILABLE", "TypeScript did not provide a semantic rename location for the extraction");
-  const renameFile = canonical(result.renameFilename ?? file);
-  rename2(state, renameFile, { ...request, operation: "rename", file: renameFile, position: result.renameLocation });
+  const renameFile2 = canonical(result.renameFilename ?? file);
+  rename2(state, renameFile2, { ...request, operation: "rename", file: renameFile2, position: result.renameLocation });
 }
 function changedFiles(state, originals) {
   return [...state.overlays].filter(([path, after]) => originals.get(path) !== after).sort(([a], [b]) => a.localeCompare(b)).map(([path, after]) => ({ path, before: originals.get(path) ?? null, after }));
@@ -2288,6 +2278,11 @@ var init_typescript = __esm(() => {
 });
 
 // src/backends/csharp.ts
+var exports_csharp = {};
+__export(exports_csharp, {
+  analyze: () => analyze2,
+  capabilities: () => capabilities2
+});
 import { basename as basename6, dirname as dirname9, isAbsolute as isAbsolute6, join, relative as relative8, resolve as resolve10, sep as sep7 } from "node:path";
 import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -2690,9 +2685,9 @@ class Diff {
       if (!component.removed) {
         if (!component.added && this.useLongestToken) {
           let value = newTokens.slice(newPos, newPos + component.count);
-          value = value.map(function(value, i) {
+          value = value.map(function(value2, i) {
             const oldValue = oldTokens[oldPos + i];
-            return oldValue.length > value.length ? oldValue : value;
+            return oldValue.length > value2.length ? oldValue : value2;
           });
           component.value = this.join(value);
         } else {
@@ -2936,8 +2931,10 @@ function splitLines(text) {
   return result;
 }
 // src/core/snapshot.ts
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { lstat, readdir, readFile, readlink, realpath } from "node:fs/promises";
+import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 var excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
 function sha256(value) {
@@ -3016,23 +3013,58 @@ async function missingDirectories(root, file) {
 async function snapshot(rootPath) {
   const root = await realpath(rootPath);
   const files = {};
-  async function walk(directory) {
-    const entries = await readdir(directory, { withFileTypes: true });
-    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    for (const entry of entries) {
-      if (excluded.has(entry.name))
+  const record = async (file, kind) => {
+    files[relative(root, file)] = kind === "symlink" ? `symlink:${await readlink(file)}` : sha256(await readFile(file));
+  };
+  const listed = await gitFiles(root);
+  if (listed) {
+    for (const name of listed) {
+      if (name.split("/").some((part) => excluded.has(part)))
         continue;
-      const file = resolve(directory, entry.name);
-      if (entry.isSymbolicLink())
-        throw new Error(`SYMLINK_UNSUPPORTED: ${file}`);
-      if (entry.isDirectory())
-        await walk(file);
-      else if (entry.isFile())
-        files[relative(root, file)] = sha256(await readFile(file));
+      const file = resolve(root, name);
+      const stat = await lstat(file).catch((error) => {
+        if (error.code === "ENOENT")
+          return null;
+        throw error;
+      });
+      if (stat?.isSymbolicLink())
+        await record(file, "symlink");
+      else if (stat?.isFile())
+        await record(file, "file");
     }
+  } else {
+    async function walk(directory) {
+      const entries = await readdir(directory, { withFileTypes: true });
+      entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      for (const entry of entries) {
+        if (excluded.has(entry.name))
+          continue;
+        const file = resolve(directory, entry.name);
+        if (entry.isSymbolicLink())
+          await record(file, "symlink");
+        else if (entry.isDirectory())
+          await walk(file);
+        else if (entry.isFile())
+          await record(file, "file");
+      }
+    }
+    await walk(root);
   }
-  await walk(root);
   return { files, hash: sha256(JSON.stringify(files)) };
+}
+var run = promisify(execFile);
+async function gitFiles(root) {
+  try {
+    const { stdout } = await run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."], {
+      cwd: root,
+      maxBuffer: 1 << 28,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
+    });
+    const names = [...new Set(stdout.split("\x00").filter(Boolean))].map((name) => name.split(sep).join("/"));
+    return names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+  } catch {
+    return null;
+  }
 }
 
 // src/core/plan.ts
@@ -3491,9 +3523,9 @@ function createRefactorApi(context) {
         if ((options.target !== undefined || options.targetProject !== undefined) && operation !== "move-type") {
           throw new Error("INVALID_ARGUMENT: target and targetProject require move-type");
         }
-        const project = await realpath3(resolve4(options.project));
+        const project2 = await realpath3(resolve4(options.project));
         const file = await realpath3(resolve4(options.file));
-        const root = await realpath3(resolve4(options.root ?? dirname3(project)));
+        const root = await realpath3(resolve4(options.root ?? dirname3(project2)));
         const text = await readFile4(file, "utf8");
         const position = (point) => {
           if (typeof point === "string")
@@ -3502,8 +3534,8 @@ function createRefactorApi(context) {
             throw new Error(`INVALID_POSITION: ${point}`);
           return point;
         };
-        const request = {
-          project,
+        const request2 = {
+          project: project2,
           root,
           file,
           operation,
@@ -3516,7 +3548,7 @@ function createRefactorApi(context) {
           ...options.typeName !== undefined ? { typeName: options.typeName } : {},
           ...options.rootNamespace !== undefined ? { rootNamespace: options.rootNamespace } : {}
         };
-        return { project, request };
+        return { project: project2, request: request2 };
       }
     },
     preview(plan) {
@@ -3865,18 +3897,18 @@ async function runCli(args, context) {
   const { command, operation, flags } = parse([...args]);
   const api = createRefactorApi(context);
   if (["preview", "validate", "apply"].includes(command)) {
-    const plan = await api.loadPlan(required(flags, "plan"));
+    const plan2 = await api.loadPlan(required(flags, "plan"));
     if (command === "preview") {
-      process.stdout.write(api.preview(plan) || `No changes.
+      process.stdout.write(api.preview(plan2) || `No changes.
 `);
       return;
     }
     if (command === "apply") {
-      console.log(JSON.stringify(await api.apply(plan), null, 2));
+      console.log(JSON.stringify(await api.apply(plan2), null, 2));
       return;
     }
-    console.log(JSON.stringify(await api.validate(plan), null, 2));
-    if (plan.validation.status !== "passed")
+    console.log(JSON.stringify(await api.validate(plan2), null, 2));
+    if (plan2.validation.status !== "passed")
       process.exitCode = 1;
     return;
   }
@@ -3947,8 +3979,8 @@ async function runCli(args, context) {
 var loadBackend = async (project, toolkitRoot) => {
   if (languageForProject(project) !== "csharp")
     return Promise.resolve().then(() => (init_typescript(), exports_typescript));
-  const backend = await Promise.resolve().then(() => (init_csharp(), {}));
-  return { capabilities: capabilities2, analyze: (request) => analyze2(request, toolkitRoot) };
+  const backend = await Promise.resolve().then(() => (init_csharp(), exports_csharp));
+  return { capabilities: backend.capabilities, analyze: (request) => backend.analyze(request, toolkitRoot) };
 };
 
 // src/cli.ts

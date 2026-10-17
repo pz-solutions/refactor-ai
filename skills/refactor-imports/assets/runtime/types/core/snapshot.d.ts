@@ -9,4 +9,10 @@ export declare function assertRegularPath(root: string, file: string, allowMissi
 export declare function canonicalMissing(file: string): Promise<string>;
 /** Ancestor directories of file (below root) that do not exist yet, outermost first. */
 export declare function missingDirectories(root: string, file: string): Promise<string[]>;
+/**
+ * Fingerprint every regular file and symlink under the root. Symlinks are recorded
+ * by their link text, never followed; writes through them are still rejected by
+ * assertRegularPath. Inside a Git work tree only tracked and unignored files count,
+ * so build caches and ignored artifacts neither slow planning nor make plans stale.
+ */
 export declare function snapshot(rootPath: string): Promise<Snapshot>;

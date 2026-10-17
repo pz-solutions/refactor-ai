@@ -193,9 +193,9 @@ class Diff {
       if (!component.removed) {
         if (!component.added && this.useLongestToken) {
           let value = newTokens.slice(newPos, newPos + component.count);
-          value = value.map(function(value, i) {
+          value = value.map(function(value2, i) {
             const oldValue = oldTokens[oldPos + i];
-            return oldValue.length > value.length ? oldValue : value;
+            return oldValue.length > value2.length ? oldValue : value2;
           });
           component.value = this.join(value);
         } else {
@@ -439,8 +439,10 @@ function splitLines(text) {
   return result;
 }
 // src/core/snapshot.ts
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { lstat, readdir, readFile, readlink, realpath } from "node:fs/promises";
+import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 var excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
 function sha256(value) {
@@ -519,23 +521,58 @@ async function missingDirectories(root, file) {
 async function snapshot(rootPath) {
   const root = await realpath(rootPath);
   const files = {};
-  async function walk(directory) {
-    const entries = await readdir(directory, { withFileTypes: true });
-    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    for (const entry of entries) {
-      if (excluded.has(entry.name))
+  const record = async (file, kind) => {
+    files[relative(root, file)] = kind === "symlink" ? `symlink:${await readlink(file)}` : sha256(await readFile(file));
+  };
+  const listed = await gitFiles(root);
+  if (listed) {
+    for (const name of listed) {
+      if (name.split("/").some((part) => excluded.has(part)))
         continue;
-      const file = resolve(directory, entry.name);
-      if (entry.isSymbolicLink())
-        throw new Error(`SYMLINK_UNSUPPORTED: ${file}`);
-      if (entry.isDirectory())
-        await walk(file);
-      else if (entry.isFile())
-        files[relative(root, file)] = sha256(await readFile(file));
+      const file = resolve(root, name);
+      const stat = await lstat(file).catch((error) => {
+        if (error.code === "ENOENT")
+          return null;
+        throw error;
+      });
+      if (stat?.isSymbolicLink())
+        await record(file, "symlink");
+      else if (stat?.isFile())
+        await record(file, "file");
     }
+  } else {
+    async function walk(directory) {
+      const entries = await readdir(directory, { withFileTypes: true });
+      entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      for (const entry of entries) {
+        if (excluded.has(entry.name))
+          continue;
+        const file = resolve(directory, entry.name);
+        if (entry.isSymbolicLink())
+          await record(file, "symlink");
+        else if (entry.isDirectory())
+          await walk(file);
+        else if (entry.isFile())
+          await record(file, "file");
+      }
+    }
+    await walk(root);
   }
-  await walk(root);
   return { files, hash: sha256(JSON.stringify(files)) };
+}
+var run = promisify(execFile);
+async function gitFiles(root) {
+  try {
+    const { stdout } = await run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."], {
+      cwd: root,
+      maxBuffer: 1 << 28,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
+    });
+    const names = [...new Set(stdout.split("\x00").filter(Boolean))].map((name) => name.split(sep).join("/"));
+    return names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+  } catch {
+    return null;
+  }
 }
 
 // src/core/plan.ts
@@ -994,9 +1031,9 @@ function createRefactorApi(context) {
         if ((options.target !== undefined || options.targetProject !== undefined) && operation !== "move-type") {
           throw new Error("INVALID_ARGUMENT: target and targetProject require move-type");
         }
-        const project = await realpath3(resolve4(options.project));
+        const project2 = await realpath3(resolve4(options.project));
         const file = await realpath3(resolve4(options.file));
-        const root = await realpath3(resolve4(options.root ?? dirname3(project)));
+        const root = await realpath3(resolve4(options.root ?? dirname3(project2)));
         const text = await readFile4(file, "utf8");
         const position = (point) => {
           if (typeof point === "string")
@@ -1005,8 +1042,8 @@ function createRefactorApi(context) {
             throw new Error(`INVALID_POSITION: ${point}`);
           return point;
         };
-        const request = {
-          project,
+        const request2 = {
+          project: project2,
           root,
           file,
           operation,
@@ -1019,7 +1056,7 @@ function createRefactorApi(context) {
           ...options.typeName !== undefined ? { typeName: options.typeName } : {},
           ...options.rootNamespace !== undefined ? { rootNamespace: options.rootNamespace } : {}
         };
-        return { project, request };
+        return { project: project2, request: request2 };
       }
     },
     preview(plan) {

@@ -12,17 +12,7 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
-var __esm = (fn, res, err) => () => {
-  if (fn)
-    try {
-      res = fn(fn = 0);
-    } catch (e) {
-      err = [e];
-    }
-  if (err)
-    throw err[0];
-  return res;
-};
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // src/backends/typescript-paths.ts
 import { isAbsolute, relative, sep } from "node:path";
@@ -902,7 +892,7 @@ class Workspace {
     const vfs = this.vfs;
     return {
       getSourceFile: (fileName, settings) => this.sourceFile(fileName, settings, options),
-      getDefaultLibFileName: (options) => ts2.getDefaultLibFilePath(options),
+      getDefaultLibFileName: (options2) => ts2.getDefaultLibFilePath(options2),
       writeFile: () => {},
       getCurrentDirectory: () => dirname2(configPath),
       getCanonicalFileName: (fileName) => vfs.caseSensitive ? fileName : fileName.toLowerCase(),
@@ -1195,7 +1185,7 @@ function selectType(context, request) {
   const { sourceFile, isJs } = context;
   const types = declaredTypes(sourceFile, isJs);
   const namespaced = namespaceMembers(sourceFile);
-  const named = (name) => types.filter((declaration) => declaration.name?.getText(sourceFile) === name);
+  const named = (name2) => types.filter((declaration) => declaration.name?.getText(sourceFile) === name2);
   let name = request.typeName;
   if (request.position !== undefined) {
     if (!Number.isInteger(request.position) || request.position < 0 || request.position > sourceFile.text.length) {
@@ -1661,13 +1651,13 @@ function moveType(context, request) {
     if (owners.length !== 1 || !ws.vfs.samePath(owners[0], ws.targetConfig)) {
       fail("TARGET_NOT_IN_PROJECT", `${target} must belong to exactly ${ws.targetConfig}; owners: ${owners.join(", ") || "none"}`);
     }
-    const targetSource = program.getSourceFile(target);
-    if (!ts3.isExternalModule(targetSource))
+    const targetSource2 = program.getSourceFile(target);
+    if (!ts3.isExternalModule(targetSource2))
       fail("MODULE_REQUIRED", `${target} is not an ES module`);
-    if (isJs && usesCommonJs(targetSource))
+    if (isJs && usesCommonJs(targetSource2))
       fail("COMMONJS_UNSUPPORTED", `${target} uses CommonJS`);
-    const existing = topLevelNames(targetSource).get(name);
-    const importsMoved = existing && ts3.isImportDeclaration(existing) && ts3.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource)?.resolvedFileName ?? "", file);
+    const existing = topLevelNames(targetSource2).get(name);
+    const importsMoved = existing && ts3.isImportDeclaration(existing) && ts3.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource2)?.resolvedFileName ?? "", file);
     if (existing && !importsMoved)
       fail("TARGET_CONFLICT", `${target} already declares ${name}`);
   }
@@ -2166,8 +2156,8 @@ function extraction(state, file, request) {
   applyFileEdits(state, result.edits);
   if (result.renameLocation === undefined)
     fail2("REFACTOR_UNAVAILABLE", "TypeScript did not provide a semantic rename location for the extraction");
-  const renameFile = canonical(result.renameFilename ?? file);
-  rename(state, renameFile, { ...request, operation: "rename", file: renameFile, position: result.renameLocation });
+  const renameFile2 = canonical(result.renameFilename ?? file);
+  rename(state, renameFile2, { ...request, operation: "rename", file: renameFile2, position: result.renameLocation });
 }
 function changedFiles(state, originals) {
   return [...state.overlays].filter(([path, after]) => originals.get(path) !== after).sort(([a], [b]) => a.localeCompare(b)).map(([path, after]) => ({ path, before: originals.get(path) ?? null, after }));
@@ -2287,6 +2277,11 @@ var init_typescript = __esm(() => {
 });
 
 // src/backends/csharp.ts
+var exports_csharp = {};
+__export(exports_csharp, {
+  analyze: () => analyze2,
+  capabilities: () => capabilities2
+});
 import { basename as basename4, dirname as dirname5, isAbsolute as isAbsolute4, join, relative as relative5, resolve as resolve5, sep as sep4 } from "node:path";
 import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
@@ -2505,8 +2500,8 @@ function languageForProject(project) {
 var loadBackend = async (project, toolkitRoot) => {
   if (languageForProject(project) !== "csharp")
     return Promise.resolve().then(() => (init_typescript(), exports_typescript));
-  const backend = await Promise.resolve().then(() => (init_csharp(), {}));
-  return { capabilities: capabilities2, analyze: (request) => analyze2(request, toolkitRoot) };
+  const backend = await Promise.resolve().then(() => (init_csharp(), exports_csharp));
+  return { capabilities: backend.capabilities, analyze: (request) => backend.analyze(request, toolkitRoot) };
 };
 export {
   loadBackend
