@@ -71,6 +71,7 @@ Paths resolve against the custom script process's current working directory. Ret
 | `target` | Destination file path for move-type, including a new parent directory if needed. |
 | `targetProject` | Destination project configuration for a cross-project move. Valid only for move-type. |
 | `typeName` | Select a declared type when a file has several declarations. |
+| `keep` | Boolean, valid only for `inline-reexports`; retain the shim after retargeting its callers. Defaults to false. |
 | `rootNamespace` | Override the C# project's namespace convention. |
 
 Read the operation's CLI `--help` for engine-specific support and limitations. TypeScript consumers can import `RefactorApi`, `PlanOptions`, `Plan`, `ValidationResult`, `ApplyResult`, `Capability`, `Diagnostic`, `FileChange` and `Operation` as types from the same entry point.
@@ -115,3 +116,24 @@ const samePlan = await rename.loadPlan(saved);
 ```
 
 The core treats `.refactor-ai` as reserved state and rejects redirected state directories when applying. Use the CLI's `--out` workflow when you need its additional plan-output path checks.
+
+## Inline re-exports (TypeScript/JavaScript)
+
+```js
+import { createRefactor } from "@refactor-ai/ts-inline-reexports";
+const inline = await createRefactor();
+const plan = await inline.plan({ project: "./tsconfig.json", root: ".", file: "./src/shim.ts", keep: false });
+console.log(inline.preview(plan));
+```
+
+The aggregate API uses `operation: "inline-reexports"`. Named/default imports and
+re-exports split by compiler-resolved origin. Relative chains are followed; bare
+module specifiers preserve the shim's public package entry. Mixed modules retain
+all re-exports. Pure shims are deleted only without remaining loaded references,
+unless `keep: true`; deletions use schemaVersion 2 and update config file lists.
+Side-effect imports stay with a note. Dynamic imports and import types stay and
+prevent deletion. Namespace imports require a pure single-origin `export *` shim
+with no default at its origin (`NAMESPACE_IMPORT_UNSUPPORTED` otherwise).
+Import/export attributes are unsupported. Resolution changes and new compiler
+errors throw; application initialization behavior, directives and external
+consumers require separate verification.

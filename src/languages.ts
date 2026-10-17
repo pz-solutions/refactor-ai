@@ -3,7 +3,7 @@ import type { Operation } from "./types.ts";
 
 export type Language = "typescript" | "csharp";
 export const languageOperations: Record<Language, readonly Operation[]> = {
-  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type"],
+  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "inline-reexports"],
   csharp: ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"],
 };
 

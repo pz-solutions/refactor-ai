@@ -22,6 +22,8 @@ export interface PlanOptions {
   end?: string | number;
   name?: string;
   mode?: "sort" | "remove-unused";
+  /** Keep an inlined re-export shim; valid only for inline-reexports. */
+  keep?: boolean;
   target?: string;
   targetProject?: string;
   typeName?: string;
@@ -93,6 +95,7 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         if ((options.target !== undefined || options.targetProject !== undefined) && operation !== "move-type") {
           throw new Error("INVALID_ARGUMENT: target and targetProject require move-type");
         }
+        if (options.keep !== undefined && (operation !== "inline-reexports" || typeof options.keep !== "boolean")) throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
         const project = await realpath(resolve(options.project));
         const file = await realpath(resolve(options.file));
         const root = await realpath(resolve(options.root ?? dirname(project)));
@@ -104,6 +107,7 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         };
         const request: RefactorRequest = {
           project, root, file, operation,
+          ...(options.keep !== undefined ? { keep: options.keep } : {}),
           ...(options.at !== undefined ? { position: position(options.at) } : {}),
           ...(options.end !== undefined ? { end: position(options.end) } : {}),
           ...(options.name !== undefined ? { newName: options.name } : {}),

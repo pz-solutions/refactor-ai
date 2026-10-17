@@ -1,10 +1,12 @@
-export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type";
+export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "inline-reexports";
 
 export interface RefactorRequest {
   project: string;
   root: string;
   file: string;
   operation: Operation;
+  /** Retain the source shim after inline-reexports. */
+  keep?: boolean;
   position?: number;
   end?: number;
   newName?: string;
