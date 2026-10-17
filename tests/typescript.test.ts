@@ -230,7 +230,7 @@ describe("TypeScript backend", () => {
 
     expect(result.changes[0]!.after).toContain("const subtotal = base + 10;");
     expect(result.changes[0]!.after).toContain("return subtotal;");
-    expect(result.notes).toHaveLength(1);
+    expect(result.notes.filter((note) => note.startsWith("JavaScript analysis"))).toHaveLength(1);
     expect(await readFile(p.file("src/a.js"), "utf8")).toBe(source);
   });
 
@@ -328,6 +328,32 @@ describe("TypeScript backend", () => {
 
     expect(result.changes[0]!.after).toContain("export const total = 1;");
     expect(result.changes[0]!.after).toContain("console.log(total);");
-    expect(result.notes).toHaveLength(1);
+    expect(result.notes.filter((note) => note.startsWith("JavaScript analysis"))).toHaveLength(1);
+  });
+
+  test("validates only the changed files and their transitive importers", async () => {
+    const p = await project({
+      "src/a.ts": "import { y } from './y';\nimport { x } from './x';\nexport const a = x + y;\n",
+      "src/x.ts": "export const x = 1;\n",
+      "src/y.ts": "export const y = 2;\n",
+      "src/b.ts": "import { a } from './a';\nexport const b = a;\n",
+      "src/c.ts": "export { b } from './b';\n",
+      "src/unrelated.ts": "export const u = 3;\n",
+    });
+    const result = await analyze({ project: p.config, root: p.root, file: p.file("src/a.ts"), operation: "imports", mode: "sort" });
+    expect(result.changes).toHaveLength(1);
+    expect(result.notes).toContain("Validated 3 affected file(s): the changed files and their transitive importers.");
+    expect(result.diagnosticsBefore).toEqual([]);
+  });
+
+  test("falls back to the whole program when a changed file augments globals", async () => {
+    const p = await project({
+      "src/a.ts": "import { x } from './x';\nimport { b } from './b';\ndeclare global { interface Window { tag: string } }\nexport const a = x + b;\n",
+      "src/x.ts": "export const x = 1;\n",
+      "src/b.ts": "export const b = 2;\n",
+    });
+    const result = await analyze({ project: p.config, root: p.root, file: p.file("src/a.ts"), operation: "imports", mode: "sort" });
+    expect(result.changes).toHaveLength(1);
+    expect(result.notes.some((note) => note.startsWith("Validated"))).toBe(false);
   });
 });

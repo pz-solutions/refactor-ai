@@ -3,6 +3,7 @@ import { statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
 import type { BackendResult, Capability, Diagnostic, FileChange, RefactorRequest } from "../types";
 import { analyzeFileOperation, fileCapabilities } from "./typescript-fileops";
+import { moduleSpecifiers } from "./typescript-workspace";
 import { isInside } from "./typescript-paths";
 
 export const capabilities: Capability[] = [
@@ -177,7 +178,7 @@ function diagnosticRecord(diagnostic: ts.Diagnostic, fallback: string): Diagnost
   };
 }
 
-function diagnostics(state: ProjectState): Diagnostic[] {
+function diagnostics(state: ProjectState, only?: Set<string>): Diagnostic[] {
   const records: Diagnostic[] = [];
   const add = (diagnostic: ts.Diagnostic) => {
     if (diagnostic.category !== ts.DiagnosticCategory.Error) return;
@@ -187,11 +188,80 @@ function diagnostics(state: ProjectState): Diagnostic[] {
   const programFiles = state.service.getProgram()?.getSourceFiles()
     .map((source) => canonical(source.fileName))
     .filter((path) => isInside(state.root, path) && !path.includes("/node_modules/")) ?? state.fileNames;
-  for (const file of [...new Set(programFiles)].sort()) {
+  for (const file of [...new Set(programFiles)].filter((path) => !only || only.has(path)).sort()) {
     for (const item of state.service.getSyntacticDiagnostics(file)) add(item);
     for (const item of state.service.getSemanticDiagnostics(file)) add(item);
   }
   return records.sort((a, b) => a.file.localeCompare(b.file) || a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
+}
+
+/** User files that import each user file (directly), from the unmodified program. */
+function importersByFile(state: ProjectState): Map<string, Set<string>> {
+  const program = state.service.getProgram()!;
+  const host = ts.sys;
+  const cache = ts.createModuleResolutionCache(dirname(state.configPath), (name) => host.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
+  const importers = new Map<string, Set<string>>();
+  const link = (target: string, importer: string) => {
+    if (!isInside(state.root, target) || target.includes("/node_modules/")) return;
+    const set = importers.get(target) ?? new Set<string>();
+    set.add(importer);
+    importers.set(target, set);
+  };
+  for (const source of program.getSourceFiles()) {
+    const file = canonical(source.fileName);
+    if (!isInside(state.root, file) || file.includes("/node_modules/")) continue;
+    for (const specifier of moduleSpecifiers(source)) {
+      const mode = program.getModeForUsageLocation(source, specifier);
+      const resolved = ts.resolveModuleName(specifier.text, file, state.options, host, cache, undefined, mode).resolvedModule;
+      if (resolved) link(canonical(resolved.resolvedFileName), file);
+    }
+    for (const reference of source.referencedFiles) link(canonical(resolve(dirname(file), reference.fileName)), file);
+  }
+  return importers;
+}
+
+/** A change to this file can alter types outside its importers (scripts, global or ambient module augmentation). */
+function hasGlobalEffect(text: string, path: string): boolean {
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false);
+  if (!ts.isExternalModule(source)) return true;
+  return source.statements.some((statement) => ts.isModuleDeclaration(statement)
+    && (ts.isStringLiteral(statement.name) || (statement.flags & ts.NodeFlags.GlobalAugmentation) !== 0));
+}
+
+/**
+ * Changed files and their transitive importers, or undefined when a changed
+ * file (before or after) can affect unrelated files; then the whole program is checked.
+ */
+function affectedFiles(state: ProjectState, importers: Map<string, Set<string>>, originals: Map<string, string | undefined>): Set<string> | undefined {
+  const changed = [...state.overlays.keys()].filter((path) => originals.get(path) !== state.overlays.get(path));
+  for (const path of changed) {
+    if (!/\.[cm]?[jt]sx?$/i.test(path) || /\.d\.[cm]?ts$/i.test(path)) return undefined;
+    for (const text of [originals.get(path), state.overlays.get(path)]) if (text !== undefined && hasGlobalEffect(text, path)) return undefined;
+  }
+  const affected = new Set<string>();
+  const pending = [...changed];
+  while (pending.length) {
+    const path = pending.pop()!;
+    if (affected.has(path)) continue;
+    affected.add(path);
+    pending.push(...(importers.get(path) ?? []));
+  }
+  return affected;
+}
+
+/** Diagnostics of `only` (or everything) for the unmodified sources, restoring the overlays afterwards. */
+function originalDiagnostics(state: ProjectState, only: Set<string> | undefined): Diagnostic[] {
+  const saved = new Map(state.overlays);
+  for (const path of saved.keys()) {
+    state.overlays.delete(path);
+    state.versions.set(path, (state.versions.get(path) ?? 0) + 1);
+  }
+  state.bumpProjectVersion();
+  try {
+    return diagnostics(state, only);
+  } finally {
+    for (const [path, text] of saved) setOverlay(state, path, text);
+  }
 }
 
 function validatePosition(text: string, position: number | undefined, label = "position"): number {
@@ -388,7 +458,7 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
       fail("PROJECT_SCOPE_INCOMPLETE", `program contains user source outside ${state.root}: ${outsideUserSources.join(", ")}`);
     }
 
-    const diagnosticsBefore = diagnostics(state);
+    const importers = importersByFile(state);
     const originals = new Map<string, string | undefined>();
     for (const path of state.fileNames) originals.set(path, sourceText(state, path));
 
@@ -402,7 +472,10 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
     }
 
     for (const path of state.overlays.keys()) if (!originals.has(path)) originals.set(path, ts.sys.readFile(path));
-    const diagnosticsAfter = diagnostics(state);
+    // Validate the changed files and everything that (transitively) imports them; unrelated files cannot change.
+    const affected = affectedFiles(state, importers, originals);
+    const diagnosticsBefore = originalDiagnostics(state, affected);
+    const diagnosticsAfter = diagnostics(state, affected);
     const beforeCounts = new Map<string, number>();
     for (const item of diagnosticsBefore) {
       const key = `${item.file}\0${item.code}\0${item.message}`;
@@ -418,6 +491,7 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
     if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.message}`).join("; "));
 
     const notes: string[] = [];
+    if (affected) notes.push(`Validated ${affected.size} affected file(s): the changed files and their transitive importers.`);
     if (request.operation === "imports") {
       notes.push(request.mode === "sort"
         ? "Sorting imports can reorder module initialization; verify application behavior."
