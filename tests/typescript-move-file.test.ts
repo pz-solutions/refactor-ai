@@ -121,6 +121,17 @@ describe("move-file", () => {
     expect(await readFile(w.path("packages/feature/src/ui/component.ts"), "utf8")).toContain("component");
   });
 
+  test("publishes a moved directory's index module under the directory key", async () => {
+    const w = await packages({
+      "apps/web/src/hooks/index.ts": 'export { hook } from "./hook";\n',
+      "apps/web/src/hooks/hook.ts": "export const hook = () => 1;\n",
+      "apps/web/src/use.ts": 'import { hook } from "./hooks";\nexport const value = hook();\n',
+    });
+    const result = await analyze(packageRequest(w, { file: w.path("apps/web/src/hooks"), target: w.path("packages/feature/src/ui") }));
+    expect(changed(result, w.path("packages/feature/package.json"))).toContain('"./ui": "./src/ui/index.ts"');
+    expect(changed(result, w.path("apps/web/src/use.ts"))).toContain('"@scope/feature/ui"');
+  });
+
   test("adds .tsx export targets for whole component modules", async () => {
     const w = await packages({
       "apps/web/tsconfig.json": config({ compilerOptions: { ...options, jsx: "preserve", allowImportingTsExtensions: true } }),

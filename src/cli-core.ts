@@ -6,6 +6,7 @@ import { type RefactorContext } from "./refactor-context.ts";
 export { offset } from "./api.ts";
 
 import { helpRequested, renderHelp } from "./help.ts";
+import { ignoreStateDirectory } from "./core/snapshot.ts";
 
 function parse(args: string[]): { command: string; operation?: string; flags: Record<string, string>; } {
   const command = args.shift() ?? "help";
@@ -98,6 +99,7 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
   }
   await mkdir(dirname(output), { recursive: true });
   if ((await realpath(dirname(output))) !== dirname(output)) throw new Error("SYMLINK_UNSUPPORTED: plan output directory changed");
+  if (dirname(output) === stateDirectory) await ignoreStateDirectory(stateDirectory);
   const outputStat = await lstat(output).catch(error => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, readlink, realpath } from "node:fs/promises";
+import { lstat, readdir, readFile, readlink, realpath, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -135,4 +135,10 @@ async function gitFiles(root: string): Promise<string[] | null> {
   } catch {
     return null;
   }
+}
+
+/** Keep plans, journals and locks out of the user's version control without touching their ignore files. */
+export async function ignoreStateDirectory(stateDirectory: string): Promise<void> {
+  try { await writeFile(resolve(stateDirectory, ".gitignore"), "*\n", { flag: "wx", mode: 0o644 }); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
 }

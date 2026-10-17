@@ -71,7 +71,9 @@ function addExport(ws: Workspace, pkg: Package, target: string): string {
   }
   const path = portablePath(relative(pkg.directory, target));
   if (path.startsWith("../")) fail("PACKAGE_EXPORTS_UNSUPPORTED", target);
-  const key = `./${path.replace(/^src\//, "").slice(0, -extname(path).length)}`;
+  // A directory's index module is published as the directory (`./feature`, or `.` for src/index).
+  const subpath = path.replace(/^src\//, "").slice(0, -extname(path).length).replace(/(^|\/)index$/, "");
+  const key = subpath ? `./${subpath}` : ".";
   const entries = property.initializer.properties;
   if (entries.some(item => ts.isPropertyAssignment(item) && ts.isStringLiteral(item.name) && item.name.text === key)) {
     fail("PACKAGE_EXPORT_CONFLICT", `${pkg.path}: ${key} already names another target`);

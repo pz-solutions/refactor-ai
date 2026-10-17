@@ -2,7 +2,7 @@ import { lstat, mkdir, open, readFile, rename, rm, rmdir, stat, unlink, writeFil
 import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { assertFresh, assertPlanShape, changeKind, newDiagnostics, type ChangeKind, type Plan } from "./plan.ts";
-import { assertRegularPath, missingDirectories, sha256 } from "./snapshot.ts";
+import { assertRegularPath, ignoreStateDirectory, missingDirectories, sha256 } from "./snapshot.ts";
 
 interface Journal {
   schemaVersion: 2;
@@ -96,6 +96,7 @@ export async function applyPlan(plan: Plan): Promise<{ status: "applied"; files:
   await mkdir(stateDirectory, { recursive: true });
   // Reserved state directory may not be redirected outside the project.
   if ((await lstat(stateDirectory)).isSymbolicLink()) throw new Error("SYMLINK_UNSUPPORTED: state directory");
+  await ignoreStateDirectory(stateDirectory);
   const lock = resolve(stateDirectory, "apply.lock");
   try { await mkdir(lock); }
   catch (error) {
