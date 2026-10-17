@@ -14,10 +14,12 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 
 ### F2. Monorepo scope needs `--root <repo>` — fixed (hint)
 - `plan rename --project apps/web/tsconfig.json` fails with `PROJECT_SCOPE_INCOMPLETE` listing ~100 files from sibling packages (resolved through workspace symlinks). The fix is `--root .`, but the error does not say so.
-- Proposal: when out-of-root files come from workspace packages, suggest the workspace root (nearest `package.json` with `workspaces`) in the error.
+- Fix: the error names the enclosing workspace (nearest `package.json` with `workspaces`) to pass as `--root`.
 
-### F3. Planning cost on a large project — open (perf)
+### F3. Planning cost on a large project — improved
 - `plan rename` on `apps/web` with `--root .`: ~30 s wall, ~44 s CPU. Fine for one-off renames, too slow for a 30-file batch done as 30 plans. Batch operations (directory move) matter more than micro-optimizing.
+
+- Status: single-project operations validate only the affected closure (F7); multi-project file operations too (`perf: validate workspace file-operation closures`, 76 s → 54 s on a cross-package move). A 31-file directory move still takes ~2 min.
 
 ### F4. No operation moves a module (functions/components) — new operation `move-file`
 - `move-type` only moves class/interface/type/enum declarations; `rename-file` only renames in place after a type. Framework migration moves whole modules, mostly React components, often whole directories, and across workspace packages.
@@ -26,7 +28,7 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 ### F5. Shim modules that only re-export the shared package — new operation `inline-reexports`
 - After earlier extractions the Next app kept files like `data-table/items.ts` = `export * from "@uber-platform/app-features/data-table/items"` and `table-print/table-print-button.tsx` mixing a re-export with its own component. They block directory moves (name collisions in the target) and hide the real dependency graph.
 
-### F6. Swapping an API-compatible module (`next-intl` → `use-intl`) — open (candidate operation)
+### F6. Swapping an API-compatible module (`next-intl` → `use-intl`) — new operation `retarget-import`
 - 15 imports in `data-table`, including `NextIntlClientProvider` → `IntlProvider` in tests. Done with `sed`. A `retarget-import` operation (`--from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider`) with type-checked validation would make this safe and repeatable across the remaining ~400 `next-intl` imports.
 - Also needed: adding `use-intl` to `apps/web/package.json` first (isolated linker → not resolvable otherwise). The validation step would have caught a missing dependency as a new diagnostic.
 
@@ -35,13 +37,15 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 - Proposal: validate the **affected closure** — changed files plus their transitive importers (reverse module graph of the original program) — and fall back to the whole program when a changed file is a script, declares `declare global`/module augmentation, or edits a config. Same guarantee for module code, typically a 10–100× smaller check for leaf files.
 - Fix (`perf: validate only the affected closure`): single-project operations check the changed files plus their transitive importers; scripts, `.d.ts`, `declare global` and ambient module declarations fall back to the whole program. uber-platform: imports sort 37 s → 12 s, rename 30 s → 12 s (8 affected files each).
 
-### F8. Cross-project `move-type` rejects monorepo packages with different `paths` — open (blocker)
+### F8. Cross-project `move-type` rejects monorepo packages with different `paths` — fixed
 - Slice agent (profile): `plan move-type … --target-project packages/app-features/tsconfig.json` → `PROJECT_OPTIONS_INCOMPATIBLE: … differ in compiler option 'paths'`. Apps and packages in a monorepo almost always differ in `paths` (`@/*` in the app only). The check should compare the options that affect how the *moved declaration's* imports and its importers resolve, not require identical configs.
+
+- Fix (`perf: validate workspace file-operation closures`): resolution-only options (`paths`, `baseUrl`) may differ; unresolved aliases in the moved declaration fail as `NEW_DIAGNOSTICS`, rebinding to a different declaration as `REFERENCES_NOT_PRESERVED`.
 
 ### F9. Rename keeps the old public name behind an alias — open (UX)
 - Renaming `ProfileContent` → `ProfileView` produced `export { ProfileView as ProfileContent }` in the barrel; the agent removed the alias by hand. Useful default for libraries, wrong during a migration where all consumers are in the workspace. Proposal: `--public` (rename re-exported names too when every consumer is loaded).
 
-### F10. TypeScript formatter ≠ repository formatter — open (docs/hook)
+### F10. TypeScript formatter ≠ repository formatter — documented (skills + README recipe)
 - Agents ran `vp check --fix` (oxfmt) after every apply; refactor-ai's edits use the TS formatter's style. Proposal: skills tell the agent to run the project's formatter on changed files after `apply`; optionally `--format-command`.
 
 ### F11. Positions (`--at line:col`) are error-prone for agents — open (UX)
