@@ -78,3 +78,19 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 
 ### F20. `inline-reexports` keeps shims reachable through dynamic `import()` — open
 - `data-table/preferences.ts` (`export * from "@uber-platform/app-features/data-table/preferences"`) stayed because two tests do `await import("@/components/data-table/preferences")`. For a pure single-origin `export *` shim, a dynamic import of the shim is equivalent to a dynamic import of the origin; the operation could retarget it (the namespace object differs only if the origin has a default export, which `export *` drops).
+
+### F21. `TARGET_UNRESOLVED` in a fresh worktree without `node_modules` — open (hint)
+- Two slice agents hit `TARGET_UNRESOLVED … (use-intl)` in freshly created worktrees; the cause was a missing `bun install`, not the specifier. When the destination does not resolve and the importer's package has no `node_modules`, say so.
+
+### F22. Moving into a package that lacks a third-party dependency — open (hint)
+- Data-table move: the only blocker was `TS2307 Cannot find module 'use-debounce'` in the destination package. `move-file` could list third-party imports of moved files that the destination `package.json` does not declare, with the source package's version, before the expensive validation.
+
+### F23. Lint configuration does not move with the code — process
+- Moved components carried `eslint-disable shadcn/no-restyle` directives that became "unused" because app-features had no `components.json`, so the shadcn rules silently ignored every UI import there (since the first extraction). Adding the config restored identical lint coverage. Recipe now says to compare the destination's lint setup.
+
+### F24. `UNHANDLED_PROJECT_GRAPH` when another app imports the moved files — open
+- MCP slice: `apps/web-start` already imported the shared module being moved, but was not part of the planned project graph; the agent had to shelve its new Start files to make the plan pass. Workspace packages that depend on the destination (or import changed files) should be discovered and validated automatically, or accepted via `--include-project`.
+
+### Outcome of the day
+- uber-platform `feat/tanstack-start-migration`: 6 routes served by Start at parity (properties list/new, profile, settings/invitations, settings/integrations/mcp, invitations redirect); hooks layer, data table, invitation/owner/tenant/MCP hooks moved into app-features by `move-file`; 8 shims removed by `inline-reexports`; framework imports retargeted by `retarget-import`.
+- Tool runs on the real repo: ~25 plans; failures were all genuine (missing dependency, missing install, stale snapshot from concurrent edits, out-of-graph project) except F13/F15/F17 which were fixed the same day.
