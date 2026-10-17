@@ -4,7 +4,7 @@ export interface Snapshot {
     hash: string;
 }
 export declare function inside(root: string, file: string): string;
-export declare function assertRegularPath(root: string, file: string, allowMissing?: boolean): Promise<void>;
+export declare function assertRegularPath(root: string, file: string, allowMissing?: boolean, allowDirectory?: boolean): Promise<void>;
 /** Canonicalize a possibly missing path via its nearest existing ancestor. */
 export declare function canonicalMissing(file: string): Promise<string>;
 /** Ancestor directories of file (below root) that do not exist yet, outermost first. */
@@ -16,3 +16,5 @@ export declare function missingDirectories(root: string, file: string): Promise<
  * so build caches and ignored artifacts neither slow planning nor make plans stale.
  */
 export declare function snapshot(rootPath: string): Promise<Snapshot>;
+/** Keep plans, journals and locks out of the user's version control without touching their ignore files. */
+export declare function ignoreStateDirectory(stateDirectory: string): Promise<void>;

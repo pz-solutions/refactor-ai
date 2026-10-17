@@ -1,14 +1,26 @@
-export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type";
+export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "move-file" | "inline-reexports" | "retarget-import";
 export interface RefactorRequest {
     project: string;
     root: string;
     file: string;
     operation: Operation;
+    /** Retain the source shim after inline-reexports. */
+    keep?: boolean;
+    /** Module specifiers for retarget-import; exact matches only. */
+    from?: string;
+    to?: string;
+    /** Imported export names, before mapping, to their destination names. */
+    map?: Record<string, string>;
+    only?: string[];
+    /** Report affected test mocks (default), or add a parallel destination mock. */
+    mocks?: "report" | "add";
+    /** Internal marker: file defaults to project directory when scope is omitted. */
+    projectScope?: boolean;
     position?: number;
     end?: number;
     newName?: string;
     mode?: "sort" | "remove-unused";
-    /** Absolute destination file path for move-type. */
+    /** Absolute destination file/directory path for move-type or move-file. */
     target?: string;
     /** Absolute destination .csproj or TS/JS config for cross-project moves. */
     targetProject?: string;

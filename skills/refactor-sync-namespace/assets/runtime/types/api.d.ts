@@ -5,17 +5,26 @@ export type { Plan } from "./core/plan.js";
 export type { Capability, Diagnostic, FileChange, Operation } from "./types.js";
 export interface PlanOptions {
     project: string;
-    file: string;
+    file?: string;
     /** Defaults to the project configuration's directory. Must cover all changed files. */
     root?: string;
     /** Required for the aggregate API; operation packages select their own operation. */
     operation?: Operation;
+    /** Exact source/destination module specifiers for retarget-import. */
+    from?: string;
+    to?: string;
+    map?: Record<string, string>;
+    only?: string[];
+    /** retarget-import: report affected test mocks (default), or add parallel mocks. */
+    mocks?: "report" | "add";
     /** A 1-based UTF-16 line:column string or a zero-based UTF-16 offset. */
     at?: string | number;
     /** Exclusive extraction end, using the same coordinates as at. */
     end?: string | number;
     name?: string;
     mode?: "sort" | "remove-unused";
+    /** Keep an inlined re-export shim; valid only for inline-reexports. */
+    keep?: boolean;
     target?: string;
     targetProject?: string;
     typeName?: string;

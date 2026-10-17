@@ -7,7 +7,7 @@ import { readFile as readFile4, realpath as realpath3 } from "node:fs/promises";
 import { dirname as dirname3, resolve as resolve4 } from "node:path";
 
 // src/core/apply.ts
-import { lstat as lstat3, mkdir, open, readFile as readFile3, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat as lstat3, mkdir, open, readFile as readFile3, rename, rm, rmdir, stat, unlink, writeFile as writeFile2 } from "node:fs/promises";
 import { dirname as dirname2, resolve as resolve3 } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -441,7 +441,7 @@ function splitLines(text) {
 // src/core/snapshot.ts
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, readlink, realpath } from "node:fs/promises";
+import { lstat, readdir, readFile, readlink, realpath, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 var excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
@@ -459,7 +459,9 @@ function inside(root, file) {
   }
   return result;
 }
-async function assertRegularPath(root, file, allowMissing = false) {
+async function assertRegularPath(root, file, allowMissing = false, allowDirectory = false) {
+  if (allowDirectory && resolve(file) === root && (await lstat(root)).isDirectory())
+    return;
   const target = inside(root, file);
   const parts = relative(root, target).split(sep);
   let current = root;
@@ -475,7 +477,7 @@ async function assertRegularPath(root, file, allowMissing = false) {
     }
     if (stat.isSymbolicLink())
       throw new Error(`SYMLINK_UNSUPPORTED: ${current}`);
-    if (i === parts.length - 1 && !stat.isFile())
+    if (i === parts.length - 1 && !stat.isFile() && !(allowDirectory && stat.isDirectory()))
       throw new Error(`NOT_A_FILE: ${current}`);
     if (i < parts.length - 1 && !stat.isDirectory())
       throw new Error(`NOT_A_DIRECTORY: ${current}`);
@@ -572,6 +574,15 @@ async function gitFiles(root) {
     return names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
   } catch {
     return null;
+  }
+}
+async function ignoreStateDirectory(stateDirectory) {
+  try {
+    await writeFile(resolve(stateDirectory, ".gitignore"), `*
+`, { flag: "wx", mode: 420 });
+  } catch (error) {
+    if (error.code !== "EEXIST")
+      throw error;
   }
 }
 
@@ -678,14 +689,15 @@ async function canonicalRequest(request) {
   const root = await realpath2(request.root);
   const result = { ...request, root, project: await realpath2(request.project), file: await realpath2(request.file) };
   await assertRegularPath(root, result.project);
-  await assertRegularPath(root, result.file);
+  const directory = request.operation === "move-file" && (await lstat2(result.file)).isDirectory() || request.operation === "retarget-import";
+  await assertRegularPath(root, result.file, false, directory);
   if (request.targetProject !== undefined) {
     result.targetProject = await realpath2(request.targetProject);
     await assertRegularPath(root, result.targetProject);
   }
   if (request.target !== undefined) {
     result.target = inside(root, await canonicalMissing(request.target));
-    await assertRegularPath(root, result.target, true);
+    await assertRegularPath(root, result.target, true, directory);
   }
   return result;
 }
@@ -735,9 +747,20 @@ async function createPlan(request, analyze) {
   changes.sort(byPath);
   const fileModes = {};
   const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat2(request.file)).mode & 511 : 384;
+  const creationMode = async (path) => {
+    if (request.operation !== "move-file" || !request.target)
+      return createdMode;
+    const directory = (await lstat2(request.file)).isDirectory();
+    if (!directory && path !== request.target)
+      return createdMode;
+    const source = directory ? resolve2(request.file, relative2(request.target, path)) : request.file;
+    if (!changes.some((change) => change.path === source && change.after === null))
+      return 384;
+    return (await lstat2(source)).mode & 511;
+  };
   for (const change of changes) {
     const beforeMode = change.before === null ? null : (await lstat2(change.path)).mode & 511;
-    fileModes[change.path] = { before: beforeMode, after: change.after === null ? null : beforeMode ?? createdMode };
+    fileModes[change.path] = { before: beforeMode, after: change.after === null ? null : beforeMode ?? await creationMode(change.path) };
   }
   const conflict = caseConflict(root, before.files, changes);
   if (conflict)
@@ -869,6 +892,7 @@ async function applyPlan(plan) {
   await mkdir(stateDirectory, { recursive: true });
   if ((await lstat3(stateDirectory)).isSymbolicLink())
     throw new Error("SYMLINK_UNSUPPORTED: state directory");
+  await ignoreStateDirectory(stateDirectory);
   const lock = resolve3(stateDirectory, "apply.lock");
   try {
     await mkdir(lock);
@@ -959,7 +983,7 @@ async function applyPlan(plan) {
     }
     if (written.length || createdDirectories.length) {
       journal.status = recoveryNeeded ? "recovery-needed" : "rolled-back";
-      await writeFile(journalPath, JSON.stringify(journal, null, 2) + `
+      await writeFile2(journalPath, JSON.stringify(journal, null, 2) + `
 `).catch(() => {});
     }
     if (recoveryNeeded)
@@ -973,7 +997,7 @@ async function applyPlan(plan) {
 // src/languages.ts
 import { extname } from "node:path";
 var languageOperations = {
-  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type"],
+  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import"],
   csharp: ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"]
 };
 function languageForProject(project) {
@@ -1026,15 +1050,26 @@ function createRefactorApi(context) {
           assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
           throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
-        if (operation === "move-type" && !options.target)
-          throw new Error("INVALID_ARGUMENT: target required for move-type");
-        if ((options.target !== undefined || options.targetProject !== undefined) && operation !== "move-type") {
-          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type");
+        if (["move-type", "move-file"].includes(operation) && !options.target)
+          throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
+        if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file"].includes(operation)) {
+          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type or move-file");
         }
+        if (options.keep !== undefined && (operation !== "inline-reexports" || typeof options.keep !== "boolean"))
+          throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
+        if (operation === "retarget-import" && (!options.from || !options.to))
+          throw new Error("INVALID_ARGUMENT: from and to required for retarget-import");
+        if (operation !== "retarget-import" && [options.from, options.to, options.map, options.only, options.mocks].some((value) => value !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: from, to, map, only and mocks require retarget-import");
+        }
+        if (options.mocks !== undefined && !["report", "add"].includes(options.mocks))
+          throw new Error("INVALID_ARGUMENT: mocks report|add");
+        if (!options.file && operation !== "retarget-import")
+          throw new Error("INVALID_ARGUMENT: file required");
         const project2 = await realpath3(resolve4(options.project));
-        const file = await realpath3(resolve4(options.file));
+        const file = await realpath3(resolve4(options.file ?? dirname3(project2)));
         const root = await realpath3(resolve4(options.root ?? dirname3(project2)));
-        const text = await readFile4(file, "utf8");
+        const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile4(file, "utf8") : "";
         const position = (point) => {
           if (typeof point === "string")
             return offset(text, point);
@@ -1047,6 +1082,15 @@ function createRefactorApi(context) {
           root,
           file,
           operation,
+          ...options.keep !== undefined ? { keep: options.keep } : {},
+          ...operation === "retarget-import" ? {
+            from: options.from,
+            to: options.to,
+            ...options.map ? { map: options.map } : {},
+            ...options.only ? { only: options.only } : {},
+            ...options.mocks !== undefined ? { mocks: options.mocks } : {},
+            ...!options.file ? { projectScope: true } : {}
+          } : {},
           ...options.at !== undefined ? { position: position(options.at) } : {},
           ...options.end !== undefined ? { end: position(options.end) } : {},
           ...options.name !== undefined ? { newName: options.name } : {},
@@ -1169,7 +1213,7 @@ async function createInstalledRefactor(moduleUrl, operation) {
   return createRefactorApi({
     loadBackend,
     operation,
-    language: operation.startsWith("extract-") ? "typescript" : operation === "sync-namespace" ? "csharp" : undefined,
+    language: operation.startsWith("extract-") || operation === "retarget-import" ? "typescript" : operation === "sync-namespace" ? "csharp" : undefined,
     toolkitRoot: join3(skillRoot, "assets")
   });
 }

@@ -15,7 +15,8 @@ var __export = (target, all) => {
 var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // src/backends/typescript-paths.ts
-import { isAbsolute, relative, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 function portablePath(path, separator = sep) {
   return path.split(separator).join("/");
 }
@@ -23,12 +24,29 @@ function isInside(root, path) {
   const difference = relative(root, path);
   return difference !== ".." && !difference.startsWith(`..${sep}`) && !isAbsolute(difference);
 }
+function workspaceRootHint(root, outside) {
+  let current = root;
+  for (;; ) {
+    const manifest = join(current, "package.json");
+    if (existsSync(manifest)) {
+      try {
+        if (JSON.parse(readFileSync(manifest, "utf8")).workspaces && outside.every((path) => isInside(current, path))) {
+          return `; these files belong to the workspace at ${current}: rerun with --root ${current}`;
+        }
+      } catch {}
+    }
+    const parent = dirname(current);
+    if (parent === current)
+      return "; widen --root to a directory containing them";
+    current = parent;
+  }
+}
 var init_typescript_paths = () => {};
 
 // src/backends/typescript-vfs.ts
 import ts from "typescript";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, relative as relative2, resolve, sep as sep2 } from "node:path";
+import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, realpathSync, statSync } from "node:fs";
+import { basename, dirname as dirname2, relative as relative2, resolve, sep as sep2 } from "node:path";
 function fail(code, reason) {
   throw new Error(`${code}: ${reason}`);
 }
@@ -39,8 +57,8 @@ function detectCaseSensitivity(root) {
   const probe = [root, ...readdirSync(root).map((name) => resolve(root, name))].find((path) => swapCase(basename(path)) !== basename(path));
   if (!probe)
     return ts.sys.useCaseSensitiveFileNames;
-  const swapped = resolve(dirname(probe), swapCase(basename(probe)));
-  if (!existsSync(swapped))
+  const swapped = resolve(dirname2(probe), swapCase(basename(probe)));
+  if (!existsSync2(swapped))
     return true;
   const a = statSync(probe), b = statSync(swapped);
   return !(a.ino === b.ino && a.dev === b.dev);
@@ -116,7 +134,7 @@ function wildcardRegex(specs, basePath, usage, flags) {
 function includeBasePath(absolute) {
   const wildcard = absolute.search(/[*?]/);
   if (wildcard < 0)
-    return basename(absolute).includes(".") ? dirname(absolute) : absolute;
+    return basename(absolute).includes(".") ? dirname2(absolute) : absolute;
   const normalized = portablePath(absolute);
   const end = normalized.lastIndexOf("/", wildcard);
   return end === 2 && /^[A-Za-z]:/.test(normalized) ? normalized.slice(0, 3) : normalized.slice(0, end) || "/";
@@ -125,6 +143,7 @@ function includeBasePath(absolute) {
 class VirtualFs {
   root;
   caseSensitive;
+  readPaths = new Map;
   disk = new Map;
   overlays = new Map;
   generated = new Map;
@@ -163,13 +182,32 @@ class VirtualFs {
       this.version += 1;
     }
   }
+  readPath(path) {
+    path = resolve(path);
+    if (!path.split(sep2).includes("node_modules"))
+      return path;
+    const cached = this.readPaths.get(path);
+    if (cached)
+      return cached;
+    let ancestor = path;
+    while (!existsSync2(ancestor) && dirname2(ancestor) !== ancestor)
+      ancestor = dirname2(ancestor);
+    let canonical = path;
+    try {
+      const real = resolve(realpathSync(ancestor), relative2(ancestor, path));
+      if (isInside(this.root, real) && !real.split(sep2).includes("node_modules"))
+        canonical = real;
+    } catch {}
+    this.readPaths.set(path, canonical);
+    return canonical;
+  }
   rawDisk(path) {
     const key = this.key(path);
     if (!this.disk.has(key)) {
       let text;
       try {
         if (statSync(path).isFile())
-          text = readFileSync(path, "utf8");
+          text = readFileSync2(path, "utf8");
       } catch {
         text = undefined;
       }
@@ -183,12 +221,14 @@ class VirtualFs {
     return this.rawDisk(path) ?? null;
   }
   hasBom(path) {
+    path = this.readPath(path);
     const overlay = this.suspended ? undefined : this.overlays.get(this.key(path));
     if (overlay)
       return overlay.bom;
     return this.diskText(path)?.startsWith(BOM) ?? false;
   }
   readFile(path) {
+    path = this.readPath(path);
     const key = this.key(path);
     const generated = this.generated.get(key);
     if (generated)
@@ -258,7 +298,7 @@ class VirtualFs {
     return paths;
   }
   entries(directory) {
-    directory = resolve(directory);
+    directory = this.readPath(directory);
     const hidden = this.isHidden(directory);
     const files = new Map;
     const directories = new Map;
@@ -288,7 +328,7 @@ class VirtualFs {
     return { files: [...files.values()], directories: [...directories.values()] };
   }
   directoryExists(path) {
-    path = resolve(path);
+    path = this.readPath(path);
     if (this.virtualPaths().some((item) => this.contains(path, item) && !this.samePath(path, item)))
       return true;
     if (this.isHidden(path))
@@ -303,6 +343,7 @@ class VirtualFs {
     return this.entries(path).directories;
   }
   realpath(path) {
+    path = this.readPath(path);
     const key = this.key(path);
     if (this.generated.has(key) || !this.suspended && this.overlays.has(key))
       return resolve(path);
@@ -408,7 +449,7 @@ var init_typescript_vfs = __esm(() => {
 // src/backends/typescript-workspace.ts
 import ts2 from "typescript";
 import { readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
-import { basename as basename2, dirname as dirname2, relative as relative3, resolve as resolve2 } from "node:path";
+import { basename as basename2, dirname as dirname3, relative as relative3, resolve as resolve2 } from "node:path";
 function configPathFor(project) {
   let stat;
   try {
@@ -486,6 +527,9 @@ function scriptKindFor(path) {
     return ts2.ScriptKind.JSON;
   return ts2.ScriptKind.TS;
 }
+function isModuleMockCall(node) {
+  return ts2.isCallExpression(node) && node.arguments.length >= 1 && ts2.isStringLiteralLike(node.arguments[0]) && ts2.isPropertyAccessExpression(node.expression) && ts2.isIdentifier(node.expression.expression) && mockObjects.has(node.expression.expression.text) && mockMethods.has(node.expression.name.text);
+}
 function moduleSpecifiers(sourceFile) {
   const found = [];
   const seen = new Set;
@@ -500,6 +544,8 @@ function moduleSpecifiers(sourceFile) {
       found.push(node.expression);
     } else if (ts2.isCallExpression(node) && node.arguments.length >= 1 && ts2.isStringLiteralLike(node.arguments[0]) && (node.expression.kind === ts2.SyntaxKind.ImportKeyword || ts2.isIdentifier(node.expression) && node.expression.text === "require")) {
       found.push(node.arguments[0]);
+    } else if (isModuleMockCall(node)) {
+      found.push(node.arguments[0]);
     } else if (ts2.isImportTypeNode(node) && ts2.isLiteralTypeNode(node.argument) && ts2.isStringLiteralLike(node.argument.literal)) {
       found.push(node.argument.literal);
     }
@@ -510,6 +556,10 @@ function moduleSpecifiers(sourceFile) {
   };
   visit(sourceFile);
   return found.sort((a, b) => a.getStart(sourceFile) - b.getStart(sourceFile));
+}
+function hasAmbientEffect(source) {
+  const visit = (node) => ts2.isModuleDeclaration(node) && (ts2.isStringLiteral(node.name) || (node.flags & ts2.NodeFlags.GlobalAugmentation) !== 0) || !!ts2.forEachChild(node, visit);
+  return visit(source);
 }
 
 class Workspace {
@@ -566,7 +616,7 @@ class Workspace {
         return text === undefined ? undefined : ts2.ScriptSnapshot.fromString(text);
       },
       getScriptKind: (fileName) => scriptKindFor(fileName),
-      getCurrentDirectory: () => dirname2(sourceConfig),
+      getCurrentDirectory: () => dirname3(sourceConfig),
       getDefaultLibFileName: (options) => ts2.getDefaultLibFilePath(options),
       fileExists: (path) => vfs.fileExists(path),
       readFile: (path) => vfs.readFile(path),
@@ -609,7 +659,7 @@ class Workspace {
     const references = result.config?.references;
     if (!Array.isArray(references))
       return [];
-    return references.map((reference) => typeof reference?.path === "string" ? resolve2(ts2.resolveProjectReferencePath({ path: resolve2(dirname2(configPath), reference.path) })) : undefined).filter((path) => path !== undefined);
+    return references.map((reference) => typeof reference?.path === "string" ? resolve2(ts2.resolveProjectReferencePath({ path: resolve2(dirname3(configPath), reference.path) })) : undefined).filter((path) => path !== undefined);
   }
   loadGraph() {
     const vfs = this.vfs;
@@ -622,12 +672,12 @@ class Workspace {
       paths.set(vfs.key(config), config);
       this.importingConfigs.push(config);
     }
-    const graphDirectories = new Set([...affected].map((key) => vfs.key(dirname2(paths.get(key)))));
+    const graphDirectories = new Set([...affected].map((key) => vfs.key(dirname3(paths.get(key)))));
     const observers = new Set;
     for (const config of this.discovered) {
       if (affected.has(vfs.key(config)) || editorConfigName.test(basename2(config)) || this.isBaseConfig(config))
         continue;
-      if (!graphDirectories.has(vfs.key(dirname2(config))) || !this.listsAny(config, this.affected))
+      if (!graphDirectories.has(vfs.key(dirname3(config))) || !this.listsAny(config, this.affected))
         continue;
       affected.add(vfs.key(config));
       paths.set(vfs.key(config), config);
@@ -685,7 +735,7 @@ class Workspace {
       if (!output) {
         fail("DECLARATION_OUTPUT_UNSUPPORTED", `${item.configPath} is referenced by another project and must emit declarations to outDir or declarationDir`);
       }
-      if (!isInside(this.root, output) || vfs.samePath(output, dirname2(item.configPath)) || vfs.contains(output, dirname2(item.configPath))) {
+      if (!isInside(this.root, output) || vfs.samePath(output, dirname3(item.configPath)) || vfs.contains(output, dirname3(item.configPath))) {
         fail("DECLARATION_OUTPUT_UNSUPPORTED", `${item.configPath}: declaration output directory must be a dedicated directory inside ${this.root}`);
       }
       item.outputDirectory = resolve2(output);
@@ -725,13 +775,9 @@ class Workspace {
     for (const item of withFiles) {
       for (const option of sharedOptionKeys) {
         if (!sameValue(item.parsed.options[option], first.parsed.options[option])) {
-          fail("PROJECT_OPTIONS_INCOMPATIBLE", `${item.configPath} and ${first.configPath} differ in compiler option '${option}'; cross-project planning requires identical module resolution settings`);
+          fail("PROJECT_OPTIONS_INCOMPATIBLE", `${item.configPath} and ${first.configPath} differ in compiler option '${option}'; cross-project planning requires compatible syntax, emit and extension settings`);
         }
       }
-    }
-    const configDirectories = new Set(withFiles.map((item) => vfs.key(dirname2(item.configPath))));
-    if (configDirectories.size > 1 && first.parsed.options.paths && !first.parsed.options.baseUrl) {
-      fail("PROJECT_OPTIONS_INCOMPATIBLE", "'paths' without 'baseUrl' resolves relative to each config; set baseUrl to plan across projects");
     }
     this.indexOwners();
   }
@@ -780,7 +826,8 @@ class Workspace {
       fail("PROGRAM_UNAVAILABLE", "TypeScript could not create a program");
     return program;
   }
-  resolveModule(specifier, sourceFile, options = this.editOptions) {
+  resolveModule(specifier, sourceFile, options) {
+    options ??= this.ownersOf(sourceFile.fileName)[0] ? this.participant(this.ownersOf(sourceFile.fileName)[0]).parsed.options : this.editOptions;
     const mode = ts2.getModeForUsageLocation(sourceFile, specifier, options);
     return ts2.resolveModuleName(specifier.text, sourceFile.fileName, options, this.vfs.moduleResolutionHost(), undefined, undefined, mode).resolvedModule;
   }
@@ -819,7 +866,7 @@ class Workspace {
         for (const entry of Array.isArray(raw) ? raw : [raw]) {
           if (typeof entry !== "string" || !/^\.\.?[\\/]/.test(entry))
             continue;
-          const path = resolve2(dirname2(candidate), entry);
+          const path = resolve2(dirname3(candidate), entry);
           this.extendedConfigs.add(this.vfs.key(/\.json$/i.test(path) ? path : `${path}.json`));
         }
       }
@@ -884,7 +931,7 @@ class Workspace {
     const cached = this.sourceFiles.get(key);
     if (cached?.text === text)
       return cached.file;
-    const file = ts2.createSourceFile(fileName, text, settings, false, scriptKindFor(fileName));
+    const file = ts2.createSourceFile(fileName, text, settings, true, scriptKindFor(fileName));
     this.sourceFiles.set(key, { text, file });
     return file;
   }
@@ -894,7 +941,7 @@ class Workspace {
       getSourceFile: (fileName, settings) => this.sourceFile(fileName, settings, options),
       getDefaultLibFileName: (options2) => ts2.getDefaultLibFilePath(options2),
       writeFile: () => {},
-      getCurrentDirectory: () => dirname2(configPath),
+      getCurrentDirectory: () => dirname3(configPath),
       getCanonicalFileName: (fileName) => vfs.caseSensitive ? fileName : fileName.toLowerCase(),
       useCaseSensitiveFileNames: () => vfs.caseSensitive,
       getNewLine: () => `
@@ -908,7 +955,141 @@ class Workspace {
       getParsedCommandLine: (fileName) => this.participants.get(vfs.key(fileName))?.parsed ?? this.looseParse(fileName)
     };
   }
-  diagnostics() {
+  validationPrograms() {
+    return new Map(this.order.map((key) => {
+      const item = this.participants.get(key);
+      return [key, ts2.createProgram({
+        rootNames: item.parsed.fileNames,
+        options: item.parsed.options,
+        projectReferences: item.parsed.projectReferences,
+        host: this.compilerHost(item.configPath, item.parsed.options)
+      })];
+    }));
+  }
+  prepareValidation() {
+    if ([...this.participants.values()].some((item) => item.references.length)) {
+      const before = this.diagnostics();
+      return () => ({ before, after: this.diagnostics() });
+    }
+    const beforePrograms = this.validationPrograms();
+    const beforeGraphs = new Map([...beforePrograms].map(([key, program]) => [key, this.validationGraph(program)]));
+    for (const [key, program] of beforePrograms) {
+      const layout = this.computedOutputRoot(this.participant(key), program);
+      if (layout !== undefined)
+        this.layouts.set(key, layout);
+    }
+    return () => {
+      const afterPrograms = this.validationPrograms();
+      const only = new Map;
+      let affected = 0;
+      for (const [key, before] of beforePrograms) {
+        const after = afterPrograms.get(key);
+        const closure = this.validationClosure(before, after, beforeGraphs.get(key), this.validationGraph(after));
+        if (closure) {
+          only.set(key, closure);
+          affected += closure.size;
+        }
+      }
+      return {
+        before: this.vfs.original(() => this.diagnostics(beforePrograms, only)),
+        after: this.diagnostics(afterPrograms, only),
+        affected: only.size ? affected : undefined,
+        affectedProjects: only.size
+      };
+    };
+  }
+  validationGraph(program) {
+    const options = program.getCompilerOptions();
+    const host = this.vfs.moduleResolutionHost();
+    const cache = ts2.createModuleResolutionCache(this.root, (path) => this.vfs.key(path), options);
+    const graph = new Map;
+    for (const source of program.getSourceFiles()) {
+      if (!this.validationSource(source))
+        continue;
+      const dependencies = moduleSpecifiers(source).map((specifier) => {
+        const mode = program.getModeForUsageLocation(source, specifier);
+        const resolved = ts2.resolveModuleName(specifier.text, source.fileName, options, host, cache, undefined, mode).resolvedModule;
+        return resolved ? this.vfs.key(resolved.resolvedFileName) : undefined;
+      });
+      for (const reference of source.referencedFiles)
+        dependencies.push(this.vfs.key(resolve2(dirname3(source.fileName), reference.fileName)));
+      graph.set(this.vfs.key(source.fileName), dependencies);
+    }
+    return graph;
+  }
+  validationSource(source) {
+    const path = resolve2(source.fileName);
+    if (!isInside(this.root, path)) {
+      if (!source.isDeclarationFile)
+        fail("PROJECT_SCOPE_INCOMPLETE", `user source outside ${this.root}: ${path}${workspaceRootHint(this.root, [path])}`);
+      return false;
+    }
+    return !portablePath(path).split("/").includes("node_modules") && !this.vfs.isHidden(path);
+  }
+  validationClosure(before, after, oldGraph, newGraph) {
+    const changes = this.vfs.changes();
+    const changed = new Set(changes.map((change) => this.vfs.key(change.path)));
+    const options = (program) => Object.fromEntries(Object.entries(program.getCompilerOptions()).filter(([key]) => key !== "configFile"));
+    if (!sameValue(options(before), options(after)))
+      return;
+    const oldRoots = new Set(before.getRootFileNames().map((path) => this.vfs.key(path)));
+    const newRoots = new Set(after.getRootFileNames().map((path) => this.vfs.key(path)));
+    if ([...oldRoots, ...newRoots].some((path) => oldRoots.has(path) !== newRoots.has(path) && !changed.has(path)))
+      return;
+    if (changes.some((change) => configName.test(basename2(change.path))))
+      return;
+    for (const change of changes.filter((change2) => basename2(change2.path) === "package.json")) {
+      if (change.before === null || change.after === null)
+        return;
+      const withoutExports = (text) => {
+        try {
+          const { exports: _exports, ...rest } = JSON.parse(text ?? "{}");
+          return rest;
+        } catch {
+          return;
+        }
+      };
+      const oldShape = withoutExports(change.before), newShape = withoutExports(change.after);
+      if (oldShape === undefined || newShape === undefined || !sameValue(oldShape, newShape))
+        return;
+    }
+    const importers = new Map;
+    const pending = [...changed];
+    for (const graph of [oldGraph, newGraph])
+      for (const [file, dependencies] of graph) {
+        for (const target of dependencies) {
+          if (!target)
+            continue;
+          const callers = importers.get(target) ?? new Set;
+          callers.add(file);
+          importers.set(target, callers);
+        }
+      }
+    for (const file of new Set([...oldGraph.keys(), ...newGraph.keys()])) {
+      if (!sameValue(oldGraph.get(file), newGraph.get(file)))
+        pending.push(file);
+    }
+    const oldFiles = new Set(before.getSourceFiles().map((source) => this.vfs.key(source.fileName)));
+    const newFiles = new Set(after.getSourceFiles().map((source) => this.vfs.key(source.fileName)));
+    for (const program of [before, after])
+      for (const source of program.getSourceFiles()) {
+        const key = this.vfs.key(source.fileName);
+        if (!changed.has(key) && oldFiles.has(key) === newFiles.has(key))
+          continue;
+        if (!/\.json$/i.test(source.fileName) && (changed.has(key) && source.isDeclarationFile || !ts2.isExternalModule(source) || hasAmbientEffect(source)))
+          return;
+      }
+    const closure = new Set;
+    while (pending.length) {
+      const file = pending.pop();
+      if (closure.has(file))
+        continue;
+      closure.add(file);
+      pending.push(...importers.get(file) ?? []);
+    }
+    return new Set([...closure].filter((file) => oldGraph.has(file) || newGraph.has(file)));
+  }
+  diagnostics(programs, only) {
     const vfs = this.vfs;
     vfs.clearGenerated();
     this.layouts = new Map;
@@ -916,7 +1097,7 @@ class Workspace {
     const merged = new Map;
     for (const key of this.order) {
       const item = this.participants.get(key);
-      const program = ts2.createProgram({
+      const program = programs?.get(key) ?? ts2.createProgram({
         rootNames: item.parsed.fileNames,
         options: item.parsed.options,
         projectReferences: item.parsed.projectReferences,
@@ -942,14 +1123,16 @@ class Workspace {
         const path = resolve2(sourceFile.fileName);
         if (!isInside(this.root, path)) {
           if (!sourceFile.isDeclarationFile)
-            fail("PROJECT_SCOPE_INCOMPLETE", `${item.configPath} uses user source outside ${this.root}: ${path}`);
+            fail("PROJECT_SCOPE_INCOMPLETE", `${item.configPath} uses user source outside ${this.root}: ${path}${workspaceRootHint(this.root, [path])}`);
           continue;
         }
         if (portablePath(path).split("/").includes("node_modules") || vfs.isHidden(path))
           continue;
+        if (only?.has(key) && !only.get(key).has(vfs.key(path)))
+          continue;
         program.getSyntacticDiagnostics(sourceFile).forEach(add);
         program.getSemanticDiagnostics(sourceFile).forEach(add);
-        if (item.parsed.options.declaration || item.parsed.options.composite)
+        if (program.getCompilerOptions().declaration || program.getCompilerOptions().composite)
           program.getDeclarationDiagnostics(sourceFile).forEach(add);
       }
       for (const [recordKey, entry] of counts) {
@@ -972,7 +1155,7 @@ class Workspace {
     const options = item.parsed.options;
     if (options.noEmit || options.rootDir || options.composite || !options.outDir && !options.declarationDir)
       return;
-    const directories = program.getSourceFiles().filter((sourceFile) => !sourceFile.isDeclarationFile && !program.isSourceFileFromExternalLibrary(sourceFile)).filter((sourceFile) => !(options.noEmitForJsFiles && /\.[cm]?jsx?$/i.test(sourceFile.fileName))).filter((sourceFile) => !/\.json$/i.test(sourceFile.fileName) || options.outDir).map((sourceFile) => portablePath(dirname2(resolve2(sourceFile.fileName))).split("/"));
+    const directories = program.getSourceFiles().filter((sourceFile) => !sourceFile.isDeclarationFile && !program.isSourceFileFromExternalLibrary(sourceFile)).filter((sourceFile) => !(options.noEmitForJsFiles && /\.[cm]?jsx?$/i.test(sourceFile.fileName))).filter((sourceFile) => !/\.json$/i.test(sourceFile.fileName) || options.outDir).map((sourceFile) => portablePath(dirname3(resolve2(sourceFile.fileName))).split("/"));
     if (!directories.length)
       return;
     let common = directories[0];
@@ -995,7 +1178,7 @@ class Workspace {
       const object = json.statements[0]?.expression;
       if (!object || !ts2.isObjectLiteralExpression(object))
         continue;
-      const directory = dirname2(item.configPath);
+      const directory = dirname3(item.configPath);
       const changes = [];
       for (const property of object.properties) {
         if (!ts2.isPropertyAssignment(property) || !ts2.isStringLiteral(property.name))
@@ -1003,6 +1186,7 @@ class Workspace {
         if (!["files", "include"].includes(property.name.text) || !ts2.isArrayLiteralExpression(property.initializer))
           continue;
         const elements = property.initializer.elements;
+        const removed = new Set;
         elements.forEach((element, index) => {
           if (!ts2.isStringLiteral(element) || /[*?]/.test(element.text))
             return;
@@ -1015,10 +1199,20 @@ class Workspace {
             const quote = text[start];
             changes.push({ span: { start, length: element.end - start }, newText: `${quote}${JSON.stringify(spec).slice(1, -1)}${quote}` });
           } else if (deletions.some((path) => vfs.samePath(path, absolute))) {
-            const span = index < elements.length - 1 ? { start, length: elements[index + 1].getStart(json) - start } : index > 0 ? { start: elements[index - 1].end, length: element.end - elements[index - 1].end } : { start, length: element.end - start };
-            changes.push({ span, newText: "" });
+            removed.add(index);
           }
         });
+        for (let index = 0;index < elements.length; index++) {
+          if (!removed.has(index))
+            continue;
+          const first = index;
+          while (removed.has(index + 1))
+            index += 1;
+          const all = first === 0 && index === elements.length - 1;
+          const start = all ? property.initializer.getStart(json) + 1 : first === 0 ? elements[first].getStart(json) : elements[first - 1].end;
+          const end = all ? property.initializer.end - 1 : first === 0 ? elements[index + 1].getStart(json) : elements[index].end;
+          changes.push({ span: { start, length: end - start }, newText: "" });
+        }
       }
       if (changes.length)
         vfs.write(item.configPath, applyTextChanges(text, changes));
@@ -1034,7 +1228,7 @@ class Workspace {
     if (!files || !ts2.isArrayLiteralExpression(files.initializer))
       return false;
     const elements = files.initializer.elements;
-    const relativePath = portablePath(relative3(dirname2(configPath), path));
+    const relativePath = portablePath(relative3(dirname3(configPath), path));
     const dotted = elements.some((element) => ts2.isStringLiteral(element) && element.text.startsWith("./"));
     const literal = JSON.stringify(dotted && !relativePath.startsWith("../") ? `./${relativePath}` : relativePath);
     let change;
@@ -1073,7 +1267,7 @@ function applyTextChanges(text, changes) {
   }
   return text;
 }
-var baseFormatOptions, configName, editorConfigName, sharedOptionKeys;
+var baseFormatOptions, configName, editorConfigName, sharedOptionKeys, mockObjects, mockMethods;
 var init_typescript_workspace = __esm(() => {
   init_typescript_vfs();
   init_typescript_paths();
@@ -1099,19 +1293,12 @@ var init_typescript_workspace = __esm(() => {
     "module",
     "moduleResolution",
     "moduleDetection",
-    "baseUrl",
-    "paths",
-    "rootDirs",
     "allowJs",
     "jsx",
     "jsxImportSource",
     "esModuleInterop",
     "allowSyntheticDefaultImports",
     "resolveJsonModule",
-    "resolvePackageJsonExports",
-    "resolvePackageJsonImports",
-    "customConditions",
-    "moduleSuffixes",
     "allowImportingTsExtensions",
     "rewriteRelativeImportExtensions",
     "allowArbitraryExtensions",
@@ -1120,12 +1307,550 @@ var init_typescript_workspace = __esm(() => {
     "experimentalDecorators",
     "typeRoots"
   ];
+  mockObjects = new Set(["vi", "vitest", "jest"]);
+  mockMethods = new Set(["mock", "doMock", "unmock", "doUnmock", "importActual", "importMock", "requireActual", "requireMock", "createMockFromModule"]);
+});
+
+// src/backends/typescript-inline-reexports.ts
+import ts3 from "typescript";
+import { dirname as dirname4, extname as extname2, relative as relative4, resolve as resolve3, sep as sep3 } from "node:path";
+
+class Origins {
+  ws;
+  checker;
+  constructor(ws) {
+    this.ws = ws;
+    this.checker = ws.program().getTypeChecker();
+  }
+  exports(source) {
+    const symbol = this.checker.getSymbolAtLocation(source);
+    return symbol ? this.checker.getExportsOfModule(symbol) : [];
+  }
+  actual(symbol) {
+    return symbol.flags & ts3.SymbolFlags.Alias ? this.checker.getAliasedSymbol(symbol) : symbol;
+  }
+  exported(source, name) {
+    const symbol = this.exports(source).find((item) => item.name === name);
+    if (!symbol)
+      fail("REEXPORT_UNRESOLVED", `${source.fileName} has no resolved export '${name}'`);
+    return symbol;
+  }
+  module(source, specifier) {
+    const symbol = this.checker.getSymbolAtLocation(specifier);
+    const target = symbol?.declarations?.find(ts3.isSourceFile);
+    if (!target)
+      fail("REEXPORT_UNRESOLVED", `${specifier.text} in ${source.fileName} has no resolved module`);
+    return target;
+  }
+  find(source, name, seen = new Set) {
+    const key = `${source.fileName}\x00${name}`;
+    if (seen.has(key))
+      fail("REEXPORT_CYCLE", `cyclic re-export of '${name}' in ${source.fileName}`);
+    const visited = new Set([...seen, key]);
+    const symbol = this.exported(source, name);
+    const declarations = source.statements.filter(ts3.isExportDeclaration);
+    const explicit = declarations.find((item) => item.exportClause && ts3.isNamedExports(item.exportClause) && item.exportClause.elements.some((element) => element.name.text === name));
+    if (explicit) {
+      if (explicit.attributes)
+        fail("REEXPORT_UNSUPPORTED", `re-export attributes in ${source.fileName}`);
+      const element = explicit.exportClause.elements.find((item) => item.name.text === name);
+      if (!explicit.moduleSpecifier)
+        return this.localOrigin(element, visited, explicit.isTypeOnly || element.isTypeOnly);
+      if (!ts3.isStringLiteralLike(explicit.moduleSpecifier))
+        return;
+      return this.follow(source, explicit.moduleSpecifier, (element.propertyName ?? element.name).text, explicit.isTypeOnly || element.isTypeOnly, visited);
+    }
+    if (this.actual(symbol).declarations?.some((item) => item.getSourceFile() === source))
+      return;
+    for (const statement of declarations) {
+      if (statement.exportClause || !statement.moduleSpecifier || !ts3.isStringLiteralLike(statement.moduleSpecifier) || name === "default")
+        continue;
+      const target = this.module(source, statement.moduleSpecifier);
+      const candidate = this.exports(target).find((item) => item.name === name);
+      if (candidate && this.actual(candidate) === this.actual(symbol)) {
+        if (statement.attributes)
+          fail("REEXPORT_UNSUPPORTED", `re-export attributes in ${source.fileName}`);
+        return this.follow(source, statement.moduleSpecifier, name, statement.isTypeOnly, visited);
+      }
+    }
+    return;
+  }
+  packageBoundary(source, target) {
+    const owner = (file) => {
+      for (let directory = dirname4(file);isInside(this.ws.root, directory); directory = dirname4(directory)) {
+        const text = this.ws.vfs.readFile(resolve3(directory, "package.json"));
+        if (text) {
+          try {
+            return { directory, manifest: JSON.parse(text) };
+          } catch {
+            fail("INVALID_PACKAGE", `cannot parse ${directory}/package.json`);
+          }
+        }
+        if (directory === dirname4(directory))
+          break;
+      }
+      return;
+    };
+    const destination = owner(target.fileName);
+    if (!destination?.manifest.name || owner(source.fileName)?.directory === destination.directory)
+      return false;
+    const values = (value) => typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(values) : [];
+    const entries = destination.manifest.exports !== undefined ? values(destination.manifest.exports) : [destination.manifest.types, destination.manifest.typings, destination.manifest.main, "./index.ts", "./index.js"].flatMap(values);
+    const stem = (path) => path.replace(/(?:\.d)?\.[cm]?[jt]sx?$/, "");
+    return entries.some((entry) => {
+      const parts = stem(resolve3(destination.directory, entry)).split("*");
+      const path = stem(target.fileName);
+      return parts.length === 1 ? this.ws.vfs.samePath(parts[0], path) : parts.length === 2 && this.ws.vfs.key(path).startsWith(this.ws.vfs.key(parts[0])) && path.endsWith(parts[1]);
+    });
+  }
+  localOrigin(element, seen, typeOnly) {
+    const local = this.checker.getExportSpecifierLocalTargetSymbol(element);
+    const declaration = local?.declarations?.[0];
+    if (!declaration || !ts3.isImportSpecifier(declaration) && !ts3.isImportClause(declaration))
+      return;
+    const clause = ts3.isImportSpecifier(declaration) ? declaration.parent.parent : declaration;
+    const statement = clause.parent;
+    if (!ts3.isImportDeclaration(statement) || !ts3.isStringLiteralLike(statement.moduleSpecifier))
+      return;
+    if (statement.attributes)
+      fail("REEXPORT_UNSUPPORTED", `import attributes in ${element.getSourceFile().fileName}`);
+    const name = ts3.isImportSpecifier(declaration) ? (declaration.propertyName ?? declaration.name).text : "default";
+    return this.follow(element.getSourceFile(), statement.moduleSpecifier, name, typeOnly || clause.isTypeOnly || ts3.isImportSpecifier(declaration) && declaration.isTypeOnly, seen);
+  }
+  follow(source, specifier, name, typeOnly, seen) {
+    const target = this.module(source, specifier);
+    this.exported(target, name);
+    const next = isRelative(specifier.text) && !this.packageBoundary(source, target) ? this.find(target, name, seen) : undefined;
+    return next ? { ...next, typeOnly: typeOnly || next.typeOnly } : { specifier, target, name, typeOnly };
+  }
+}
+function isRelative(specifier) {
+  return /^\.\.?\//.test(specifier);
+}
+function originSpecifier(origin, importer) {
+  const original = origin.specifier.text;
+  if (!isRelative(original))
+    return original;
+  const written = original.match(/(?:\.d)?\.[cm]?[jt]sx?$/)?.[0] ?? "";
+  const extension = origin.target.fileName.match(/(?:\.d)?\.[cm]?[jt]sx?$/)?.[0] ?? extname2(origin.target.fileName);
+  const runtime = { ".ts": ".js", ".tsx": ".js", ".mts": ".mjs", ".cts": ".cjs" };
+  const suffix = written === extension ? extension : [".js", ".jsx", ".mjs", ".cjs"].includes(written) ? written === ".jsx" && extension === ".tsx" ? ".jsx" : runtime[extension.replace(/^\.d/, "")] ?? extension : "";
+  const target = origin.target.fileName.slice(0, -extension.length) + suffix;
+  const path = portablePath(relative4(dirname4(importer.fileName), target));
+  return path.startsWith(".") ? path : `./${path}`;
+}
+function literal(text, quote) {
+  const escaped = JSON.stringify(text).slice(1, -1);
+  return `${quote}${quote === "'" ? escaped.replace(/'/g, "\\'") : escaped}${quote}`;
+}
+function bindingName(name) {
+  return /^[$\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*$/u.test(name) ? name : JSON.stringify(name);
+}
+function resolveAs(ws, text, source, usage) {
+  const mode = ts3.getModeForUsageLocation(source, usage, ws.editOptions);
+  return ts3.resolveModuleName(text, source.fileName, ws.editOptions, ws.vfs.moduleResolutionHost(), undefined, undefined, mode).resolvedModule;
+}
+function groupsFor(origins, shim, importer, specifier, bindings) {
+  const groups = new Map;
+  for (const binding of bindings) {
+    const origin = origins.find(shim, binding.imported);
+    const direct = origin ? originSpecifier(origin, importer) : specifier.text;
+    if (origin) {
+      const resolved = resolveAs(origins.ws, direct, importer, specifier);
+      if (!resolved || !origins.ws.vfs.samePath(resolved.resolvedFileName, origin.target.fileName)) {
+        fail("REEXPORT_RESOLUTION_CHANGED", `'${direct}' in ${importer.fileName} does not resolve to ${origin.target.fileName}`);
+      }
+    }
+    const group = groups.get(direct) ?? { specifier: direct, bindings: [] };
+    group.bindings.push({ ...binding, imported: origin?.name ?? binding.imported, typeOnly: binding.typeOnly || (origin?.typeOnly ?? false) });
+    groups.set(direct, group);
+  }
+  return [...groups.values()];
+}
+function renderGroup(group, exporting, typeOnly, quote, suffix) {
+  const defaults = exporting ? [] : group.bindings.filter((item) => item.defaultImport && item.imported === "default");
+  const named = group.bindings.filter((item) => !defaults.includes(item));
+  const allType = typeOnly;
+  if (!typeOnly && defaults.some((item) => item.typeOnly)) {
+    const typed = defaults.filter((item) => item.typeOnly);
+    const remaining = group.bindings.filter((item) => !typed.includes(item));
+    return [
+      renderGroup({ ...group, bindings: typed }, false, true, quote, suffix),
+      ...remaining.length ? [renderGroup({ ...group, bindings: remaining }, false, false, quote, suffix)] : []
+    ].join(`
+`);
+  }
+  const names = named.map((item) => `${!allType && item.typeOnly ? "type " : ""}${bindingName(item.imported)}${item.imported === item.local ? "" : ` as ${bindingName(item.local)}`}`);
+  if (allType && defaults.length && named.length) {
+    return [
+      renderGroup({ ...group, bindings: defaults }, exporting, true, quote, suffix),
+      renderGroup({ ...group, bindings: named }, exporting, true, quote, suffix)
+    ].join(`
+`);
+  }
+  const clause = [...defaults.map((item) => item.local), ...names.length ? [`{ ${names.join(", ")} }`] : []].join(", ");
+  return `${exporting ? "export" : "import"} ${allType ? "type " : ""}${clause} from ${literal(group.specifier, quote)}${suffix}`;
+}
+function pureShim(source) {
+  return source.statements.some(ts3.isExportDeclaration) && source.statements.every((item) => ts3.isExportDeclaration(item) && !!item.moduleSpecifier || ts3.isExpressionStatement(item) && ts3.isStringLiteral(item.expression));
+}
+function singleStar(source) {
+  const exports = source.statements.filter(ts3.isExportDeclaration);
+  return pureShim(source) && exports.length === 1 && !exports[0].exportClause && !exports[0].isTypeOnly ? exports[0] : undefined;
+}
+function retargetNamespace(origins, shim, source, specifier) {
+  const star = singleStar(shim);
+  if (!star || !star.moduleSpecifier || !ts3.isStringLiteralLike(star.moduleSpecifier)) {
+    fail("NAMESPACE_IMPORT_UNSUPPORTED", `${source.fileName} imports a namespace from ${shim.fileName}; only pure single-origin export * shims support this`);
+  }
+  if (star.attributes)
+    fail("REEXPORT_UNSUPPORTED", `re-export attributes in ${shim.fileName}`);
+  const target = origins.module(shim, star.moduleSpecifier);
+  if (origins.exports(target).some((item) => item.name === "default"))
+    fail("NAMESPACE_IMPORT_UNSUPPORTED", "origin exports default, which export * excludes");
+  const origin = { specifier: star.moduleSpecifier, target, name: "", typeOnly: false };
+  const direct = originSpecifier(origin, source);
+  const resolved = resolveAs(origins.ws, direct, source, specifier);
+  if (!resolved || !origins.ws.vfs.samePath(resolved.resolvedFileName, target.fileName))
+    fail("REEXPORT_RESOLUTION_CHANGED", direct);
+  const start = specifier.getStart(source);
+  return { span: { start, length: specifier.end - start }, newText: literal(direct, source.text[start]) };
+}
+function rewrite(origins, shim, source, notes) {
+  const changes = [];
+  for (const statement of source.statements) {
+    if (!ts3.isImportDeclaration(statement) && !ts3.isExportDeclaration(statement) || !statement.moduleSpecifier || !ts3.isStringLiteralLike(statement.moduleSpecifier))
+      continue;
+    const specifier = statement.moduleSpecifier;
+    const resolved = origins.ws.resolveModule(specifier, source);
+    if (!resolved || !origins.ws.vfs.samePath(resolved.resolvedFileName, shim.fileName))
+      continue;
+    const exporting = ts3.isExportDeclaration(statement);
+    const clause = exporting ? statement.exportClause : statement.importClause;
+    if (!exporting && !clause) {
+      notes.push(`Kept side-effect import of ${shim.fileName} in ${source.fileName}.`);
+      continue;
+    }
+    if (statement.attributes)
+      fail("REEXPORT_UNSUPPORTED", `import/export attributes in ${source.fileName}`);
+    if (!exporting && statement.importClause?.namedBindings && ts3.isNamespaceImport(statement.importClause.namedBindings) || exporting && statement.exportClause && ts3.isNamespaceExport(statement.exportClause)) {
+      changes.push(retargetNamespace(origins, shim, source, specifier));
+      continue;
+    }
+    const typeOnly = exporting ? statement.isTypeOnly : statement.importClause.isTypeOnly;
+    const bindings = [];
+    if (!exporting && statement.importClause.name)
+      bindings.push({ imported: "default", local: statement.importClause.name.text, typeOnly, defaultImport: true });
+    const named = exporting ? statement.exportClause : statement.importClause.namedBindings;
+    if (named && (ts3.isNamedExports(named) || ts3.isNamedImports(named))) {
+      for (const item of named.elements)
+        bindings.push({ imported: (item.propertyName ?? item.name).text, local: item.name.text, typeOnly: typeOnly || item.isTypeOnly });
+    } else if (exporting && !named) {
+      for (const symbol of origins.exports(shim))
+        if (symbol.name !== "default")
+          bindings.push({ imported: symbol.name, local: symbol.name, typeOnly: typeOnly || !(origins.actual(symbol).flags & ts3.SymbolFlags.Value) });
+    }
+    if (!bindings.length)
+      continue;
+    const groups = groupsFor(origins, shim, source, specifier, bindings);
+    if (groups.length === 1 && groups[0].specifier === specifier.text)
+      continue;
+    const start = statement.getStart(source);
+    const quote = source.text[specifier.getStart(source)];
+    const suffix = source.text.slice(specifier.end, statement.end);
+    const output = groups.map((group) => renderGroup(group, exporting, typeOnly, quote, suffix)).join(`
+`).replace(/\n/g, eolOf(source.text));
+    changes.push({ span: { start, length: statement.end - start }, newText: output });
+  }
+  return changes;
+}
+function inlineReexports(ws, file, source, notes, keep = false) {
+  if (file.split(sep3).includes("node_modules") || ws.vfs.isHidden(file))
+    fail("OUTSIDE_PROJECT", `cannot inline a dependency or build output: ${file}`);
+  const origins = new Origins(ws);
+  const files = ws.program().getSourceFiles().filter((item) => isInside(ws.root, resolve3(item.fileName)) && !item.fileName.split(sep3).includes("node_modules") && !ws.vfs.isHidden(item.fileName));
+  const edits = files.filter((item) => !ws.vfs.samePath(item.fileName, file)).map((item) => ({ source: item, changes: rewrite(origins, source, item, notes) }));
+  for (const edit of edits)
+    if (edit.changes.length)
+      ws.vfs.write(edit.source.fileName, applyTextChanges(edit.source.text, edit.changes));
+  const remaining = ws.program().getSourceFiles().filter((item) => isInside(ws.root, resolve3(item.fileName)) && !item.fileName.split(sep3).includes("node_modules") && !ws.vfs.isHidden(item.fileName)).some((item) => moduleSpecifiers(item).some((specifier) => {
+    const target = ws.resolveModule(specifier, item);
+    return target && ws.vfs.samePath(target.resolvedFileName, file);
+  }) || item.referencedFiles.some((reference) => ws.vfs.samePath(resolve3(dirname4(item.fileName), reference.fileName), file)));
+  if (!keep && pureShim(source) && !remaining) {
+    ws.vfs.write(file, null);
+    ws.updateConfigLists([], [file]);
+    ws.reparse();
+    notes.push(`Deleted unreferenced re-export shim ${file}.`);
+    return true;
+  }
+  notes.push(keep ? `Kept ${file} (--keep).` : `Kept ${file} and its re-exports (${remaining ? "remaining module references" : "local declarations"}).`);
+  return false;
+}
+var init_typescript_inline_reexports = __esm(() => {
+  init_typescript_paths();
+  init_typescript_vfs();
+  init_typescript_workspace();
+});
+
+// src/backends/typescript-package-specifiers.ts
+import ts4 from "typescript";
+import { dirname as dirname5, extname as extname3, relative as relative5, resolve as resolve4 } from "node:path";
+function packageFor(ws, file) {
+  for (let directory = dirname5(file);isInside(ws.root, directory); directory = dirname5(directory)) {
+    const path = resolve4(directory, "package.json");
+    const text = ws.vfs.readFile(path);
+    if (text !== undefined) {
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        fail("INVALID_PACKAGE", path);
+      }
+      if (typeof json.name === "string" && json.name)
+        return { path, directory, name: json.name, json };
+    }
+    if (ws.vfs.samePath(directory, ws.root))
+      break;
+  }
+  return;
+}
+function packageSelfImport(ws, importer, target, specifier) {
+  const pkg = packageFor(ws, importer);
+  return !!pkg && (specifier === pkg.name || specifier.startsWith(`${pkg.name}/`)) && packageFor(ws, target)?.path === pkg.path;
+}
+function strings(value) {
+  if (typeof value === "string")
+    return [value];
+  if (Array.isArray(value))
+    return value.flatMap(strings);
+  if (value && typeof value === "object")
+    return Object.values(value).flatMap(strings);
+  return [];
+}
+function exportedPaths(pkg, target) {
+  const exports = pkg.json.exports;
+  const entries = exports && typeof exports === "object" && !Array.isArray(exports) && Object.keys(exports).some((key) => key.startsWith(".")) ? Object.entries(exports) : [[".", exports]];
+  const candidates = [];
+  const path = `./${portablePath(relative5(pkg.directory, target))}`;
+  for (const [key, value] of entries) {
+    if (key !== "." && !key.startsWith("./"))
+      continue;
+    for (const pattern of strings(value)) {
+      if (!pattern.startsWith("./"))
+        continue;
+      if (!pattern.includes("*") && pattern === path && !key.includes("*"))
+        candidates.push(key);
+      else if (pattern.split("*").length === 2 && key.split("*").length === 2) {
+        const [prefix, suffix] = pattern.split("*");
+        if (path.startsWith(prefix) && path.endsWith(suffix) && path.length >= prefix.length + suffix.length) {
+          candidates.push(key.replace("*", path.slice(prefix.length, path.length - suffix.length)));
+        }
+      }
+    }
+  }
+  return [...new Set(candidates)].sort((a, b) => a.length - b.length || a.localeCompare(b));
+}
+function addExport(ws, pkg, target) {
+  const text = ws.vfs.readFile(pkg.path);
+  const json = ts4.parseJsonText(pkg.path, text);
+  const object = json.statements[0]?.expression;
+  if (!object || !ts4.isObjectLiteralExpression(object))
+    fail("INVALID_PACKAGE", pkg.path);
+  const property = object.properties.find((item) => ts4.isPropertyAssignment(item) && ts4.isStringLiteral(item.name) && item.name.text === "exports");
+  if (!property)
+    fail("PACKAGE_EXPORTS_REQUIRED", `${pkg.path} has no exports field; declare the package's public surface before moving files into it`);
+  if (!ts4.isObjectLiteralExpression(property.initializer) || property.initializer.properties.some((item) => !ts4.isPropertyAssignment(item) || !ts4.isStringLiteral(item.name) || !item.name.text.startsWith("."))) {
+    fail("PACKAGE_EXPORTS_UNSUPPORTED", `${pkg.path}: automatic exports require an object of subpath entries`);
+  }
+  const path = portablePath(relative5(pkg.directory, target));
+  if (path.startsWith("../"))
+    fail("PACKAGE_EXPORTS_UNSUPPORTED", target);
+  const subpath = path.replace(/^src\//, "").slice(0, -extname3(path).length).replace(/(^|\/)index$/, "");
+  const key = subpath ? `./${subpath}` : ".";
+  const entries = property.initializer.properties;
+  if (entries.some((item) => ts4.isPropertyAssignment(item) && ts4.isStringLiteral(item.name) && item.name.text === key)) {
+    fail("PACKAGE_EXPORT_CONFLICT", `${pkg.path}: ${key} already names another target`);
+  }
+  const literal2 = `${JSON.stringify(key)}: ${JSON.stringify(`./${path}`)}`;
+  const last = entries[entries.length - 1];
+  const multiline = text.slice(property.initializer.getStart(json), property.initializer.end).includes(`
+`);
+  const indentAt = (position) => text.slice(text.lastIndexOf(`
+`, position) + 1, position).match(/^[\t ]*/)?.[0] ?? "";
+  const indent = last ? indentAt(last.getStart(json)) : indentAt(property.getStart(json)) + (text.match(/\n([\t ]+)"/)?.[1] ?? "  ");
+  const start = last?.end ?? property.initializer.getStart(json) + 1;
+  const tail = text.slice(start, property.initializer.end - 1);
+  const comma = tail.indexOf(",");
+  const changes = [];
+  if (last && comma >= 0) {
+    changes.push({ span: { start: start + comma + 1, length: 0 }, newText: `${multiline ? eolOf(text) + indent : " "}${literal2},` });
+  } else {
+    changes.push({ span: { start, length: 0 }, newText: `${last ? "," : ""}${multiline ? eolOf(text) + indent : last ? " " : ""}${literal2}` });
+  }
+  ws.vfs.write(pkg.path, applyTextChanges(text, changes));
+  return key;
+}
+function packageSpecifier(ws, importer, target, mode) {
+  const destination = packageFor(ws, target);
+  const source = packageFor(ws, importer);
+  if (!destination || source && ws.vfs.samePath(source.path, destination.path))
+    return;
+  if (!source)
+    fail("MISSING_DEPENDENCY", `${importer} has no named package declaring ${destination.name}`);
+  const declares = ["dependencies", "devDependencies", "peerDependencies"].some((field) => {
+    const value = source.json[field];
+    return value && typeof value === "object" && Object.hasOwn(value, destination.name);
+  });
+  if (!declares)
+    fail("MISSING_DEPENDENCY", `${source.path} must declare ${destination.name} in dependencies, devDependencies or peerDependencies`);
+  const paths = exportedPaths(destination, target);
+  const nameFor = (key2) => destination.name + (key2 === "." ? "" : key2.slice(1));
+  const owner = ws.ownersOf(importer)[0];
+  const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
+  const key = paths.find((key2) => {
+    const resolved = ts4.resolveModuleName(nameFor(key2), importer, options, ws.vfs.moduleResolutionHost(), undefined, undefined, mode).resolvedModule;
+    return resolved && ws.vfs.samePath(resolved.resolvedFileName, target);
+  }) ?? paths[0] ?? addExport(ws, destination, target);
+  return nameFor(key);
+}
+function relativeStyle(ws, target, fallback, cache = new Map) {
+  const pkg = packageFor(ws, target);
+  if (!pkg)
+    return fallback.startsWith(".") ? fallback : "./module";
+  const fallbackStyle = fallback.startsWith(".") ? fallback : "./module";
+  if (cache.has(pkg.path))
+    return cache.get(pkg.path) ?? fallbackStyle;
+  let explicit = 0, implicit = 0;
+  let sample = "./module";
+  for (const file of ws.unionFiles()) {
+    if (!isInside(pkg.directory, file) || packageFor(ws, file)?.path !== pkg.path)
+      continue;
+    const text = ws.vfs.readFile(file);
+    if (text === undefined)
+      continue;
+    const source = ts4.createSourceFile(file, text, ts4.ScriptTarget.Latest, true);
+    for (const specifier of moduleSpecifiers(source)) {
+      if (!/^\.\.?\//.test(specifier.text))
+        continue;
+      if (/\.[cm]?[jt]sx?$/.test(specifier.text)) {
+        explicit += 1;
+        sample = specifier.text;
+      } else
+        implicit += 1;
+    }
+  }
+  const style = !explicit && !implicit ? null : explicit > implicit ? sample : "./module";
+  cache.set(pkg.path, style);
+  return style ?? fallbackStyle;
+}
+var init_typescript_package_specifiers = __esm(() => {
+  init_typescript_vfs();
+  init_typescript_workspace();
+  init_typescript_paths();
+});
+
+// src/backends/typescript-suppressions.ts
+import { readdirSync as readdirSync3 } from "node:fs";
+import { dirname as dirname6, relative as relative6, resolve as resolve5 } from "node:path";
+function nearestLedger(ws, file) {
+  for (let directory = dirname6(file);isInside(ws.root, directory); directory = dirname6(directory)) {
+    const path = resolve5(directory, "eslint-suppressions.json");
+    if (ws.vfs.fileExists(path))
+      return path;
+    if (ws.vfs.samePath(directory, ws.root))
+      break;
+  }
+  return;
+}
+function newLedger(ws, file) {
+  const directory = packageFor(ws, file)?.directory ?? dirname6(ws.targetConfig);
+  let names;
+  try {
+    names = readdirSync3(directory);
+  } catch {
+    return;
+  }
+  return names.some((name) => /^eslint\.config\.[cm]?[jt]s$/.test(name) && ws.vfs.fileExists(resolve5(directory, name))) ? resolve5(directory, "eslint-suppressions.json") : undefined;
+}
+function record(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function readLedger(ws, path) {
+  const text = ws.vfs.readFile(path);
+  let entries = {};
+  try {
+    if (text !== undefined)
+      entries = JSON.parse(text);
+  } catch {
+    fail("INVALID_SUPPRESSIONS", path);
+  }
+  if (!record(entries) || Object.values(entries).some((rules) => !record(rules) || Object.values(rules).some((rule) => !record(rule) || !Number.isSafeInteger(rule.count) || rule.count < 0))) {
+    fail("INVALID_SUPPRESSIONS", `${path}: expected file entries containing rule counts`);
+  }
+  const keys = Object.keys(entries);
+  const sorted = [...keys].sort();
+  return { entries, sorted: keys.every((key, index) => key === sorted[index]) };
+}
+function moveSuppressions(ws, renames, notes) {
+  const ledgers = new Map;
+  const ledger = (path) => {
+    if (!ledgers.has(path))
+      ledgers.set(path, readLedger(ws, path));
+    return ledgers.get(path);
+  };
+  const transfers = renames.flatMap(([from, to]) => {
+    const source = nearestLedger(ws, from);
+    if (!source)
+      return [];
+    const key = portablePath(relative6(dirname6(source), from));
+    const entries = ledger(source).entries;
+    if (!Object.hasOwn(entries, key))
+      return [];
+    const destination = nearestLedger(ws, to) ?? newLedger(ws, to);
+    if (destination)
+      ledger(destination);
+    return [{ source, key, rules: entries[key], destination, to }];
+  });
+  for (const { source, key } of transfers)
+    delete ledger(source).entries[key];
+  for (const { source, key, rules, destination, to } of transfers) {
+    const label = `${portablePath(relative6(ws.root, source))}:${key}`;
+    if (!destination) {
+      notes.push(`Dropped ESLint suppressions for ${label}; ${portablePath(relative6(ws.root, to))} has no destination ledger or package eslint.config.*; review suppressions.`);
+      continue;
+    }
+    const targetKey = portablePath(relative6(dirname6(destination), to));
+    const entries = ledger(destination).entries;
+    if (!Object.hasOwn(entries, targetKey))
+      Object.defineProperty(entries, targetKey, { value: {}, enumerable: true, configurable: true, writable: true });
+    const target = entries[targetKey];
+    for (const [rule, value] of Object.entries(rules)) {
+      const count = (Object.hasOwn(target, rule) ? target[rule].count : 0) + value.count;
+      if (!Number.isSafeInteger(count))
+        fail("INVALID_SUPPRESSIONS", `${destination}: count overflow for ${rule}`);
+      Object.defineProperty(target, rule, { value: { ...value, count }, enumerable: true, configurable: true, writable: true });
+    }
+    notes.push(`Moved ESLint suppressions ${label} -> ${portablePath(relative6(ws.root, destination))}:${targetKey}.`);
+  }
+  const changed = new Set(transfers.flatMap((item) => [item.source, ...item.destination ? [item.destination] : []]));
+  for (const path of changed) {
+    const { entries, sorted } = ledger(path);
+    const ordered = sorted ? Object.fromEntries(Object.entries(entries).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : entries;
+    ws.vfs.write(path, JSON.stringify(ordered, null, 2) + `
+`);
+  }
+}
+var init_typescript_suppressions = __esm(() => {
+  init_typescript_package_specifiers();
+  init_typescript_paths();
+  init_typescript_vfs();
 });
 
 // src/backends/typescript-fileops.ts
-import ts3 from "typescript";
-import { existsSync as existsSync2, readdirSync as readdirSync3 } from "node:fs";
-import { dirname as dirname3, extname as extname2, isAbsolute as isAbsolute2, relative as relative4, resolve as resolve3, sep as sep3 } from "node:path";
+import ts5 from "typescript";
+import { existsSync as existsSync3, lstatSync, readFileSync as readFileSync3, readdirSync as readdirSync4 } from "node:fs";
+import { dirname as dirname7, extname as extname4, isAbsolute as isAbsolute2, relative as relative7, resolve as resolve6, sep as sep4 } from "node:path";
 function preferencesFor(ws) {
   let single = 0, double = 0;
   for (const path of userFiles(ws)) {
@@ -1143,12 +1868,12 @@ function preferencesFor(ws) {
 function assertAbsolute(name, value) {
   if (!value || !isAbsolute2(value))
     fail("INVALID_REQUEST", `${name} must be an absolute path`);
-  return resolve3(value);
+  return resolve6(value);
 }
 function sourceExtension(path) {
   if (/\.d(\.[^./]+)?\.[cm]?ts$/i.test(path))
     fail("UNSUPPORTED_FILE", "declaration files cannot be renamed or moved");
-  const extension = extname2(path);
+  const extension = extname4(path);
   if (![...tsExtensions, ...jsExtensions].includes(extension))
     fail("UNSUPPORTED_FILE", extension || "file has no extension");
   return extension;
@@ -1158,26 +1883,26 @@ function formatFor(text) {
 }
 function declaredTypes(sourceFile, isJs) {
   return sourceFile.statements.filter((statement) => {
-    if (ts3.isClassDeclaration(statement))
+    if (ts5.isClassDeclaration(statement))
       return statement.name !== undefined;
-    return !isJs && (ts3.isInterfaceDeclaration(statement) || ts3.isTypeAliasDeclaration(statement) || ts3.isEnumDeclaration(statement));
+    return !isJs && (ts5.isInterfaceDeclaration(statement) || ts5.isTypeAliasDeclaration(statement) || ts5.isEnumDeclaration(statement));
   });
 }
 function namespaceMembers(sourceFile) {
   const names = new Set;
   const visit = (node) => {
-    if (ts3.isModuleDeclaration(node)) {
+    if (ts5.isModuleDeclaration(node)) {
       names.add(node.name.text);
       if (node.body)
-        ts3.forEachChild(node.body, visit);
-    } else if ((ts3.isClassDeclaration(node) || ts3.isInterfaceDeclaration(node) || ts3.isTypeAliasDeclaration(node) || ts3.isEnumDeclaration(node)) && node.name) {
+        ts5.forEachChild(node.body, visit);
+    } else if ((ts5.isClassDeclaration(node) || ts5.isInterfaceDeclaration(node) || ts5.isTypeAliasDeclaration(node) || ts5.isEnumDeclaration(node)) && node.name) {
       names.add(node.name.text);
-    } else if (ts3.isModuleBlock(node)) {
-      ts3.forEachChild(node, visit);
+    } else if (ts5.isModuleBlock(node)) {
+      ts5.forEachChild(node, visit);
     }
   };
   for (const statement of sourceFile.statements)
-    if (ts3.isModuleDeclaration(statement))
+    if (ts5.isModuleDeclaration(statement))
       visit(statement);
   return names;
 }
@@ -1192,7 +1917,7 @@ function selectType(context, request) {
       fail("INVALID_RANGE", "position must be a UTF-16 offset within the file");
     }
     const statement = sourceFile.statements.find((item) => item.getStart(sourceFile) <= request.position && request.position <= item.end);
-    if (statement && ts3.isModuleDeclaration(statement))
+    if (statement && ts5.isModuleDeclaration(statement))
       fail("NAMESPACE_UNSUPPORTED", "types inside TypeScript namespaces are not supported");
     const declaration = types.find((item) => item === statement);
     if (!declaration)
@@ -1223,16 +1948,16 @@ function selectType(context, request) {
 }
 function assertCaseSafe(root, path) {
   let current = root;
-  for (const part of relative4(root, path).split(sep3)) {
+  for (const part of relative7(root, path).split(sep4)) {
     let names;
     try {
-      names = readdirSync3(current);
+      names = readdirSync4(current);
     } catch {
       return;
     }
-    const next = resolve3(current, part);
+    const next = resolve6(current, part);
     if (!names.includes(part)) {
-      if (existsSync2(next)) {
+      if (existsSync3(next)) {
         const actual = names.find((name) => name.toLowerCase() === part.toLowerCase()) ?? "an existing entry";
         fail("CASE_COLLISION", `${next} differs only in case from ${actual}; this volume is case-insensitive and the change could overwrite data`);
       }
@@ -1245,19 +1970,19 @@ function parseFile(ws, path) {
   const text = ws.vfs.readFile(path);
   if (text === undefined)
     return;
-  const impliedNodeFormat = ts3.getImpliedNodeFormatForFile(path, undefined, ws.vfs.moduleResolutionHost(), ws.editOptions);
-  return ts3.createSourceFile(path, text, { languageVersion: ts3.ScriptTarget.Latest, impliedNodeFormat }, true, scriptKindFor(path));
+  const impliedNodeFormat = ts5.getImpliedNodeFormatForFile(path, undefined, ws.vfs.moduleResolutionHost(), ws.editOptions);
+  return ts5.createSourceFile(path, text, { languageVersion: ts5.ScriptTarget.Latest, impliedNodeFormat }, true, scriptKindFor(path));
 }
 function userFiles(ws) {
-  return ws.unionFiles().filter((path) => isInside(ws.root, path) && !path.split(sep3).includes("node_modules"));
+  return ws.unionFiles().filter((path) => isInside(ws.root, path) && !path.split(sep4).includes("node_modules"));
 }
 function applyEdits(context, edits, newFile) {
   const { ws } = context;
   for (const edit of [...edits].sort((a, b) => a.fileName.localeCompare(b.fileName))) {
-    const path = resolve3(edit.fileName);
+    const path = resolve6(edit.fileName);
     if (!isInside(ws.root, path))
       fail("OUTSIDE_ROOT", `TypeScript proposed a change outside ${ws.root}: ${path}`);
-    if (path.split(sep3).includes("node_modules") || ws.vfs.isHidden(path))
+    if (path.split(sep4).includes("node_modules") || ws.vfs.isHidden(path))
       fail("OUTSIDE_PROJECT", `TypeScript proposed a change to a dependency or build output: ${path}`);
     const before = ws.vfs.readFile(path);
     if (edit.isNewFile) {
@@ -1284,10 +2009,12 @@ function assertMembership(ws, before, renames, deletions, gains) {
   for (const [config, files] of before) {
     const expected = files.filter((key) => !deleted.has(key)).map((key) => renameMap.get(key) ?? key);
     const actual = ws.fileNames(config).map((path) => vfs.key(path)).sort();
-    if (gains && !expected.includes(vfs.key(gains.path))) {
-      const must = gains.must.some((item) => vfs.samePath(item, config));
-      if (must || gains.may.some((item) => vfs.samePath(item, config)) && actual.includes(vfs.key(gains.path)))
-        expected.push(vfs.key(gains.path));
+    for (const gain of gains ? Array.isArray(gains) ? gains : [gains] : []) {
+      if (expected.includes(vfs.key(gain.path)))
+        continue;
+      const must = gain.must.some((item) => vfs.samePath(item, config));
+      if (must || gain.may.some((item) => vfs.samePath(item, config)) && actual.includes(vfs.key(gain.path)))
+        expected.push(vfs.key(gain.path));
     }
     expected.sort();
     const added = actual.filter((key) => !expected.includes(key));
@@ -1300,23 +2027,27 @@ function assertMembership(ws, before, renames, deletions, gains) {
     }
   }
 }
-function importers(ws, path) {
-  const found = [];
+function importerMap(ws, paths) {
+  const found = new Map(paths.map((path) => [ws.vfs.key(path), []]));
   for (const file of userFiles(ws)) {
     const sourceFile = parseFile(ws, file);
     if (!sourceFile)
       continue;
     for (const specifier of moduleSpecifiers(sourceFile)) {
       const resolved = ws.resolveModule(specifier, sourceFile);
-      if (resolved && ws.vfs.samePath(resolved.resolvedFileName, path))
-        found.push(ws.vfs.key(file));
+      if (resolved)
+        found.get(ws.vfs.key(resolved.resolvedFileName))?.push(ws.vfs.key(file));
     }
     for (const reference of sourceFile.referencedFiles) {
-      if (ws.vfs.samePath(resolve3(dirname3(file), reference.fileName), path))
-        found.push(ws.vfs.key(file));
+      found.get(ws.vfs.key(resolve6(dirname7(file), reference.fileName)))?.push(ws.vfs.key(file));
     }
   }
-  return found.sort();
+  for (const files of found.values())
+    files.sort();
+  return found;
+}
+function importers(ws, path) {
+  return importerMap(ws, [path]).get(ws.vfs.key(path));
 }
 function nodeAt(sourceFile, position) {
   let node = sourceFile;
@@ -1328,10 +2059,10 @@ function nodeAt(sourceFile, position) {
   }
 }
 function inModuleSyntax(node) {
-  for (let current = node;current && !ts3.isSourceFile(current); current = current.parent) {
-    if (ts3.isImportSpecifier(current) || ts3.isExportSpecifier(current) || ts3.isImportClause(current) || ts3.isNamespaceImport(current) || ts3.isImportEqualsDeclaration(current))
+  for (let current = node;current && !ts5.isSourceFile(current); current = current.parent) {
+    if (ts5.isImportSpecifier(current) || ts5.isExportSpecifier(current) || ts5.isImportClause(current) || ts5.isNamespaceImport(current) || ts5.isImportEqualsDeclaration(current))
       return true;
-    if (ts3.isStatement(current))
+    if (ts5.isStatement(current))
       return false;
   }
   return false;
@@ -1365,14 +2096,14 @@ function usesCommonJs(sourceFile) {
   const visit = (node) => {
     if (found)
       return;
-    if (ts3.isCallExpression(node) && ts3.isIdentifier(node.expression) && node.expression.text === "require")
+    if (ts5.isCallExpression(node) && ts5.isIdentifier(node.expression) && node.expression.text === "require")
       found = true;
-    else if (ts3.isPropertyAccessExpression(node) && ts3.isIdentifier(node.expression) && (node.expression.text === "module" && node.name.text === "exports" || node.expression.text === "exports"))
+    else if (ts5.isPropertyAccessExpression(node) && ts5.isIdentifier(node.expression) && (node.expression.text === "module" && node.name.text === "exports" || node.expression.text === "exports"))
       found = true;
-    else if (ts3.isExportAssignment(node) && node.isExportEquals)
+    else if (ts5.isExportAssignment(node) && node.isExportEquals)
       found = true;
     else
-      ts3.forEachChild(node, visit);
+      ts5.forEachChild(node, visit);
   };
   visit(sourceFile);
   return found;
@@ -1381,13 +2112,17 @@ function specifierLike(from, to, original, originalTarget) {
   if (!original.startsWith("./") && !original.startsWith("../")) {
     fail("REEXPORT_UNSUPPORTED", `non-relative specifier '${original}' in ${from} cannot be retargeted deterministically`);
   }
-  const written = extname2(original);
-  const targetExtension = extname2(to);
+  const written = extname4(original);
+  const targetExtension = extname4(to);
+  if (![...tsExtensions, ...jsExtensions].includes(targetExtension)) {
+    const path2 = portablePath(relative7(dirname7(from), to));
+    return path2.startsWith(".") ? path2 : `./${path2}`;
+  }
   let extension = "";
   if ([...tsExtensions, ...jsExtensions].includes(written)) {
-    extension = written === extname2(originalTarget) ? targetExtension : written === ".jsx" && targetExtension === ".tsx" ? ".jsx" : jsEquivalent[targetExtension] ?? targetExtension;
+    extension = written === extname4(originalTarget) ? targetExtension : written === ".jsx" && targetExtension === ".tsx" ? ".jsx" : jsEquivalent[targetExtension] ?? targetExtension;
   }
-  const path = portablePath(relative4(dirname3(from), to.slice(0, to.length - targetExtension.length))) + extension;
+  const path = portablePath(relative7(dirname7(from), to.slice(0, to.length - targetExtension.length))) + extension;
   return path.startsWith(".") ? path : `./${path}`;
 }
 function updateReexports(context, target, name, exported, sourceDeleted) {
@@ -1402,21 +2137,21 @@ function updateReexports(context, target, name, exported, sourceDeleted) {
     const eol = eolOf(text);
     const changes = [];
     for (const statement of sourceFile.statements) {
-      if (!ts3.isExportDeclaration(statement) || !statement.moduleSpecifier || !ts3.isStringLiteral(statement.moduleSpecifier))
+      if (!ts5.isExportDeclaration(statement) || !statement.moduleSpecifier || !ts5.isStringLiteral(statement.moduleSpecifier))
         continue;
       const resolved = ws.resolveModule(statement.moduleSpecifier, sourceFile);
       if (!resolved || !ws.vfs.samePath(resolved.resolvedFileName, file))
         continue;
       const specifierStart = statement.moduleSpecifier.getStart(sourceFile);
       const quote = text[specifierStart];
-      const literal = `${quote}${specifierLike(path, target, statement.moduleSpecifier.text, file)}${quote}`;
+      const literal2 = `${quote}${specifierLike(path, target, statement.moduleSpecifier.text, file)}${quote}`;
       const typeOnly = statement.isTypeOnly ? "type " : "";
       if (!statement.exportClause) {
         if (sourceDeleted)
-          changes.push({ span: { start: specifierStart, length: statement.moduleSpecifier.end - specifierStart }, newText: literal });
+          changes.push({ span: { start: specifierStart, length: statement.moduleSpecifier.end - specifierStart }, newText: literal2 });
         else if (exported)
-          changes.push({ span: { start: statement.end, length: 0 }, newText: `${eol}export ${typeOnly}{ ${name} } from ${literal};` });
-      } else if (ts3.isNamespaceExport(statement.exportClause)) {
+          changes.push({ span: { start: statement.end, length: 0 }, newText: `${eol}export ${typeOnly}{ ${name} } from ${literal2};` });
+      } else if (ts5.isNamespaceExport(statement.exportClause)) {
         if (exported)
           fail("REEXPORT_UNSUPPORTED", `${path} re-exports ${file} as namespace '${statement.exportClause.name.getText(sourceFile)}'; moving ${name} would change that namespace`);
       } else {
@@ -1425,7 +2160,7 @@ function updateReexports(context, target, name, exported, sourceDeleted) {
         if (!moved.length)
           continue;
         const kept = elements.filter((element) => !moved.includes(element));
-        const movedDeclaration = `export ${typeOnly}{ ${moved.map((element) => element.getText(sourceFile)).join(", ")} } from ${literal};`;
+        const movedDeclaration = `export ${typeOnly}{ ${moved.map((element) => element.getText(sourceFile)).join(", ")} } from ${literal2};`;
         if (!kept.length) {
           const start = statement.getStart(sourceFile);
           changes.push({ span: { start, length: statement.end - start }, newText: movedDeclaration });
@@ -1452,10 +2187,10 @@ function moduleEdges(ws, files, owners) {
     const options = ws.participant(from[0]).parsed.options;
     for (const specifier of moduleSpecifiers(sourceFile)) {
       const resolved = ws.resolveModule(specifier, sourceFile, options);
-      if (!resolved || resolved.isExternalLibraryImport)
+      if (!resolved)
         continue;
-      const target = resolve3(resolved.resolvedFileName);
-      if (!isInside(ws.root, target) || target.split(sep3).includes("node_modules") || ws.vfs.isHidden(target))
+      const target = resolve6(resolved.resolvedFileName);
+      if (!isInside(ws.root, target) || target.split(sep4).includes("node_modules") || ws.vfs.isHidden(target))
         continue;
       edges.push({ file, target, from, to: owners(target) });
     }
@@ -1527,7 +2262,7 @@ function renameFile(context, request) {
     fail("INVALID_REQUEST", "rename-file keeps the file in its project; targetProject must be omitted");
   }
   const { name } = selectType(context, request);
-  const target = resolve3(dirname3(file), `${name}${extname2(file)}`);
+  const target = resolve6(dirname7(file), `${name}${extname4(file)}`);
   if (request.target !== undefined && assertAbsolute("target", request.target) !== target) {
     fail("INVALID_REQUEST", `rename-file derives its destination from the type name: ${target}`);
   }
@@ -1567,22 +2302,22 @@ function renameFile(context, request) {
 function topLevelNames(sourceFile) {
   const names = new Map;
   for (const statement of sourceFile.statements) {
-    if (ts3.isImportDeclaration(statement)) {
+    if (ts5.isImportDeclaration(statement)) {
       const clause = statement.importClause;
       if (clause?.name)
         names.set(clause.name.text, statement);
-      if (clause?.namedBindings && ts3.isNamespaceImport(clause.namedBindings))
+      if (clause?.namedBindings && ts5.isNamespaceImport(clause.namedBindings))
         names.set(clause.namedBindings.name.text, statement);
-      if (clause?.namedBindings && ts3.isNamedImports(clause.namedBindings)) {
+      if (clause?.namedBindings && ts5.isNamedImports(clause.namedBindings)) {
         for (const element of clause.namedBindings.elements)
           names.set(element.name.text, statement);
       }
-    } else if (ts3.isVariableStatement(statement)) {
+    } else if (ts5.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
-        if (ts3.isIdentifier(declaration.name))
+        if (ts5.isIdentifier(declaration.name))
           names.set(declaration.name.text, statement);
       }
-    } else if ("name" in statement && statement.name && ts3.isIdentifier(statement.name)) {
+    } else if ("name" in statement && statement.name && ts5.isIdentifier(statement.name)) {
       names.set(statement.name.text, statement);
     }
   }
@@ -1591,28 +2326,60 @@ function topLevelNames(sourceFile) {
 function assertSafeInitialization(declaration) {
   const reject = () => fail("INITIALIZATION_EFFECTS_UNSUPPORTED", "move-type cannot preserve runtime initialization order for this declaration; static effects, computed names, decorators and evaluated base classes are unsupported");
   const constant = (expression) => {
-    if (ts3.isParenthesizedExpression(expression) || ts3.isAsExpression(expression) || ts3.isTypeAssertionExpression(expression) || ts3.isSatisfiesExpression(expression))
+    if (ts5.isParenthesizedExpression(expression) || ts5.isAsExpression(expression) || ts5.isTypeAssertionExpression(expression) || ts5.isSatisfiesExpression(expression))
       return constant(expression.expression);
-    if (ts3.isPrefixUnaryExpression(expression))
-      return [ts3.SyntaxKind.PlusToken, ts3.SyntaxKind.MinusToken, ts3.SyntaxKind.ExclamationToken, ts3.SyntaxKind.TildeToken].includes(expression.operator) && constant(expression.operand);
-    return ts3.isNumericLiteral(expression) || ts3.isStringLiteral(expression) || ts3.isNoSubstitutionTemplateLiteral(expression) || ts3.isBigIntLiteral(expression) || [ts3.SyntaxKind.TrueKeyword, ts3.SyntaxKind.FalseKeyword, ts3.SyntaxKind.NullKeyword].includes(expression.kind);
+    if (ts5.isPrefixUnaryExpression(expression))
+      return [ts5.SyntaxKind.PlusToken, ts5.SyntaxKind.MinusToken, ts5.SyntaxKind.ExclamationToken, ts5.SyntaxKind.TildeToken].includes(expression.operator) && constant(expression.operand);
+    return ts5.isNumericLiteral(expression) || ts5.isStringLiteral(expression) || ts5.isNoSubstitutionTemplateLiteral(expression) || ts5.isBigIntLiteral(expression) || [ts5.SyntaxKind.TrueKeyword, ts5.SyntaxKind.FalseKeyword, ts5.SyntaxKind.NullKeyword].includes(expression.kind);
   };
-  if (ts3.isEnumDeclaration(declaration)) {
+  if (ts5.isEnumDeclaration(declaration)) {
     if (declaration.members.some((member) => member.initializer && !constant(member.initializer)))
       reject();
   }
-  if (!ts3.isClassDeclaration(declaration))
+  if (!ts5.isClassDeclaration(declaration))
     return;
-  if (ts3.getDecorators(declaration)?.length || declaration.heritageClauses?.some((clause) => clause.token === ts3.SyntaxKind.ExtendsKeyword && clause.types.some((type) => !ts3.isIdentifier(type.expression))))
+  if (ts5.getDecorators(declaration)?.length || declaration.heritageClauses?.some((clause) => clause.token === ts5.SyntaxKind.ExtendsKeyword && clause.types.some((type) => !ts5.isIdentifier(type.expression))))
     reject();
   for (const member of declaration.members) {
-    if (ts3.canHaveDecorators(member) && ts3.getDecorators(member)?.length || ts3.isClassStaticBlockDeclaration(member) || member.name && ts3.isComputedPropertyName(member.name))
+    if (ts5.canHaveDecorators(member) && ts5.getDecorators(member)?.length || ts5.isClassStaticBlockDeclaration(member) || member.name && ts5.isComputedPropertyName(member.name))
       reject();
-    if (ts3.isConstructorDeclaration(member) && member.parameters.some((parameter) => ts3.getDecorators(parameter)?.length))
+    if (ts5.isConstructorDeclaration(member) && member.parameters.some((parameter) => ts5.getDecorators(parameter)?.length))
       reject();
-    if (ts3.isPropertyDeclaration(member) && ts3.getModifiers(member)?.some((modifier) => modifier.kind === ts3.SyntaxKind.StaticKeyword) && member.initializer && !constant(member.initializer))
+    if (ts5.isPropertyDeclaration(member) && ts5.getModifiers(member)?.some((modifier) => modifier.kind === ts5.SyntaxKind.StaticKeyword) && member.initializer && !constant(member.initializer))
       reject();
   }
+}
+function importedTarget(ws, binding) {
+  const imported = ts5.isImportSpecifier(binding) ? (binding.propertyName ?? binding.name).text : ts5.isImportClause(binding) ? "default" : ts5.isNamespaceImport(binding) ? "*" : undefined;
+  if (imported === undefined)
+    return;
+  let parent = binding;
+  while (parent.parent && !ts5.isImportDeclaration(parent))
+    parent = parent.parent;
+  if (!ts5.isImportDeclaration(parent) || !ts5.isStringLiteralLike(parent.moduleSpecifier))
+    return;
+  const resolved = ws.resolveModule(parent.moduleSpecifier, parent.getSourceFile());
+  return resolved ? `${ws.vfs.key(resolved.resolvedFileName)}\x00${imported}` : undefined;
+}
+function typeImportTargets(ws, declaration) {
+  const checker = ws.program().getTypeChecker();
+  const targets = new Set;
+  const visit = (node) => {
+    if (ts5.isIdentifier(node))
+      for (const binding of checker.getSymbolAtLocation(node)?.declarations ?? []) {
+        const target = importedTarget(ws, binding);
+        if (target)
+          targets.add(target);
+      }
+    if (ts5.isImportTypeNode(node) && ts5.isLiteralTypeNode(node.argument) && ts5.isStringLiteralLike(node.argument.literal)) {
+      const resolved = ws.resolveModule(node.argument.literal, node.getSourceFile());
+      if (resolved)
+        targets.add(`${ws.vfs.key(resolved.resolvedFileName)}\x00import-type:${node.qualifier?.getText() ?? "*"}`);
+    }
+    ts5.forEachChild(node, visit);
+  };
+  visit(declaration);
+  return targets;
 }
 function moveType(context, request) {
   const { ws, file, root, sourceFile, isJs } = context;
@@ -1625,7 +2392,7 @@ function moveType(context, request) {
   }
   if (ws.vfs.samePath(target, file))
     fail("INVALID_REQUEST", "target must differ from the source file");
-  if (!ts3.isExternalModule(sourceFile))
+  if (!ts5.isExternalModule(sourceFile))
     fail("MODULE_REQUIRED", "move-type requires an ES module source file (with import or export)");
   if (isJs && usesCommonJs(sourceFile))
     fail("COMMONJS_UNSUPPORTED", "CommonJS require/exports are not supported by move-type");
@@ -1641,7 +2408,8 @@ function moveType(context, request) {
   if (!symbol || (symbol.declarations?.length ?? 0) !== 1) {
     fail("MERGED_DECLARATION_UNSUPPORTED", `${name} merges with other declarations (namespace, interface or global augmentation)`);
   }
-  const exported = (ts3.getCombinedModifierFlags(declaration) & ts3.ModifierFlags.Export) !== 0;
+  const importedTargets = typeImportTargets(ws, declaration);
+  const exported = (ts5.getCombinedModifierFlags(declaration) & ts5.ModifierFlags.Export) !== 0;
   const targetExists = ws.vfs.fileExists(target);
   if (!targetExists && ws.vfs.directoryExists(target))
     fail("TARGET_EXISTS", `${target} is a directory`);
@@ -1652,12 +2420,12 @@ function moveType(context, request) {
       fail("TARGET_NOT_IN_PROJECT", `${target} must belong to exactly ${ws.targetConfig}; owners: ${owners.join(", ") || "none"}`);
     }
     const targetSource2 = program.getSourceFile(target);
-    if (!ts3.isExternalModule(targetSource2))
+    if (!ts5.isExternalModule(targetSource2))
       fail("MODULE_REQUIRED", `${target} is not an ES module`);
     if (isJs && usesCommonJs(targetSource2))
       fail("COMMONJS_UNSUPPORTED", `${target} uses CommonJS`);
     const existing = topLevelNames(targetSource2).get(name);
-    const importsMoved = existing && ts3.isImportDeclaration(existing) && ts3.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource2)?.resolvedFileName ?? "", file);
+    const importsMoved = existing && ts5.isImportDeclaration(existing) && ts5.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource2)?.resolvedFileName ?? "", file);
     if (existing && !importsMoved)
       fail("TARGET_CONFLICT", `${target} already declares ${name}`);
   }
@@ -1670,7 +2438,7 @@ function moveType(context, request) {
       beforeOwners.set(key, [...beforeOwners.get(key) ?? [], config]);
   }
   const listedBefore = (config, path) => before.get(config).includes(ws.vfs.key(path));
-  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname3(config), dirname3(ws.targetConfig)));
+  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname7(config), dirname7(ws.targetConfig)));
   const mirroring = siblings.filter((config) => listedBefore(config, file) && !listedBefore(config, target));
   const statementStart = declaration.getStart(sourceFile);
   const moduleGraph = () => {
@@ -1681,7 +2449,7 @@ function moveType(context, request) {
     }
     return graph;
   };
-  const modulesBefore = ts3.isClassDeclaration(declaration) ? moduleGraph() : undefined;
+  const modulesBefore = ts5.isClassDeclaration(declaration) ? moduleGraph() : undefined;
   const countsBefore = referenceCounts(ws, file, nameStart, { start: declaration.pos, end: declaration.end, to: target });
   const range = { pos: statementStart, end: declaration.end };
   const preferences = preferencesFor(ws);
@@ -1730,6 +2498,13 @@ function moveType(context, request) {
   if (!targetSource || !movedDeclaration)
     fail("REFACTOR_UNAVAILABLE", `${name} was not found in ${target} after the move`);
   assertSameCounts(countsBefore, referenceCounts(ws, target, movedDeclaration.name.getStart(targetSource)), name);
+  context.verify = () => {
+    const actual = typeImportTargets(ws, movedDeclaration);
+    for (const dependency of importedTargets) {
+      if (!actual.has(dependency))
+        fail("REFERENCES_NOT_PRESERVED", `${name} in ${target} no longer imports ${dependency.replace("\x00", " export ")}`);
+    }
+  };
   const changed = ws.vfs.changes().filter((change) => change.after !== null && !/\.json$/i.test(change.path)).map((change) => change.path);
   const afterViolations = accessViolations(ws, changed, (path) => ws.ownersOf(path));
   const beforeViolations = ws.vfs.original(() => accessViolations(ws, changed.filter((path) => ws.vfs.diskText(path) !== null), (path) => beforeOwners.get(ws.vfs.key(path)) ?? []));
@@ -1749,6 +2524,190 @@ function moveType(context, request) {
     fail("PROJECT_DEPENDENCY_CYCLE", `the move would make projects depend on each other (${cycles.join("; ")}); move the type's dependencies first or choose another target`);
   }
 }
+function movePaths(root, file, target) {
+  if (!isInside(root, target))
+    fail("OUTSIDE_ROOT", `target is outside ${root}`);
+  let stat;
+  try {
+    stat = lstatSync(file);
+  } catch {
+    fail("FILE_NOT_FOUND", file);
+  }
+  if (stat.isSymbolicLink())
+    fail("SYMLINK_UNSUPPORTED", file);
+  if (stat.isFile()) {
+    if (extname4(file) !== extname4(target))
+      fail("UNSUPPORTED_TARGET", "move-file must retain the file extension");
+    return [[file, target]];
+  }
+  if (!stat.isDirectory())
+    fail("UNSUPPORTED_FILE", file);
+  if (isInside(file, target) || isInside(target, file))
+    fail("INVALID_REQUEST", "source and destination directories must not overlap");
+  const paths = [];
+  const visit = (directory) => {
+    for (const entry of readdirSync4(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = resolve6(directory, entry.name);
+      if (entry.isSymbolicLink())
+        fail("SYMLINK_UNSUPPORTED", path);
+      if (entry.isDirectory())
+        visit(path);
+      else if (entry.isFile())
+        paths.push([path, resolve6(target, relative7(file, path))]);
+      else
+        fail("UNSUPPORTED_FILE", path);
+    }
+  };
+  visit(file);
+  if (!paths.length)
+    fail("EMPTY_DIRECTORY", `${file} contains no files`);
+  return paths;
+}
+function relocationImports(ws, renames) {
+  const moved = new Set(renames.map(([from]) => ws.vfs.key(from)));
+  const imports = [];
+  for (const file of userFiles(ws)) {
+    const source = parseFile(ws, file);
+    if (!source)
+      continue;
+    const owner = ws.ownersOf(file)[0];
+    const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
+    moduleSpecifiers(source).forEach((specifier, index) => {
+      const resolved = ws.resolveModule(specifier, source, options);
+      if (!resolved)
+        return;
+      const target = resolve6(resolved.resolvedFileName);
+      if (!moved.has(ws.vfs.key(file)) && !moved.has(ws.vfs.key(target)))
+        return;
+      const alias = Object.keys(options.paths ?? {}).some((pattern) => {
+        const [prefix, suffix] = pattern.split("*");
+        return pattern.includes("*") ? specifier.text.startsWith(prefix) && specifier.text.endsWith(suffix) : pattern === specifier.text;
+      });
+      imports.push({ file, index, target, original: specifier.text, alias });
+    });
+  }
+  return imports;
+}
+function moveFile(context, request, renames) {
+  const { ws, root, file } = context;
+  const target = assertAbsolute("target", request.target);
+  const directory = lstatSync(file).isDirectory();
+  if (ws.vfs.samePath(file, target))
+    fail("INVALID_REQUEST", "target must differ from the source");
+  if (ws.vfs.fileExists(target) || !directory && ws.vfs.directoryExists(target))
+    fail("TARGET_EXISTS", target);
+  for (const [from, to] of renames) {
+    if (ws.vfs.fileExists(to) || ws.vfs.directoryExists(to))
+      fail("TARGET_EXISTS", to);
+    assertCaseSafe(root, to);
+    const bytes = readFileSync3(from);
+    if (!Buffer.from(bytes.toString("utf8")).equals(bytes))
+      fail("UNSUPPORTED_ENCODING", `${from}: move-file plans require UTF-8 text`);
+  }
+  const before = membership(ws);
+  const beforeOwners = new Map;
+  for (const [config, keys] of before) {
+    if (ws.isObserver(config))
+      continue;
+    for (const key of keys)
+      beforeOwners.set(key, [...beforeOwners.get(key) ?? [], config]);
+  }
+  const graphBefore = projectGraph(ws, userFiles(ws), (path) => ws.ownersOf(path));
+  const imports = relocationImports(ws, renames);
+  const mapping = new Map(renames.map(([from, to]) => [ws.vfs.key(from), to]));
+  const relocated = (path) => mapping.get(ws.vfs.key(path)) ?? path;
+  const styleCache = new Map;
+  const retargeted = imports.filter((edge) => mapping.has(ws.vfs.key(edge.target)) || mapping.has(ws.vfs.key(edge.file)) && packageSelfImport(ws, relocated(edge.file), relocated(edge.target), edge.original));
+  const styles = new Map(retargeted.map((edge) => [edge, relativeStyle(ws, relocated(edge.target), edge.original, styleCache)]));
+  const beforeImporters = importerMap(ws, renames.map(([from]) => from));
+  const expectedImporters = new Map(renames.map(([from, to]) => [to, beforeImporters.get(ws.vfs.key(from)).map(relocated).map((path) => ws.vfs.key(path)).sort()]));
+  applyEdits(context, ws.service.getEditsForFileRename(file, target, formatFor(context.sourceFile.text), preferencesFor(ws)));
+  for (const [from, to] of renames) {
+    const text = ws.vfs.readFile(from);
+    const bom = ws.vfs.hasBom(from);
+    ws.vfs.write(from, null);
+    ws.vfs.write(to, text, bom);
+  }
+  const sameProject = ws.vfs.samePath(ws.sourceConfig, ws.targetConfig);
+  const configRenames = directory ? [[file, target], ...renames] : renames;
+  const substitutions = new Map;
+  if (!sameProject)
+    for (const item of ws.participants.values()) {
+      if (ws.vfs.samePath(dirname7(item.configPath), dirname7(ws.targetConfig)))
+        substitutions.set(ws.vfs.key(item.configPath), configRenames);
+    }
+  ws.updateConfigLists(sameProject ? configRenames : [], sameProject ? [] : configRenames.map(([from]) => from), substitutions);
+  ws.reparse();
+  const sourceRenames = renames.filter(([from]) => [...before.values()].some((files) => files.includes(ws.vfs.key(from))));
+  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname7(config), dirname7(ws.targetConfig)));
+  for (const [, to] of sourceRenames) {
+    if (!ws.fileNames(ws.targetConfig).some((path) => ws.vfs.samePath(path, to))) {
+      if (!ws.addToFiles(ws.targetConfig, to))
+        fail("TARGET_NOT_IN_PROJECT", `${to} is not matched by the include patterns of ${ws.targetConfig}`);
+      ws.reparse();
+    }
+    const owners = ws.ownersOf(to);
+    if (owners.length !== 1 || !ws.vfs.samePath(owners[0], ws.targetConfig))
+      fail("TARGET_NOT_IN_PROJECT", `${to} must belong to exactly ${ws.targetConfig}; owners: ${owners.join(", ") || "none"}`);
+  }
+  assertMembership(ws, before, sameProject ? sourceRenames : [], sameProject ? [] : sourceRenames.map(([from]) => from), sameProject ? undefined : sourceRenames.map(([, path]) => ({ path, must: [ws.targetConfig], may: siblings })));
+  const changes = new Map;
+  for (const edge of retargeted) {
+    const from = relocated(edge.file), to = relocated(edge.target);
+    const source = parseFile(ws, from);
+    const specifier = moduleSpecifiers(source)[edge.index];
+    if (!specifier)
+      fail("REFERENCES_NOT_PRESERVED", `module specifier disappeared in ${from}`);
+    const owner = ws.ownersOf(from)[0];
+    const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
+    const bare = packageSpecifier(ws, from, to, ts5.getModeForUsageLocation(source, specifier, options));
+    const style = styles.get(edge);
+    const name = bare ?? specifierLike(from, to, style, edge.target);
+    const start = specifier.getStart(source) + 1;
+    const list = changes.get(from) ?? [];
+    list.push({ span: { start, length: specifier.end - start - 1 }, newText: JSON.stringify(name).slice(1, -1) });
+    changes.set(from, list);
+  }
+  for (const [path, edits] of changes)
+    ws.vfs.write(path, applyTextChanges(ws.vfs.readFile(path), edits));
+  ws.reparse();
+  context.aliasHints = imports.filter((edge) => edge.alias && mapping.has(ws.vfs.key(edge.file)) && !mapping.has(ws.vfs.key(edge.target))).filter((edge) => {
+    const source = parseFile(ws, relocated(edge.file));
+    const specifier = moduleSpecifiers(source)[edge.index];
+    return specifier && !ws.resolveModule(specifier, source, ws.participant(ws.targetConfig).parsed.options);
+  }).map((edge) => `${edge.original} (${relocated(edge.file)})`);
+  const changed = ws.vfs.changes().filter((change) => change.after !== null && /\.[cm]?[jt]sx?$/.test(change.path)).map((change) => change.path);
+  const afterViolations = accessViolations(ws, changed, (path) => ws.ownersOf(path));
+  const originals = new Map(renames.map(([from, to]) => [ws.vfs.key(to), from]));
+  const originalPaths = changed.map((path) => originals.get(ws.vfs.key(path)) ?? path);
+  const beforeViolations = ws.vfs.original(() => accessViolations(ws, originalPaths.filter((path) => ws.vfs.diskText(path) !== null), (path) => beforeOwners.get(ws.vfs.key(path)) ?? []));
+  const priorKeys = new Set([...beforeViolations.keys()].map((key) => key.split("\x00").map(relocated).map((path) => ws.vfs.key(path)).join("\x00")));
+  const introduced = [...afterViolations].filter(([key]) => !priorKeys.has(key)).map(([, message]) => message);
+  if (introduced.length)
+    fail("INACCESSIBLE_DEPENDENCY", `${introduced.join("; ")}; add a project reference or move dependencies first`);
+  const cycles = introducedCycles(graphBefore, projectGraph(ws, userFiles(ws), (path) => ws.ownersOf(path)));
+  if (cycles.length)
+    fail("PROJECT_DEPENDENCY_CYCLE", `the move introduces project cycles (${cycles.join("; ")}); move dependencies first`);
+  context.verify = () => {
+    for (const edge of imports) {
+      const from = relocated(edge.file), to = relocated(edge.target);
+      const source = parseFile(ws, from);
+      const specifier = moduleSpecifiers(source)[edge.index];
+      const resolved = specifier && ws.resolveModule(specifier, source);
+      if (!resolved || !ws.vfs.samePath(resolved.resolvedFileName, to)) {
+        fail("REFERENCES_NOT_PRESERVED", `${edge.original} in ${from} must still resolve to ${to}`);
+      }
+    }
+    const afterImporters = importerMap(ws, renames.map(([, to]) => to));
+    for (const [to, expected] of expectedImporters) {
+      const actual = afterImporters.get(ws.vfs.key(to));
+      if (JSON.stringify(expected) !== JSON.stringify(actual))
+        fail("REFERENCES_NOT_PRESERVED", `${expected.length} module references expected for ${to}, found ${actual.length}`);
+    }
+  };
+  moveSuppressions(ws, renames, context.notes);
+  context.notes.push(`Moved ${renames.length} file(s) from ${relative7(root, file)} to ${relative7(root, target)}; validated source and target project membership.`);
+}
 function newDiagnostics(before, after) {
   const key = (item) => `${item.file}\x00${item.code}\x00${item.message}`;
   const counts = new Map;
@@ -1767,44 +2726,56 @@ async function analyzeFileOperation(request) {
   const file = assertAbsolute("file", request.file);
   if (!isInside(root, file))
     fail("OUTSIDE_ROOT", `file is outside ${root}`);
-  const extension = sourceExtension(file);
+  const movingFiles = request.operation === "move-file" ? movePaths(root, file, assertAbsolute("target", request.target)) : undefined;
+  const extension = movingFiles ? extname4(file) : sourceExtension(file);
   const sourceConfig = configPathFor(assertAbsolute("project", request.project));
-  const targetConfig = request.operation === "move-type" && request.targetProject ? configPathFor(assertAbsolute("targetProject", request.targetProject)) : sourceConfig;
-  const affected = [file];
-  if (request.operation === "move-type" && request.target && isAbsolute2(request.target) && existsSync2(request.target))
-    affected.push(resolve3(request.target));
+  const targetConfig = ["move-type", "move-file"].includes(request.operation) && request.targetProject ? configPathFor(assertAbsolute("targetProject", request.targetProject)) : sourceConfig;
+  const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
+  if (request.operation === "move-type" && request.target && isAbsolute2(request.target) && existsSync3(request.target))
+    affected.push(resolve6(request.target));
   const ws = new Workspace(root, sourceConfig, targetConfig, affected);
   try {
-    if (!ws.vfs.fileExists(file))
+    if (!movingFiles && !ws.vfs.fileExists(file))
       fail("FILE_NOT_FOUND", file);
-    const owners = ws.ownersOf(file);
-    if (!owners.some((owner) => ws.vfs.samePath(owner, sourceConfig)))
-      fail("FILE_NOT_IN_PROJECT", `${file} is not included by ${sourceConfig}`);
-    if (owners.length > 1)
-      fail("OWNERSHIP_AMBIGUOUS", `${file} is included by several projects: ${owners.join(", ")}`);
-    ws.assertNoUnhandledProjects([file], true, false);
-    const sourceFile = ws.program().getSourceFile(file);
+    const selected = movingFiles ? movingFiles.map(([from]) => from).filter((path) => /\.[cm]?[jt]sx?$/.test(path)) : [file];
+    for (const file2 of selected) {
+      const owners = ws.ownersOf(file2);
+      if (!owners.some((owner) => ws.vfs.samePath(owner, sourceConfig)))
+        fail("FILE_NOT_IN_PROJECT", `${file2} is not included by ${sourceConfig}`);
+      if (owners.length > 1)
+        fail("OWNERSHIP_AMBIGUOUS", `${file2} is included by several projects: ${owners.join(", ")}`);
+    }
+    ws.assertNoUnhandledProjects(selected, true, false);
+    const sourceFile = ws.program().getSourceFile(selected[0] ?? file) ?? (movingFiles ? ts5.createSourceFile(file, "", ts5.ScriptTarget.Latest) : undefined);
     if (!sourceFile)
       fail("FILE_NOT_IN_PROJECT", file);
     const isJs = jsExtensions.includes(extension);
     const context = { ws, root, file, sourceFile, isJs, notes: [] };
-    const diagnosticsBefore = ws.diagnostics();
+    const validate = ws.prepareValidation();
     let renamed;
     if (request.operation === "rename-file")
       renamed = renameFile(context, request).renamed;
     else if (request.operation === "move-type")
       moveType(context, request);
-    else
+    else if (movingFiles)
+      moveFile(context, request, movingFiles);
+    else if (request.operation === "inline-reexports") {
+      const before = membership(ws);
+      const deleted = inlineReexports(ws, file, sourceFile, context.notes, request.keep);
+      assertMembership(ws, before, [], deleted ? [file] : []);
+    } else
       fail("UNSUPPORTED_OPERATION", String(request.operation));
     const written = ws.vfs.changes().filter((change) => change.after !== null && !/\.json$/i.test(change.path)).map((change) => change.path);
     if (written.length)
       ws.assertNoUnhandledProjects(written, false);
     const layoutsBefore = new Map(ws.layouts);
-    const diagnosticsAfter = ws.diagnostics();
-    const comparable = renamed ? diagnosticsBefore.map((item) => ws.vfs.samePath(item.file, renamed[0]) ? { ...item, file: renamed[1] } : item) : diagnosticsBefore;
+    const { before: diagnosticsBefore, after: diagnosticsAfter, affected: validatedFiles, affectedProjects: validatedProjects = ws.participants.size } = validate();
+    const renameMap = new Map((movingFiles ?? (renamed ? [renamed] : [])).map(([from, to]) => [ws.vfs.key(from), to]));
+    const comparable = movingFiles ? diagnosticsBefore.map((item) => ({ ...item, file: renameMap.get(ws.vfs.key(item.file)) ?? item.file })) : renamed ? diagnosticsBefore.map((item) => ws.vfs.samePath(item.file, renamed[0]) ? { ...item, file: renamed[1] } : item) : diagnosticsBefore;
     const introduced = newDiagnostics(comparable, diagnosticsAfter);
     if (introduced.length)
-      fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; "));
+      fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ") + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : ""));
+    context.verify?.();
     for (const [key, layout] of layoutsBefore) {
       const after = ws.layouts.get(key);
       if (after !== undefined && after !== layout) {
@@ -1812,22 +2783,24 @@ async function analyzeFileOperation(request) {
       }
     }
     for (const config of ws.importingConfigs) {
-      context.notes.push(`Included ${relative4(root, config)} because its program imports ${relative4(root, file)} without a project reference.`);
+      context.notes.push(`Included ${relative7(root, config)} because its program imports ${relative7(root, file)} without a project reference.`);
     }
     for (const config of ws.observers()) {
-      context.notes.push(`Updated and validated ${relative4(root, config)}, a variant config that also compiles the affected files.`);
+      context.notes.push(`Updated and validated ${relative7(root, config)}, a variant config that also compiles the affected files.`);
     }
-    if (ws.participants.size > 1) {
-      context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative4(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
+    if (validatedFiles !== undefined) {
+      context.notes.push(`Validated ${validatedFiles} affected file(s) across ${validatedProjects} project(s): the changed files and their transitive importers in the original and planned module graphs.${validatedProjects < ws.participants.size ? ` Fully checked ${ws.participants.size - validatedProjects} other project(s).` : ""}`);
+    } else if (ws.participants.size > 1) {
+      context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative7(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
     }
     if (isJs) {
       context.notes.push("JavaScript analysis is semantic only for references TypeScript can resolve; dynamic imports with computed paths and string-based references are not changed.");
     }
     if (renamed)
-      context.notes.push(`Renamed ${relative4(root, renamed[0])} to ${relative4(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
+      context.notes.push(`Renamed ${relative7(root, renamed[0])} to ${relative7(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
     return {
       backend: "typescript",
-      version: ts3.version,
+      version: ts5.version,
       changes: ws.vfs.changes(),
       diagnosticsBefore: comparable,
       diagnosticsAfter,
@@ -1839,10 +2812,15 @@ async function analyzeFileOperation(request) {
 }
 var fileCapabilities, tsExtensions, jsExtensions, jsEquivalent;
 var init_typescript_fileops = __esm(() => {
+  init_typescript_inline_reexports();
   init_typescript_vfs();
   init_typescript_workspace();
+  init_typescript_package_specifiers();
+  init_typescript_suppressions();
   init_typescript_paths();
   fileCapabilities = [
+    { operation: "move-file", description: "Move whole TS/JS modules or directories within or between workspace packages, updating imports, exports and project file lists." },
+    { operation: "inline-reexports", description: "Inline shim re-exports into workspace callers, deleting unreferenced pure shims unless kept." },
     {
       operation: "rename-file",
       description: "Rename a TS/JS file after its declared type (TS class, interface, type alias or enum; JS class), updating imports in all projects that reference it."
@@ -1857,20 +2835,354 @@ var init_typescript_fileops = __esm(() => {
   jsEquivalent = { ".ts": ".js", ".tsx": ".js", ".mts": ".mjs", ".cts": ".cjs" };
 });
 
+// src/backends/typescript-retarget-mocks.ts
+import ts6 from "typescript";
+import { resolve as resolve7 } from "node:path";
+function mockCalls(source, name) {
+  return moduleSpecifiers(source).filter((specifier) => specifier.text === name && isModuleMockCall(specifier.parent) && ts6.isPropertyAccessExpression(specifier.parent.expression) && ["mock", "doMock"].includes(specifier.parent.expression.name.text)).map((specifier) => specifier.parent);
+}
+function affectedMockFiles(context, affected, from) {
+  if (!affected.length)
+    return [];
+  const program = context.service.getProgram();
+  const files = program.getSourceFiles().filter((source) => isInside(context.root, resolve7(source.fileName)) && !source.fileName.replaceAll("\\", "/").includes("/node_modules/"));
+  const callers = new Map;
+  const cache = ts6.createModuleResolutionCache(context.root, (path) => path, context.options);
+  for (const source of files) {
+    for (const specifier of moduleSpecifiers(source)) {
+      if (isModuleMockCall(specifier.parent) && ts6.isPropertyAccessExpression(specifier.parent.expression) && !["importActual", "importMock", "requireActual", "requireMock"].includes(specifier.parent.expression.name.text))
+        continue;
+      const mode = ts6.getModeForUsageLocation(source, specifier, context.options);
+      const target = ts6.resolveModuleName(specifier.text, source.fileName, context.options, ts6.sys, cache, undefined, mode).resolvedModule;
+      if (!target)
+        continue;
+      const key = resolve7(target.resolvedFileName);
+      if (!callers.has(key))
+        callers.set(key, new Set);
+      callers.get(key).add(resolve7(source.fileName));
+    }
+  }
+  const reached = new Set(affected.map((source) => resolve7(source.fileName)));
+  const queue = [...reached];
+  for (let index = 0;index < queue.length; index++) {
+    for (const caller of callers.get(queue[index]) ?? []) {
+      if (reached.has(caller))
+        continue;
+      reached.add(caller);
+      queue.push(caller);
+    }
+  }
+  return files.filter((source) => reached.has(resolve7(source.fileName)) && mockCalls(source, from).length).map((source) => source.fileName).sort();
+}
+function addParallelMocks(context, files, request) {
+  const added = [];
+  for (const file of files) {
+    const source = context.service.getProgram().getSourceFile(file);
+    if (mockCalls(source, request.to).length)
+      continue;
+    const edits = [];
+    for (const call of mockCalls(source, request.from)) {
+      const statement = call.parent;
+      if (!ts6.isExpressionStatement(statement) || !ts6.isSourceFile(statement.parent) && !ts6.isBlock(statement.parent)) {
+        fail("UNSUPPORTED_MOCK_CALL", `${file}: --mocks add requires standalone mock statements in a source file or block; use --mocks report`);
+      }
+      const specifier = call.arguments[0];
+      const mode = ts6.getModeForUsageLocation(source, specifier, context.options);
+      if (!ts6.resolveModuleName(request.to, file, context.options, ts6.sys, undefined, undefined, mode).resolvedModule) {
+        fail("TARGET_UNRESOLVED", `${file} (${request.to})`);
+      }
+      const start = call.getStart(source);
+      const quote = source.text[specifier.getStart(source)];
+      const escaped = JSON.stringify(request.to).slice(1, -1);
+      const literal2 = quote === '"' ? JSON.stringify(request.to) : quote + escaped.replaceAll(quote, (match) => `\\${match}`).replaceAll("${", quote === "`" ? "\\${" : "${") + quote;
+      const text2 = source.text.slice(start, specifier.getStart(source)) + literal2 + source.text.slice(specifier.end, call.end);
+      const indent = source.text.slice(source.text.lastIndexOf(`
+`, statement.getStart(source)) + 1, statement.getStart(source)).match(/^[\t ]*/)?.[0] ?? "";
+      const tail = source.text.slice(statement.end);
+      const trivia = /^(?:[\t ]|\/\*[^]*?\*\/)*(?:\/\/[^\r\n]*)?(?=\r?\n|$)/.exec(tail)?.[0];
+      const end = statement.end + (trivia?.length ?? 0);
+      const prefix = trivia === undefined && !source.text.slice(statement.getStart(source), statement.end).endsWith(";") ? ";" : "";
+      edits.push({ start: end, text: `${prefix}${eolOf(source.text)}${indent}${text2};` });
+    }
+    let text = source.text;
+    for (const edit of edits.sort((a, b) => b.start - a.start))
+      text = text.slice(0, edit.start) + edit.text + text.slice(edit.start);
+    if (edits.length) {
+      context.setText(file, text);
+      added.push(file);
+    }
+  }
+  return added;
+}
+var init_typescript_retarget_mocks = __esm(() => {
+  init_typescript_vfs();
+  init_typescript_workspace();
+});
+
+// src/backends/typescript-retarget-import.ts
+import ts7 from "typescript";
+import { statSync as statSync3 } from "node:fs";
+import { resolve as resolve8 } from "node:path";
+function identifier(name) {
+  const scanner = ts7.createScanner(ts7.ScriptTarget.Latest, false, ts7.LanguageVariant.Standard, name);
+  return scanner.scan() === ts7.SyntaxKind.Identifier && scanner.getTokenText() === name && scanner.scan() === ts7.SyntaxKind.EndOfFileToken;
+}
+function mappedName(request, name) {
+  return request?.map && Object.hasOwn(request.map, name) ? request.map[name] : undefined;
+}
+function validate(request) {
+  if (!request.from || !request.to)
+    fail("INVALID_REQUEST", "retarget-import requires from and to");
+  if (request.from.includes("*") || request.to.includes("*"))
+    fail("UNSUPPORTED_SPECIFIER", "retarget-import requires exact specifiers; wildcard prefixes are unsupported");
+  if (request.from === request.to)
+    fail("INVALID_REQUEST", "from and to must differ");
+  if (request.mocks !== undefined && !["report", "add"].includes(request.mocks))
+    fail("INVALID_REQUEST", "mocks must be report or add");
+  if (request.only && (!Array.isArray(request.only) || !request.only.length || request.only.some((name) => !name))) {
+    fail("INVALID_REQUEST", "only must contain pre-map export names");
+  }
+  for (const [from, to] of Object.entries(request.map ?? {})) {
+    if (!identifier(from) || !identifier(to))
+      fail("INVALID_NAME", `invalid export mapping ${from}=${to}`);
+  }
+}
+function members(node) {
+  if (ts7.isImportDeclaration(node)) {
+    const bindings = node.importClause?.namedBindings;
+    return bindings && ts7.isNamedImports(bindings) ? bindings.elements : undefined;
+  }
+  return node.exportClause && ts7.isNamedExports(node.exportClause) ? node.exportClause.elements : undefined;
+}
+function selections(source, request) {
+  const found = [];
+  for (const node of source.statements) {
+    if (!ts7.isImportDeclaration(node) && !ts7.isExportDeclaration(node) || !node.moduleSpecifier || !ts7.isStringLiteral(node.moduleSpecifier) || node.moduleSpecifier.text !== request.from)
+      continue;
+    const list = members(node);
+    if (request.only && ts7.isImportDeclaration(node) && (node.importClause?.name || node.importClause?.namedBindings && ts7.isNamespaceImport(node.importClause.namedBindings))) {
+      fail("UNSUPPORTED_SELECTION", `${source.fileName}: --only cannot select default or namespace imports`);
+    }
+    const selected = list?.filter((item) => !request.only || request.only.includes((item.propertyName ?? item.name).text));
+    if (request.only && !selected?.length)
+      continue;
+    found.push({ declaration: node, target: request.to, members: selected });
+  }
+  return found;
+}
+function selectedFiles(context, request) {
+  const scope = resolve8(request.file);
+  if (!isInside(context.root, scope))
+    fail("OUTSIDE_ROOT", scope);
+  let directory = true;
+  if (!request.projectScope) {
+    try {
+      directory = statSync3(scope).isDirectory();
+    } catch {
+      fail("FILE_NOT_FOUND", scope);
+    }
+  }
+  const files = context.service.getProgram().getSourceFiles().filter((source) => !context.service.getProgram().isSourceFileDefaultLibrary(source) && !source.fileName.replaceAll("\\", "/").includes("/node_modules/") && isInside(context.root, resolve8(source.fileName)) && (request.projectScope || (directory ? isInside(scope, resolve8(source.fileName)) : resolve8(source.fileName) === scope)));
+  if (!directory && !files.length)
+    fail("FILE_NOT_IN_PROJECT", scope);
+  return files.sort((a, b) => a.fileName.localeCompare(b.fileName));
+}
+function renameBindings(context, file, request) {
+  const renamed = new Set;
+  for (;; ) {
+    const source = context.service.getProgram().getSourceFile(file);
+    const match = selections(source, request).flatMap((selection, index) => (selection.members ?? []).map((member) => ({
+      item: member,
+      key: `${index}:${members(selection.declaration).indexOf(member)}`
+    }))).find(({ item: item2 }) => ts7.isImportSpecifier(item2) && !item2.propertyName && mappedName(request, item2.name.text) && mappedName(request, item2.name.text) !== item2.name.text);
+    if (!match)
+      return renamed;
+    const { item, key } = match;
+    renamed.add(key);
+    const end = item.name.end;
+    context.setText(file, source.text.slice(0, end) + ` as ${item.name.text}` + source.text.slice(end));
+    context.rename(file, end + 4, mappedName(request, item.name.text));
+  }
+}
+function replace(text, edits) {
+  let boundary = text.length;
+  for (const edit of edits.sort((a, b) => b.span.start - a.span.start)) {
+    const end = edit.span.start + edit.span.length;
+    if (end > boundary)
+      fail("OVERLAPPING_EDITS", "retarget-import declarations overlap");
+    text = text.slice(0, edit.span.start) + edit.newText + text.slice(end);
+    boundary = edit.span.start;
+  }
+  return text;
+}
+function memberText(source, list, item, request, collapseAlias = false) {
+  const index = list.indexOf(item);
+  const limit = list[index + 1]?.pos ?? item.parent.end - 1;
+  let raw = source.text.slice(item.pos, limit);
+  const edits = [];
+  const scanner = ts7.createScanner(ts7.ScriptTarget.Latest, false, ts7.LanguageVariant.Standard, raw);
+  while (scanner.scan() !== ts7.SyntaxKind.EndOfFileToken) {
+    if (scanner.getToken() === ts7.SyntaxKind.CommaToken)
+      edits.push({ span: { start: scanner.getTokenPos(), length: 1 }, newText: "" });
+  }
+  const imported = item.propertyName ?? item.name;
+  const mapped = mappedName(request, imported.text);
+  if (mapped && mapped !== imported.text) {
+    edits.push({ span: { start: imported.getStart(source) - item.pos, length: imported.end - imported.getStart(source) }, newText: mapped });
+    if (collapseAlias && ts7.isImportSpecifier(item) && item.propertyName && item.name.text === mapped) {
+      const between = source.text.slice(item.propertyName.end, item.name.end);
+      if (!between.includes("/*") && !between.includes("//"))
+        edits.push({ span: { start: item.propertyName.end - item.pos, length: item.name.end - item.propertyName.end }, newText: "" });
+    }
+  }
+  raw = replace(raw, edits).trim();
+  return raw.includes("//") ? raw + (source.text.includes(`\r
+`) ? `\r
+` : `
+`) : raw;
+}
+function memberTokens(text) {
+  const tokens = [], comments = [];
+  const scanner = ts7.createScanner(ts7.ScriptTarget.Latest, false, ts7.LanguageVariant.Standard, text);
+  while (scanner.scan() !== ts7.SyntaxKind.EndOfFileToken) {
+    const kind = scanner.getToken();
+    if (kind === ts7.SyntaxKind.SingleLineCommentTrivia)
+      comments.push(scanner.getTokenText() + (text.includes(`\r
+`) ? `\r
+` : `
+`));
+    else if (kind === ts7.SyntaxKind.MultiLineCommentTrivia)
+      comments.push(scanner.getTokenText() + " ");
+    else if (kind > ts7.SyntaxKind.LastTriviaToken)
+      tokens.push(scanner.getTokenText());
+  }
+  return { key: JSON.stringify(tokens), comments: comments.join("") };
+}
+function mergeMembers(existing, moved) {
+  for (const text of moved) {
+    const { key, comments } = memberTokens(text);
+    const index = existing.findIndex((item) => memberTokens(item).key === key);
+    if (index < 0)
+      existing.push(text);
+    else if (comments)
+      existing[index] = comments + existing[index];
+  }
+}
+function namedText(items) {
+  return `{ ${items.join(", ")} }`;
+}
+function typeOnly(node) {
+  return ts7.isImportDeclaration(node) ? !!node.importClause?.isTypeOnly : node.isTypeOnly;
+}
+function attributes(node, source) {
+  return node.attributes?.getText(source) ?? "";
+}
+function outerComments(source, node, named) {
+  const start = node.getStart(source), text = node.getText(source);
+  const outside = text.slice(0, named.getStart(source) - start) + text.slice(named.end - start);
+  return memberTokens(outside).comments;
+}
+function transformFile(source, request, renamed) {
+  const replacements = new Map;
+  const additions = new Map;
+  const newline = source.text.includes(`\r
+`) ? `\r
+` : `
+`;
+  for (const [index, selection] of selections(source, request).entries()) {
+    const node = selection.declaration, module = node.moduleSpecifier;
+    const list = members(node), chosen = selection.members;
+    const quote = source.text[module.getStart(source)];
+    const literal2 = quote + selection.target.replaceAll("\\", "\\\\").replaceAll(quote, `\\${quote}`) + quote;
+    const edit = [{ span: { start: module.getStart(source) - node.getStart(source), length: module.getWidth(source) }, newText: literal2 }];
+    if (!list || !chosen?.length) {
+      replacements.set(node, replace(node.getText(source), edit));
+      continue;
+    }
+    const remaining = list.filter((item) => !chosen.includes(item));
+    const moved = chosen.map((item) => memberText(source, list, item, request, renamed.has(`${index}:${list.indexOf(item)}`)));
+    const named = list[0].parent;
+    const pureNamed = ts7.isImportDeclaration(node) && !node.importClause?.name;
+    const merge = pureNamed ? source.statements.find((other) => ts7.isImportDeclaration(other) && ts7.isStringLiteral(other.moduleSpecifier) && other.moduleSpecifier.text === selection.target && !!other.importClause && (!other.importClause.namedBindings || ts7.isNamedImports(other.importClause.namedBindings)) && !(other.importClause.isTypeOnly && other.importClause.name) && typeOnly(other) === typeOnly(node) && attributes(other, source) === attributes(node, source)) : undefined;
+    if (merge) {
+      const existing = members(merge) ?? [];
+      const texts = additions.get(merge) ?? existing.map((item) => memberText(source, existing, item));
+      mergeMembers(texts, moved);
+      additions.set(merge, texts);
+    }
+    if (remaining.length) {
+      const original = replace(node.getText(source), [{ span: { start: named.getStart(source) - node.getStart(source), length: named.getWidth(source) }, newText: namedText(remaining.map((item) => memberText(source, list, item))) }]);
+      const kind = ts7.isImportDeclaration(node) ? "import" : "export";
+      const suffix = source.text.slice(module.end, node.end);
+      replacements.set(node, original + (merge ? "" : `${newline}${kind}${typeOnly(node) ? " type" : ""} ${namedText(moved)} from ${literal2}${suffix}`));
+    } else if (merge)
+      replacements.set(node, outerComments(source, node, named));
+    else if (!chosen.some((item) => mappedName(request, (item.propertyName ?? item.name).text))) {
+      replacements.set(node, replace(node.getText(source), edit));
+    } else {
+      edit.push({ span: { start: named.getStart(source) - node.getStart(source), length: named.getWidth(source) }, newText: namedText(moved) });
+      replacements.set(node, replace(node.getText(source), edit));
+    }
+  }
+  for (const [node, texts] of additions) {
+    const named = node.importClause.namedBindings;
+    const start = node.getStart(source);
+    const span = named ? { start: named.getStart(source) - start, length: named.getWidth(source) } : { start: node.importClause.name.end - start, length: 0 };
+    replacements.set(node, replace(node.getText(source), [{ span, newText: (named ? "" : ", ") + namedText(texts) }]));
+  }
+  return replace(source.text, [...replacements].map(([node, newText]) => ({ span: { start: node.getStart(source), length: node.getWidth(source) }, newText })));
+}
+function retargetImports(context, request) {
+  validate(request);
+  const affected = selectedFiles(context, request).filter((source) => selections(source, request).length);
+  const unresolved = [];
+  const cache = ts7.createModuleResolutionCache(ts7.sys.getCurrentDirectory(), (path) => path, context.options);
+  for (const source of affected) {
+    for (const { declaration, target } of selections(source, request)) {
+      const mode = ts7.getModeForUsageLocation(source, declaration.moduleSpecifier, context.options);
+      if (!ts7.resolveModuleName(target, source.fileName, context.options, ts7.sys, cache, undefined, mode).resolvedModule) {
+        unresolved.push(`${source.fileName} (${target})`);
+      }
+    }
+  }
+  if (unresolved.length)
+    fail("TARGET_UNRESOLVED", [...new Set(unresolved)].sort().join(", "));
+  const mocks = affectedMockFiles(context, affected, request.from);
+  for (const source of affected) {
+    const renamed = renameBindings(context, source.fileName, request);
+    const current = context.service.getProgram().getSourceFile(source.fileName);
+    context.setText(source.fileName, transformFile(current, request, renamed));
+  }
+  const notes = affected.length ? ["Retargeted imports/re-exports; compiler validation does not prove runtime API compatibility."] : ["No matching imports or re-exports; no changes."];
+  if (request.mocks === "add") {
+    const added = addParallelMocks(context, mocks, request);
+    if (added.length)
+      notes.push(`Added parallel mocks for ${request.to} in: ${added.join(", ")}. Review factory runtime compatibility.`);
+  } else if (mocks.length) {
+    notes.push(`Tests mocking ${request.from} import retargeted files: ${mocks.join(", ")}. Review mocks or use --mocks add.`);
+  }
+  return notes;
+}
+var init_typescript_retarget_import = __esm(() => {
+  init_typescript_paths();
+  init_typescript_vfs();
+  init_typescript_retarget_mocks();
+});
+
 // src/backends/typescript.ts
 var exports_typescript = {};
 __export(exports_typescript, {
   analyze: () => analyze,
   capabilities: () => capabilities
 });
-import ts4 from "typescript";
-import { statSync as statSync3 } from "node:fs";
-import { basename as basename3, dirname as dirname4, extname as extname3, isAbsolute as isAbsolute3, resolve as resolve4 } from "node:path";
+import ts8 from "typescript";
+import { statSync as statSync4 } from "node:fs";
+import { basename as basename3, dirname as dirname8, extname as extname5, isAbsolute as isAbsolute3, resolve as resolve9 } from "node:path";
 function fail2(code, reason) {
   throw new Error(`${code}: ${reason}`);
 }
 function canonical(path) {
-  return resolve4(path);
+  return resolve9(path);
 }
 function assertAbsolute2(name, value) {
   if (!isAbsolute3(value))
@@ -1880,7 +3192,7 @@ function assertAbsolute2(name, value) {
 function configPathFor2(project) {
   let stat;
   try {
-    stat = statSync3(project);
+    stat = statSync4(project);
   } catch {
     fail2("PROJECT_NOT_FOUND", project);
   }
@@ -1892,7 +3204,7 @@ function configPathFor2(project) {
   }
   if (!stat.isDirectory())
     fail2("UNSUPPORTED_PROJECT", "project must be a config file or directory");
-  const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve4(project, name)).filter(ts4.sys.fileExists);
+  const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve9(project, name)).filter(ts8.sys.fileExists);
   if (candidates.length === 0)
     fail2("CONFIG_NOT_FOUND", `no tsconfig.json or jsconfig.json in ${project}`);
   if (candidates.length > 1)
@@ -1905,18 +3217,18 @@ function loadProject(request) {
   const configPath = configPathFor2(project);
   if (!isInside(root, configPath))
     fail2("OUTSIDE_ROOT", `project config is outside ${root}`);
-  const parsed = ts4.getParsedCommandLineOfConfigFile(configPath, {}, {
-    ...ts4.sys,
+  const parsed = ts8.getParsedCommandLineOfConfigFile(configPath, {}, {
+    ...ts8.sys,
     onUnRecoverableConfigFileDiagnostic(diagnostic) {
-      fail2("INVALID_CONFIG", ts4.flattenDiagnosticMessageText(diagnostic.messageText, `
+      fail2("INVALID_CONFIG", ts8.flattenDiagnosticMessageText(diagnostic.messageText, `
 `));
     }
   });
   if (!parsed)
     fail2("INVALID_CONFIG", `could not parse ${configPath}`);
-  const configErrors = parsed.errors.filter((diagnostic) => diagnostic.category === ts4.DiagnosticCategory.Error);
+  const configErrors = parsed.errors.filter((diagnostic) => diagnostic.category === ts8.DiagnosticCategory.Error);
   if (configErrors.length)
-    fail2("INVALID_CONFIG", ts4.flattenDiagnosticMessageText(configErrors[0].messageText, `
+    fail2("INVALID_CONFIG", ts8.flattenDiagnosticMessageText(configErrors[0].messageText, `
 `));
   if (parsed.projectReferences?.length) {
     fail2("PROJECT_REFERENCES_UNSUPPORTED", "project references require more than one configured program");
@@ -1931,22 +3243,22 @@ function loadProject(request) {
     getScriptVersion: (fileName) => String(versions.get(canonical(fileName)) ?? 0),
     getScriptSnapshot(fileName) {
       const path = canonical(fileName);
-      const text = overlays.get(path) ?? ts4.sys.readFile(path);
-      return text === undefined ? undefined : ts4.ScriptSnapshot.fromString(text);
+      const text = overlays.get(path) ?? ts8.sys.readFile(path);
+      return text === undefined ? undefined : ts8.ScriptSnapshot.fromString(text);
     },
-    getCurrentDirectory: () => dirname4(configPath),
-    getDefaultLibFileName: (options) => ts4.getDefaultLibFilePath(options),
-    fileExists: ts4.sys.fileExists,
-    readFile: ts4.sys.readFile,
-    readDirectory: ts4.sys.readDirectory,
-    directoryExists: ts4.sys.directoryExists,
-    getDirectories: ts4.sys.getDirectories,
-    realpath: ts4.sys.realpath,
-    useCaseSensitiveFileNames: () => ts4.sys.useCaseSensitiveFileNames,
-    getNewLine: () => ts4.sys.newLine,
+    getCurrentDirectory: () => dirname8(configPath),
+    getDefaultLibFileName: (options) => ts8.getDefaultLibFilePath(options),
+    fileExists: ts8.sys.fileExists,
+    readFile: ts8.sys.readFile,
+    readDirectory: ts8.sys.readDirectory,
+    directoryExists: ts8.sys.directoryExists,
+    getDirectories: ts8.sys.getDirectories,
+    realpath: ts8.sys.realpath,
+    useCaseSensitiveFileNames: () => ts8.sys.useCaseSensitiveFileNames,
+    getNewLine: () => ts8.sys.newLine,
     getProjectVersion: () => String(projectVersion)
   };
-  const service = ts4.createLanguageService(host, ts4.createDocumentRegistry());
+  const service = ts8.createLanguageService(host, ts8.createDocumentRegistry());
   return {
     configPath,
     root,
@@ -1961,7 +3273,7 @@ function loadProject(request) {
   };
 }
 function sourceText(state, path) {
-  return state.overlays.get(path) ?? ts4.sys.readFile(path);
+  return state.overlays.get(path) ?? ts8.sys.readFile(path);
 }
 function setOverlay(state, path, text) {
   state.overlays.set(path, text);
@@ -1997,14 +3309,14 @@ function diagnosticRecord(diagnostic, fallback) {
   return {
     file: diagnostic.file ? canonical(diagnostic.file.fileName) : fallback,
     code: `TS${diagnostic.code}`,
-    message: ts4.flattenDiagnosticMessageText(diagnostic.messageText, `
+    message: ts8.flattenDiagnosticMessageText(diagnostic.messageText, `
 `)
   };
 }
 function diagnostics(state, only) {
   const records = [];
   const add = (diagnostic) => {
-    if (diagnostic.category !== ts4.DiagnosticCategory.Error)
+    if (diagnostic.category !== ts8.DiagnosticCategory.Error)
       return;
     records.push(diagnosticRecord(diagnostic, state.configPath));
   };
@@ -2021,8 +3333,8 @@ function diagnostics(state, only) {
 }
 function importersByFile(state) {
   const program = state.service.getProgram();
-  const host = ts4.sys;
-  const cache = ts4.createModuleResolutionCache(dirname4(state.configPath), (name) => host.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
+  const host = ts8.sys;
+  const cache = ts8.createModuleResolutionCache(dirname8(state.configPath), (name) => host.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
   const importers2 = new Map;
   const link = (target, importer) => {
     if (!isInside(state.root, target) || target.includes("/node_modules/"))
@@ -2037,20 +3349,20 @@ function importersByFile(state) {
       continue;
     for (const specifier of moduleSpecifiers(source)) {
       const mode = program.getModeForUsageLocation(source, specifier);
-      const resolved = ts4.resolveModuleName(specifier.text, file, state.options, host, cache, undefined, mode).resolvedModule;
+      const resolved = ts8.resolveModuleName(specifier.text, file, state.options, host, cache, undefined, mode).resolvedModule;
       if (resolved)
         link(canonical(resolved.resolvedFileName), file);
     }
     for (const reference of source.referencedFiles)
-      link(canonical(resolve4(dirname4(file), reference.fileName)), file);
+      link(canonical(resolve9(dirname8(file), reference.fileName)), file);
   }
   return importers2;
 }
 function hasGlobalEffect(text, path) {
-  const source = ts4.createSourceFile(path, text, ts4.ScriptTarget.Latest, false);
-  if (!ts4.isExternalModule(source))
+  const source = ts8.createSourceFile(path, text, ts8.ScriptTarget.Latest, false);
+  if (!ts8.isExternalModule(source))
     return true;
-  return source.statements.some((statement) => ts4.isModuleDeclaration(statement) && (ts4.isStringLiteral(statement.name) || (statement.flags & ts4.NodeFlags.GlobalAugmentation) !== 0));
+  return source.statements.some((statement) => ts8.isModuleDeclaration(statement) && (ts8.isStringLiteral(statement.name) || (statement.flags & ts8.NodeFlags.GlobalAugmentation) !== 0));
 }
 function affectedFiles(state, importers2, originals) {
   const changed = [...state.overlays.keys()].filter((path) => originals.get(path) !== state.overlays.get(path));
@@ -2093,8 +3405,8 @@ function validatePosition(text, position, label = "position") {
   return position;
 }
 function isValidIdentifier(name, target) {
-  const scanner = ts4.createScanner(target, false, ts4.LanguageVariant.Standard, name);
-  return scanner.scan() === ts4.SyntaxKind.Identifier && scanner.getTokenText() === name && scanner.scan() === ts4.SyntaxKind.EndOfFileToken;
+  const scanner = ts8.createScanner(target, false, ts8.LanguageVariant.Standard, name);
+  return scanner.scan() === ts8.SyntaxKind.Identifier && scanner.getTokenText() === name && scanner.scan() === ts8.SyntaxKind.EndOfFileToken;
 }
 function renameLocationKey(fileName, start, length) {
   return `${canonical(fileName)}\x00${start}\x00${length}`;
@@ -2161,7 +3473,7 @@ function rename(state, file, request) {
   const position = validatePosition(text, request.position);
   if (!request.newName?.trim())
     fail2("INVALID_REQUEST", "newName is required for rename");
-  if (!isValidIdentifier(request.newName, state.options.target ?? ts4.ScriptTarget.Latest)) {
+  if (!isValidIdentifier(request.newName, state.options.target ?? ts8.ScriptTarget.Latest)) {
     fail2("INVALID_NAME", `${request.newName} is not a valid identifier`);
   }
   const info = state.service.getRenameInfo(file, position, { providePrefixAndSuffixTextForRename: true });
@@ -2194,7 +3506,7 @@ function imports(state, file, request) {
   if (request.mode !== "sort" && request.mode !== "remove-unused") {
     fail2("INVALID_REQUEST", "imports mode must be sort or remove-unused");
   }
-  const mode = request.mode === "sort" ? ts4.OrganizeImportsMode.SortAndCombine : ts4.OrganizeImportsMode.RemoveUnused;
+  const mode = request.mode === "sort" ? ts8.OrganizeImportsMode.SortAndCombine : ts8.OrganizeImportsMode.RemoveUnused;
   applyFileEdits(state, state.service.organizeImports({ type: "file", fileName: file, mode }, formatOptions, {}));
 }
 function format(state, file) {
@@ -2208,7 +3520,7 @@ function extraction(state, file, request) {
   const end = validatePosition(text, request.end, "end");
   if (end <= position)
     fail2("INVALID_RANGE", "end must be greater than position");
-  if (!request.newName?.trim() || !isValidIdentifier(request.newName, state.options.target ?? ts4.ScriptTarget.Latest)) {
+  if (!request.newName?.trim() || !isValidIdentifier(request.newName, state.options.target ?? ts8.ScriptTarget.Latest)) {
     fail2("INVALID_NAME", "newName must be a valid identifier for extraction");
   }
   const range = { pos: position, end };
@@ -2230,7 +3542,7 @@ function changedFiles(state, originals) {
   return [...state.overlays].filter(([path, after]) => originals.get(path) !== after).sort(([a], [b]) => a.localeCompare(b)).map(([path, after]) => ({ path, before: originals.get(path) ?? null, after }));
 }
 async function analyze(request) {
-  if (request.operation === "rename-file" || request.operation === "move-type")
+  if (request.operation === "rename-file" || request.operation === "move-type" || request.operation === "move-file" || request.operation === "inline-reexports")
     return analyzeFileOperation(request);
   if (request.operation === "sync-namespace") {
     fail2("UNSUPPORTED_OPERATION", "sync-namespace is C# only; ES modules have no namespace-to-directory convention");
@@ -2240,25 +3552,35 @@ async function analyze(request) {
     const file = assertAbsolute2("file", request.file);
     if (!isInside(state.root, file))
       fail2("OUTSIDE_ROOT", `file is outside ${state.root}`);
-    const text = sourceText(state, file);
+    const text = request.operation === "retarget-import" ? "" : sourceText(state, file);
     if (text === undefined)
       fail2("FILE_NOT_FOUND", file);
-    const extension = extname3(file).toLowerCase();
-    if (![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].includes(extension)) {
+    const extension = extname5(file).toLowerCase();
+    if (request.operation !== "retarget-import" && ![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].includes(extension)) {
       fail2("UNSUPPORTED_FILE", extension || "file has no extension");
     }
     const program = state.service.getProgram();
-    if (!program?.getSourceFile(file))
+    if (!program || request.operation !== "retarget-import" && !program.getSourceFile(file))
       fail2("FILE_NOT_IN_PROJECT", file);
     const outsideUserSources = program.getSourceFiles().filter((source) => !isInside(state.root, canonical(source.fileName)) && !source.isDeclarationFile).map((source) => canonical(source.fileName)).sort();
     if (outsideUserSources.length) {
-      fail2("PROJECT_SCOPE_INCOMPLETE", `program contains user source outside ${state.root}: ${outsideUserSources.join(", ")}`);
+      fail2("PROJECT_SCOPE_INCOMPLETE", `program contains user source outside ${state.root}: ${outsideUserSources.slice(0, 5).join(", ")}${outsideUserSources.length > 5 ? ` and ${outsideUserSources.length - 5} more` : ""}${workspaceRootHint(state.root, outsideUserSources)}`);
     }
     const importers2 = importersByFile(state);
     const originals = new Map;
     for (const path of state.fileNames)
       originals.set(path, sourceText(state, path));
+    let operationNotes = [];
     switch (request.operation) {
+      case "retarget-import":
+        operationNotes = retargetImports({
+          service: state.service,
+          options: state.options,
+          root: state.root,
+          setText: (path, text2) => setOverlay(state, path, text2),
+          rename: (path, position, newName) => rename(state, path, { ...request, operation: "rename", file: path, position, newName })
+        }, request);
+        break;
       case "rename":
         rename(state, file, request);
         break;
@@ -2277,7 +3599,7 @@ async function analyze(request) {
     }
     for (const path of state.overlays.keys())
       if (!originals.has(path))
-        originals.set(path, ts4.sys.readFile(path));
+        originals.set(path, ts8.sys.readFile(path));
     const affected = affectedFiles(state, importers2, originals);
     const diagnosticsBefore = originalDiagnostics(state, affected);
     const diagnosticsAfter = diagnostics(state, affected);
@@ -2296,7 +3618,7 @@ async function analyze(request) {
     });
     if (introduced.length)
       fail2("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.message}`).join("; "));
-    const notes = [];
+    const notes = operationNotes;
     if (affected)
       notes.push(`Validated ${affected.size} affected file(s): the changed files and their transitive importers.`);
     if (request.operation === "imports") {
@@ -2307,7 +3629,7 @@ async function analyze(request) {
     }
     return {
       backend: "typescript",
-      version: ts4.version,
+      version: ts8.version,
       changes: changedFiles(state, originals),
       diagnosticsBefore,
       diagnosticsAfter,
@@ -2321,6 +3643,7 @@ var capabilities, formatOptions;
 var init_typescript = __esm(() => {
   init_typescript_fileops();
   init_typescript_workspace();
+  init_typescript_retarget_import();
   init_typescript_paths();
   capabilities = [
     { operation: "rename", description: "Rename a TypeScript or JavaScript symbol across its configured project." },
@@ -2328,6 +3651,7 @@ var init_typescript = __esm(() => {
     { operation: "format", description: "Format a source file with the TypeScript formatter." },
     { operation: "extract-function", description: "Extract the selected statements or expression to a named function." },
     { operation: "extract-variable", description: "Extract the selected expression to a named variable." },
+    { operation: "retarget-import", description: "Retarget imports and re-exports to an API-compatible module, with optional export mapping." },
     ...fileCapabilities
   ];
   formatOptions = {
@@ -2336,7 +3660,7 @@ var init_typescript = __esm(() => {
     newLineCharacter: `
 `,
     convertTabsToSpaces: true,
-    indentStyle: ts4.IndentStyle.Smart,
+    indentStyle: ts8.IndentStyle.Smart,
     insertSpaceAfterCommaDelimiter: true,
     insertSpaceAfterSemicolonInForStatements: true,
     insertSpaceBeforeAndAfterBinaryOperators: true,
@@ -2344,7 +3668,7 @@ var init_typescript = __esm(() => {
     insertSpaceAfterFunctionKeywordForAnonymousFunctions: false,
     insertSpaceBeforeFunctionParenthesis: false,
     insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces: true,
-    semicolons: ts4.SemicolonPreference.Insert
+    semicolons: ts8.SemicolonPreference.Insert
   };
 });
 
@@ -2354,7 +3678,7 @@ __export(exports_csharp, {
   analyze: () => analyze2,
   capabilities: () => capabilities2
 });
-import { basename as basename4, dirname as dirname5, isAbsolute as isAbsolute4, join, relative as relative5, resolve as resolve5, sep as sep4 } from "node:path";
+import { basename as basename4, dirname as dirname9, isAbsolute as isAbsolute4, join as join2, relative as relative8, resolve as resolve10, sep as sep5 } from "node:path";
 import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -2446,19 +3770,19 @@ function validateResult(result, root) {
   }
 }
 function ensureWithinRoot(root, path, label) {
-  const difference = relative5(resolve5(root), resolve5(path));
-  if (difference === ".." || difference.startsWith(`..${sep4}`) || isAbsolute4(difference)) {
+  const difference = relative8(resolve10(root), resolve10(path));
+  if (difference === ".." || difference.startsWith(`..${sep5}`) || isAbsolute4(difference)) {
     throw new Error(`OUTSIDE_ROOT: ${label} is outside root: ${path}`);
   }
 }
 async function findOrBuildHelper(toolkitRoot) {
   const configured = toolkitRoot ?? process.env.REFACTOR_AI_HOME;
-  const directory = dirname5(fileURLToPath(import.meta.url));
-  const sourceRoot = configured ? resolve5(configured) : resolve5(directory, basename4(directory) === "backends" && basename4(dirname5(directory)) === "src" ? "../.." : "..");
+  const directory = dirname9(fileURLToPath(import.meta.url));
+  const sourceRoot = configured ? resolve10(configured) : resolve10(directory, basename4(directory) === "backends" && basename4(dirname9(directory)) === "src" ? "../.." : "..");
   const dll = helperDll(sourceRoot);
   if (await exists(dll))
     return dll;
-  const project = join(sourceRoot, "dotnet", "RefactorHelper", "RefactorHelper.csproj");
+  const project = join2(sourceRoot, "dotnet", "RefactorHelper", "RefactorHelper.csproj");
   if (!await exists(project))
     throw new Error("CSHARP_HELPER_NOT_FOUND: the selected toolkit root has no helper; set REFACTOR_AI_HOME to the package root");
   const { stdout, stderr, exitCode, timedOut } = await runDotnet([
@@ -2477,7 +3801,7 @@ async function findOrBuildHelper(toolkitRoot) {
   return helperDll(sourceRoot);
 }
 function helperDll(root) {
-  return join(root, "dotnet", "RefactorHelper", "bin", "Release", "net8.0", "RefactorHelper.dll");
+  return join2(root, "dotnet", "RefactorHelper", "bin", "Release", "net8.0", "RefactorHelper.dll");
 }
 function processEnv() {
   return { ...process.env, DOTNET_NOLOGO: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1" };

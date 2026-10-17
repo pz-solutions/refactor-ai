@@ -4,12 +4,32 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/languages.ts
 var languageOperations = {
-  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type"],
+  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import"],
   csharp: ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"]
 };
 
 // src/help.ts
 var operationHelp = {
+  "move-file": {
+    description: "Move a whole module or directory within or between workspace packages.",
+    support: "TypeScript and JavaScript",
+    required: "--to <destination> [--target-project <config>] [--root <directory>]",
+    details: "--file accepts a file or directory. A directory moves every file below it in one plan, preserving relative layout. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Aliases between moved files become relative imports; unresolved source-project aliases cause NEW_DIAGNOSTICS with a hint. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
+    examples: [
+      "plan move-file --project ./tsconfig.json --file ./src/components/button.tsx --to ./src/ui/button.tsx",
+      "plan move-file --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/components --to ./packages/feature/src/components --target-project ./packages/feature/tsconfig.json"
+    ]
+  },
+  "retarget-import": {
+    description: "Retarget imports and re-exports to an API-compatible module.",
+    support: "TypeScript and JavaScript",
+    required: "--from <specifier> --to <specifier> [--map Old=New ...] [--only Name,Name] [--mocks report|add] [--file <file|directory>]",
+    details: "Exact specifiers only; wildcards are rejected. Omit --file for the loaded project. --only selects pre-map export names and splits declarations. Unaliased mapped imports rename local references semantically, including JSX; explicit aliases stay unchanged. Re-export mappings rename the imported export. Compatible named destination imports merge and identical bindings dedupe; type-only modifiers, quotes, directives and comments are retained. Default, namespace, star exports and side-effect imports retarget only without --only; compiler diagnostics validate their compatibility. Targets must resolve from every affected file (TARGET_UNRESOLVED). Missing exports fail NEW_DIAGNOSTICS. No matches succeed with a note. --mocks report (default) lists loaded test files mocking the source while transitively importing retargeted files, including callers outside --file. --mocks add copies each standalone vi/vitest/jest mock/doMock registration for the destination with the same factory text, unless that file already mocks the destination. Expression-valued calls fail UNSUPPORTED_MOCK_CALL in add mode. Project references are unsupported. Verify runtime behavior separately.",
+    examples: [
+      "plan retarget-import --project apps/web/tsconfig.json --root . --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider",
+      "plan retarget-import --project ./tsconfig.json --from old-lib --to new-lib --only Widget,Options --file ./src/features"
+    ]
+  },
   rename: {
     description: "Rename a symbol and its semantic references.",
     support: "TypeScript, JavaScript and C#",
@@ -58,6 +78,16 @@ var operationHelp = {
     details: "The end position is exclusive. Scope and edits come from the TypeScript refactoring action, followed by semantic rename. Unsupported expressions and name conflicts are rejected.",
     examples: [
       "plan extract-variable --project examples/typescript/tsconfig.json --file examples/typescript/math.ts --at 2:10 --end 2:22 --name total"
+    ]
+  },
+  "inline-reexports": {
+    description: "Import re-exported bindings directly from their origin modules.",
+    support: "TypeScript and JavaScript",
+    required: "[--keep]",
+    details: "Follows compiler-resolved aliases and relative export * chains, stopping at bare/package entries. Splits mixed imports by origin, retaining type modifiers, aliases, quotes and extension conventions. Mixed modules retain all re-exports. Unreferenced pure shims are deleted and config file lists updated unless --keep is supplied. Side-effect imports stay with a note. Namespace imports require a pure single-origin export * shim with no default export at the origin. Dynamic imports and import types remain references and prevent deletion. New compiler errors are rejected; run application tests for initialization behavior and external consumers.",
+    examples: [
+      "plan inline-reexports --project ./tsconfig.json --file ./src/shim.ts",
+      "plan inline-reexports --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/shim.ts --keep"
     ]
   },
   "rename-file": {
@@ -122,7 +152,8 @@ function optionsText(language) {
   const project = language === "typescript" ? "tsconfig.json or jsconfig.json" : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln";
   return `  --project <config>       Required for capabilities and plan; ${project}.
 ${language !== "csharp" ? `                           Named TS configurations are supported by file/type operations.
-` : ""}  --file <source>          Required for plan; file included by the selected project.
+` : ""}  --file <source>          Required for plan except retarget-import; a file, or a directory for move-file/retarget-import.
+  --keep                   Retain the shim for inline-reexports.
   --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
   --at <line:column>       Symbol/type position or extraction start, 1-based UTF-16.
@@ -131,8 +162,12 @@ ${language !== "csharp" ? `                           Named TS configurations ar
   --mode <mode>            imports: ${language === "csharp" ? "remove-unused (default); sorting is unsupported" : "sort (default) or remove-unused"}.
   --type <identifier>      Declared type for rename-file or move-type; select when
                            several types exist, or use --at.
-  --to <file>              Required destination for move-type; relative to cwd.
-  --target-project <config> Destination project config; move-type only.
+  --to <path|specifier>    Destination for move-type/move-file (path) or retarget-import (specifier).
+  --from <specifier>       Source module specifier for retarget-import.
+  --map <Old=New>          Repeatable export mapping for retarget-import.
+  --only <Name,Name>       Pre-map export names to retarget; other bindings stay.
+  --mocks <report|add>     Report affected test mocks (default), or add parallel mocks.
+  --target-project <config> Destination project config; move-type or move-file.
 ${language !== "typescript" ? `  --root-namespace <name>  C# namespace convention override for sync-namespace
                            or move-type.
 ` : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
@@ -256,7 +291,7 @@ ${runtimeRequirements}`;
   if (operation) {
     return `${title}
 Usage:
-  ${invocation} plan ${operation} --project <config> --file <source> [operation options]
+  ${invocation} plan ${operation} --project <config> ${operation === "retarget-import" ? "[--file <file|directory>]" : "--file <source>"} [operation options]
 
 ${operationText(operation, invocation, language)}
 Options and defaults:

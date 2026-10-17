@@ -61,19 +61,46 @@ Paths resolve against the custom script process's current working directory. Ret
 
 | Option | Meaning |
 | --- | --- |
-| `project`, `file` | Required project configuration and source file. TS/JS uses tsconfig/jsconfig JSON; C# uses `.csproj` or `.sln`. |
+| `project`, `file` | Required project configuration and source file (a directory for move-file; optional for retarget-import, which accepts a file or directory). TS/JS uses tsconfig/jsconfig JSON; C# uses `.csproj` or `.sln`. |
 | `root` | Directory covering the project and all changed files; defaults to the project configuration's directory. Set a shared root for cross-project changes. |
 | `operation` | Required for aggregate APIs; optional for operation APIs. |
 | `at` | A 1-based `"line:column"` string or zero-based character offset, both measured in UTF-16 code units. Required for rename and extraction. |
 | `end` | Exclusive extraction end, with the same coordinate formats as `at`. |
 | `name` | New symbol, function or variable name, as required by the operation. |
 | `mode` | Imports mode: `"sort"` or `"remove-unused"`. TS/JS defaults to sort; C# operation APIs default to remove-unused. The aggregate API retains the CLI convention: request remove-unused explicitly for C#. |
-| `target` | Destination file path for move-type, including a new parent directory if needed. |
-| `targetProject` | Destination project configuration for a cross-project move. Valid only for move-type. |
+| `target` | Destination file/directory path for move-type or move-file, including a new parent directory if needed. |
+| `targetProject` | Destination project configuration for a cross-project move. Valid for move-type or move-file. |
 | `typeName` | Select a declared type when a file has several declarations. |
+| `keep` | Boolean, valid only for `inline-reexports`; retain the shim after retargeting its callers. Defaults to false. |
+| `from`, `to` | Exact source and destination module specifiers; required for retarget-import. Wildcard prefixes are rejected. |
+| `map` | retarget-import export mapping object, e.g. `{ NextIntlClientProvider: "IntlProvider" }`. Unaliased bindings and semantic usages rename; explicit local aliases remain unchanged. |
+| `only` | retarget-import array of pre-map export names. Other bindings stay on the source module; declarations split as needed. Default/namespace imports require this option absent. |
+| `mocks` | retarget-import: `"report"` (default) lists affected test mocks; `"add"` inserts parallel destination mocks with the same factory text. |
 | `rootNamespace` | Override the C# project's namespace convention. |
 
+Example: `await refactor.plan({ operation: "move-file", project: "./apps/web/tsconfig.json", root: ".", file: "./apps/web/src/components", target: "./packages/feature/src/components", targetProject: "./packages/feature/tsconfig.json" })`. The `@refactor-ai/ts-move-file` package and `refactor-move-file` skill select this operation automatically. Directory moves include non-source UTF-8 files. Cross-package importers use package exports (missing exact entries become planned manifest edits) and must declare the destination dependency. Unresolved source-project aliases fail with `NEW_DIAGNOSTICS` and an alias hint. Moved files use relative imports for their destination package’s own bare specifiers, following that package’s extension style. Matching entries in the nearest ancestor `eslint-suppressions.json` transfer to the destination’s nearest ledger, merging rule counts. A missing destination ledger is created only for a package with `eslint.config.*`; otherwise source entries are removed with a review note. Ledger edits use two-space JSON and a trailing newline, retaining existing key order (sorted ledgers remain sorted).
+
 Read the operation's CLI `--help` for engine-specific support and limitations. TypeScript consumers can import `RefactorApi`, `PlanOptions`, `Plan`, `ValidationResult`, `ApplyResult`, `Capability`, `Diagnostic`, `FileChange` and `Operation` as types from the same entry point.
+
+## Retarget imports
+
+```js
+const plan = await refactor.plan({
+  operation: "retarget-import", // omit in @refactor-ai/ts-retarget-import
+  project: "./apps/web/tsconfig.json",
+  root: ".",
+  from: "next-intl",
+  to: "use-intl",
+  map: { NextIntlClientProvider: "IntlProvider" },
+  // file: "./apps/web/src/features", // optional file or directory scope
+  // only: ["useTranslations", "NextIntlClientProvider"],
+  // mocks: "add", // default: "report"
+});
+```
+
+Scope defaults to every user source in the loaded TS/JS project. Compatible named destination imports merge and identical bindings dedupe, preserving quote style, type-only modifiers, directives and comments. Explicit re-export aliases stay unchanged; an unaliased re-export takes its mapped name. Default/namespace imports, star re-exports and side-effect imports move only without `only`; compiler diagnostics check member compatibility. Unresolvable destination modules throw `TARGET_UNRESOLVED` listing affected files; missing exports throw `NEW_DIAGNOSTICS` naming the binding. No matches succeed with a note. Project references and wildcard module matching are unsupported. Compiler checks do not establish runtime API compatibility.
+
+`mocks: "report"` adds a note listing loaded files with `vi`, `vitest` or `jest` `mock`/`doMock` calls for `from` that import a retargeted file directly or transitively. Callers outside `file` scope are included; mocks alone do not establish an import edge. `mocks: "add"` inserts a parallel registration immediately after each such statement, retaining the original callee, factory expression text, quotes and newline style. Files already registering a mock for `to` are skipped. Calls must be standalone expression statements in a source file or block; expression-valued calls fail `UNSUPPORTED_MOCK_CALL` in add mode and can still be reported. Destination resolution and compiler validation cover added mocks. Computed specifiers and callers outside the loaded project are outside this analysis; run application tests to verify factory behavior, especially after export mapping.
 
 ## Sequential automation
 
@@ -115,3 +142,24 @@ const samePlan = await rename.loadPlan(saved);
 ```
 
 The core treats `.refactor-ai` as reserved state and rejects redirected state directories when applying. Use the CLI's `--out` workflow when you need its additional plan-output path checks.
+
+## Inline re-exports (TypeScript/JavaScript)
+
+```js
+import { createRefactor } from "@refactor-ai/ts-inline-reexports";
+const inline = await createRefactor();
+const plan = await inline.plan({ project: "./tsconfig.json", root: ".", file: "./src/shim.ts", keep: false });
+console.log(inline.preview(plan));
+```
+
+The aggregate API uses `operation: "inline-reexports"`. Named/default imports and
+re-exports split by compiler-resolved origin. Relative chains are followed; bare
+module specifiers preserve the shim's public package entry. Mixed modules retain
+all re-exports. Pure shims are deleted only without remaining loaded references,
+unless `keep: true`; deletions use schemaVersion 2 and update config file lists.
+Side-effect imports stay with a note. Dynamic imports and import types stay and
+prevent deletion. Namespace imports require a pure single-origin `export *` shim
+with no default at its origin (`NAMESPACE_IMPORT_UNSUPPORTED` otherwise).
+Import/export attributes are unsupported. Resolution changes and new compiler
+errors throw; application initialization behavior, directives and external
+consumers require separate verification.
