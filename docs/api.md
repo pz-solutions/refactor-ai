@@ -75,9 +75,10 @@ Paths resolve against the custom script process's current working directory. Ret
 | `from`, `to` | Exact source and destination module specifiers; required for retarget-import. Wildcard prefixes are rejected. |
 | `map` | retarget-import export mapping object, e.g. `{ NextIntlClientProvider: "IntlProvider" }`. Unaliased bindings and semantic usages rename; explicit local aliases remain unchanged. |
 | `only` | retarget-import array of pre-map export names. Other bindings stay on the source module; declarations split as needed. Default/namespace imports require this option absent. |
+| `mocks` | retarget-import: `"report"` (default) lists affected test mocks; `"add"` inserts parallel destination mocks with the same factory text. |
 | `rootNamespace` | Override the C# project's namespace convention. |
 
-Example: `await refactor.plan({ operation: "move-file", project: "./apps/web/tsconfig.json", root: ".", file: "./apps/web/src/components", target: "./packages/feature/src/components", targetProject: "./packages/feature/tsconfig.json" })`. The `@refactor-ai/ts-move-file` package and `refactor-move-file` skill select this operation automatically. Directory moves include non-source UTF-8 files. Cross-package importers use package exports (missing exact entries become planned manifest edits) and must declare the destination dependency. Unresolved source-project aliases fail with `NEW_DIAGNOSTICS` and an alias hint.
+Example: `await refactor.plan({ operation: "move-file", project: "./apps/web/tsconfig.json", root: ".", file: "./apps/web/src/components", target: "./packages/feature/src/components", targetProject: "./packages/feature/tsconfig.json" })`. The `@refactor-ai/ts-move-file` package and `refactor-move-file` skill select this operation automatically. Directory moves include non-source UTF-8 files. Cross-package importers use package exports (missing exact entries become planned manifest edits) and must declare the destination dependency. Unresolved source-project aliases fail with `NEW_DIAGNOSTICS` and an alias hint. Moved files use relative imports for their destination package’s own bare specifiers, following that package’s extension style. Matching entries in the nearest ancestor `eslint-suppressions.json` transfer to the destination’s nearest ledger, merging rule counts. A missing destination ledger is created only for a package with `eslint.config.*`; otherwise source entries are removed with a review note. Ledger edits use two-space JSON and a trailing newline, retaining existing key order (sorted ledgers remain sorted).
 
 Read the operation's CLI `--help` for engine-specific support and limitations. TypeScript consumers can import `RefactorApi`, `PlanOptions`, `Plan`, `ValidationResult`, `ApplyResult`, `Capability`, `Diagnostic`, `FileChange` and `Operation` as types from the same entry point.
 
@@ -93,10 +94,13 @@ const plan = await refactor.plan({
   map: { NextIntlClientProvider: "IntlProvider" },
   // file: "./apps/web/src/features", // optional file or directory scope
   // only: ["useTranslations", "NextIntlClientProvider"],
+  // mocks: "add", // default: "report"
 });
 ```
 
 Scope defaults to every user source in the loaded TS/JS project. Compatible named destination imports merge and identical bindings dedupe, preserving quote style, type-only modifiers, directives and comments. Explicit re-export aliases stay unchanged; an unaliased re-export takes its mapped name. Default/namespace imports, star re-exports and side-effect imports move only without `only`; compiler diagnostics check member compatibility. Unresolvable destination modules throw `TARGET_UNRESOLVED` listing affected files; missing exports throw `NEW_DIAGNOSTICS` naming the binding. No matches succeed with a note. Project references and wildcard module matching are unsupported. Compiler checks do not establish runtime API compatibility.
+
+`mocks: "report"` adds a note listing loaded files with `vi`, `vitest` or `jest` `mock`/`doMock` calls for `from` that import a retargeted file directly or transitively. Callers outside `file` scope are included; mocks alone do not establish an import edge. `mocks: "add"` inserts a parallel registration immediately after each such statement, retaining the original callee, factory expression text, quotes and newline style. Files already registering a mock for `to` are skipped. Calls must be standalone expression statements in a source file or block; expression-valued calls fail `UNSUPPORTED_MOCK_CALL` in add mode and can still be reported. Destination resolution and compiler validation cover added mocks. Computed specifiers and callers outside the loaded project are outside this analysis; run application tests to verify factory behavior, especially after export mapping.
 
 ## Sequential automation
 

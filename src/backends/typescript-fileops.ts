@@ -5,7 +5,8 @@ import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path"
 import type { BackendResult, Capability, Diagnostic, RefactorRequest } from "../types";
 import { eolOf, fail, isInside, withEol } from "./typescript-vfs";
 import { Workspace, applyTextChanges, baseFormatOptions, configPathFor, moduleSpecifiers, scriptKindFor } from "./typescript-workspace";
-import { packageSpecifier, relativeStyle } from "./typescript-package-specifiers";
+import { packageSelfImport, packageSpecifier, relativeStyle } from "./typescript-package-specifiers";
+import { moveSuppressions } from "./typescript-suppressions";
 import { portablePath } from "./typescript-paths";
 
 export const fileCapabilities: Capability[] = [
@@ -752,8 +753,9 @@ function moveFile(context: Context, request: RefactorRequest, renames: [string, 
   const mapping = new Map(renames.map(([from, to]) => [ws.vfs.key(from), to]));
   const relocated = (path: string) => mapping.get(ws.vfs.key(path)) ?? path;
   const styleCache = new Map<string, string | null>();
-  const styles = new Map(imports.filter(edge => mapping.has(ws.vfs.key(edge.target)))
-    .map(edge => [edge, relativeStyle(ws, relocated(edge.target), edge.original, styleCache)]));
+  const retargeted = imports.filter(edge => mapping.has(ws.vfs.key(edge.target))
+    || (mapping.has(ws.vfs.key(edge.file)) && packageSelfImport(ws, relocated(edge.file), relocated(edge.target), edge.original)));
+  const styles = new Map(retargeted.map(edge => [edge, relativeStyle(ws, relocated(edge.target), edge.original, styleCache)]));
   const beforeImporters = importerMap(ws, renames.map(([from]) => from));
   const expectedImporters = new Map(renames.map(([from, to]) => [to, beforeImporters.get(ws.vfs.key(from))!.map(relocated).map(path => ws.vfs.key(path)).sort()]));
   applyEdits(context, ws.service.getEditsForFileRename(file, target, formatFor(context.sourceFile.text), preferencesFor(ws)));
@@ -787,8 +789,7 @@ function moveFile(context: Context, request: RefactorRequest, renames: [string, 
     sameProject ? undefined : sourceRenames.map(([, path]) => ({ path, must: [ws.targetConfig], may: siblings })));
 
   const changes = new Map<string, ts.TextChange[]>();
-  for (const edge of imports) {
-    if (!mapping.has(ws.vfs.key(edge.target))) continue;
+  for (const edge of retargeted) {
     const from = relocated(edge.file), to = relocated(edge.target);
     const source = parseFile(ws, from)!;
     const specifier = moduleSpecifiers(source)[edge.index];
@@ -838,6 +839,7 @@ function moveFile(context: Context, request: RefactorRequest, renames: [string, 
       if (JSON.stringify(expected) !== JSON.stringify(actual)) fail("REFERENCES_NOT_PRESERVED", `${expected.length} module references expected for ${to}, found ${actual.length}`);
     }
   };
+  moveSuppressions(ws, renames, context.notes);
   context.notes.push(`Moved ${renames.length} file(s) from ${relative(root, file)} to ${relative(root, target)}; validated source and target project membership.`);
 }
 

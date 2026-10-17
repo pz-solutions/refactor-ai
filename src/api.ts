@@ -21,6 +21,8 @@ export interface PlanOptions {
   to?: string;
   map?: Record<string, string>;
   only?: string[];
+  /** retarget-import: report affected test mocks (default), or add parallel mocks. */
+  mocks?: "report" | "add";
   /** A 1-based UTF-16 line:column string or a zero-based UTF-16 offset. */
   at?: string | number;
   /** Exclusive extraction end, using the same coordinates as at. */
@@ -102,9 +104,10 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         }
         if (options.keep !== undefined && (operation !== "inline-reexports" || typeof options.keep !== "boolean")) throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
         if (operation === "retarget-import" && (!options.from || !options.to)) throw new Error("INVALID_ARGUMENT: from and to required for retarget-import");
-        if (operation !== "retarget-import" && [options.from, options.to, options.map, options.only].some(value => value !== undefined)) {
-          throw new Error("INVALID_ARGUMENT: from, to, map and only require retarget-import");
+        if (operation !== "retarget-import" && [options.from, options.to, options.map, options.only, options.mocks].some(value => value !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: from, to, map, only and mocks require retarget-import");
         }
+        if (options.mocks !== undefined && !["report", "add"].includes(options.mocks)) throw new Error("INVALID_ARGUMENT: mocks report|add");
         if (!options.file && operation !== "retarget-import") throw new Error("INVALID_ARGUMENT: file required");
         const project = await realpath(resolve(options.project));
         const file = await realpath(resolve(options.file ?? dirname(project)));
@@ -120,6 +123,7 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
           ...(options.keep !== undefined ? { keep: options.keep } : {}),
           ...(operation === "retarget-import" ? { from: options.from, to: options.to,
             ...(options.map ? { map: options.map } : {}), ...(options.only ? { only: options.only } : {}),
+            ...(options.mocks !== undefined ? { mocks: options.mocks } : {}),
             ...(!options.file ? { projectScope: true } : {}) } : {}),
           ...(options.at !== undefined ? { position: position(options.at) } : {}),
           ...(options.end !== undefined ? { end: position(options.end) } : {}),

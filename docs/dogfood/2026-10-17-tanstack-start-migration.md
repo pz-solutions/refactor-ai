@@ -59,14 +59,14 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 ### F15. Test mocks name modules by string — fixed
 - After the hooks move 21 Vitest cases failed: `vi.doMock("@/lib/hooks", …)` still named the old path, so the mock silently stopped applying. `vi|vitest|jest` `.mock/doMock/unmock/importActual/requireActual/…` first arguments are now module specifiers for every operation. Redoing the move with the fix rewrote all mocks; frontend suite back to green (except F16).
 
-### F16. Retargeting a module leaves tests mocking the old one — open
-- `next-intl` → `use-intl` in the data table broke 8 tests that `vi.doMock("next-intl", …)`: the code under test now reads `use-intl`. `retarget-import` should list test files that mock `--from` while (transitively) importing a retargeted file, or offer `--mocks` to add the parallel mock.
+### F16. Retargeting a module leaves tests mocking the old one — fixed
+- `next-intl` → `use-intl` in the data table broke 8 tests that `vi.doMock("next-intl", …)`: the code under test now reads `use-intl`. `retarget-import` now reports those loaded test files by default; `--mocks add` clones standalone mock registrations for the new module, with compiler validation and existing-destination deduplication.
 
-### F17. Moves inside a package keep package self-imports — open
-- After retarget (`@/contexts/organization-context` → `@uber-platform/app-features/shell/organization-context`) and the move into app-features, the moved hooks imported their own package by name. Should become relative (`../../shell/organization-context`) like other same-package imports. Fixed by hand.
+### F17. Moves inside a package keep package self-imports — fixed
+- After retarget (`@/contexts/organization-context` → `@uber-platform/app-features/shell/organization-context`) and the move into app-features, the moved hooks imported their own package by name. Should become relative (`../../shell/organization-context`) like other same-package imports. Originally fixed by hand; `move-file` now rewrites resolved destination-package self-imports in moved files using the package’s relative extension style.
 
-### F18. Moves must carry lint-suppression ledgers — open
-- ESLint bulk suppressions (`eslint-suppressions.json`) are keyed by file path per package. Moving `profile-content` into app-features moved 17 suppressed violations into an unsuppressed location; the entry had to be pruned from the Next ledger and re-added to the package ledger by hand. `move-file` could move matching ledger entries (ESLint native ledger format) and report it in notes.
+### F18. Moves must carry lint-suppression ledgers — fixed
+- ESLint bulk suppressions (`eslint-suppressions.json`) are keyed by file path per package. Moving `profile-content` into app-features moved 17 suppressed violations into an unsuppressed location; the entry had to be pruned from the Next ledger and re-added to the package ledger by hand. `move-file` now transfers nearest-ledger entries and merges rule counts, retaining JSON ordering. Missing destination ledgers are created only for packages with an ESLint config; otherwise dropped entries require review in plan notes.
 
 ### F19. Changed-file gates flag untouched complexity — process
 - Fallow's changed-file audit treated two components whose only change was a rewritten import as new findings. Mass import rewrites widen "changed files" for every gate; expect it and keep such moves in dedicated commits.

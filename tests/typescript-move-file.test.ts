@@ -254,6 +254,77 @@ describe("move-file", () => {
     expect(changed(result, w.path("packages/feature/package.json"))).toBeUndefined();
   });
 
+  for (const samePackage of [false, true]) test(`moved files replace destination package self-imports (${samePackage ? "within" : "across"} packages)`, async () => {
+    const w = await packages({
+      "apps/web/src/component.ts": 'import { existing } from "@scope/feature/existing"; export const component = () => existing;',
+      "packages/feature/src/component.ts": 'import { existing } from "@scope/feature/existing"; export const component = () => existing;',
+      "packages/feature/src/unrelated.ts": 'export { existing } from "@scope/feature/existing";',
+      "packages/feature/src/existing.ts": 'export { keep as existing } from "./keep.js";',
+      "packages/feature/src/keep.ts": 'export const keep = 1;',
+    });
+    const result = await analyze(packageRequest(w, samePackage ? {
+      project: w.path("packages/feature/tsconfig.json"), file: w.path("packages/feature/src/component.ts"),
+    } : {}));
+    expect(changed(result, w.path("packages/feature/src/ui/component.ts"))).toContain('"../existing.js"');
+    expect(changed(result, w.path("packages/feature/src/unrelated.ts"))).toBeUndefined();
+  });
+
+  test("directory moves carry nearest suppression entries and retain sorted JSON keys", async () => {
+    const entry = { complexity: { count: 2 } };
+    const w = await workspace({
+      "tsconfig.json": config(), "src/old/a.ts": "export const a = 1;", "src/old/b.ts": "export const b = 2;",
+      "eslint-suppressions.json": JSON.stringify({ "src/old/a.ts": entry, "src/old/b.ts": entry, "src/z.ts": entry }),
+      "src/eslint-suppressions.json": JSON.stringify({ "old/a.ts": entry, "old/b.ts": entry, "z.ts": entry }),
+    });
+    const plan = await createPlan(request(w, { file: w.path("src/old"), target: w.path("src/new") }), analyze);
+    expect(changed(plan, w.path("src/eslint-suppressions.json"))).toBe(JSON.stringify({ "new/a.ts": entry, "new/b.ts": entry, "z.ts": entry }, null, 2) + "\n");
+    expect(changed(plan, w.path("eslint-suppressions.json"))).toBeUndefined();
+    expect(plan.notes.join(" ")).toContain("old/a.ts -> src/eslint-suppressions.json:new/a.ts");
+    expect(plan.notes.join(" ")).toContain("old/b.ts -> src/eslint-suppressions.json:new/b.ts");
+    await applyPlan(plan);
+    expect(JSON.parse(await readFile(w.path("src/eslint-suppressions.json"), "utf8"))["new/a.ts"]).toEqual(entry);
+  });
+
+  for (const merge of [false, true]) test(`cross-package suppression transfers ${merge ? "merge counts" : "append keys"} in unsorted ledgers`, async () => {
+    const w = await packages({
+      "apps/web/eslint-suppressions.json": JSON.stringify({ "src/component.ts": { complexity: { count: 2 }, "no-console": { count: 1 } } }),
+      "packages/feature/eslint-suppressions.json": JSON.stringify({
+        "src/z.ts": {}, "src/a.ts": {}, ...(merge ? { "src/ui/component.ts": { complexity: { count: 3 } } } : {}),
+      }),
+      "apps/web/src/other.ts": "export const other = 1;",
+    });
+    const result = await analyze(packageRequest(w));
+    expect(changed(result, w.path("apps/web/eslint-suppressions.json"))).toBe("{}\n");
+    const after = changed(result, w.path("packages/feature/eslint-suppressions.json"))!;
+    expect(Object.keys(JSON.parse(after))).toEqual(["src/z.ts", "src/a.ts", "src/ui/component.ts"]);
+    expect(JSON.parse(after)["src/ui/component.ts"]).toEqual({ complexity: { count: merge ? 5 : 2 }, "no-console": { count: 1 } });
+  });
+
+  for (const eslint of [false, true]) test(`cross-package suppressions ${eslint ? "create a configured package ledger" : "drop with a review note without ESLint"}`, async () => {
+    const entry = { complexity: { count: 2 } };
+    const w = await packages({
+      "apps/web/eslint-suppressions.json": JSON.stringify({ "src/component.ts": entry }),
+      ...(eslint ? { "packages/feature/eslint.config.mjs": "export default [];" } : {}),
+    });
+    await chmod(w.path("apps/web/src/component.ts"), 0o750);
+    const result = await createPlan(packageRequest(w), analyze);
+    expect(changed(result, w.path("apps/web/eslint-suppressions.json"))).toBe("{}\n");
+    expect(changed(result, w.path("packages/feature/eslint-suppressions.json"))).toBe(eslint ? JSON.stringify({ "src/ui/component.ts": entry }, null, 2) + "\n" : undefined);
+    expect(result.notes.join(" ")).toContain(eslint ? "Moved ESLint suppressions" : "Dropped ESLint suppressions");
+    if (!eslint) expect(result.notes.join(" ")).toContain("review suppressions");
+    expect(existsSync(w.path("packages/feature/eslint-suppressions.json"))).toBe(false);
+    await applyPlan(result);
+    if (eslint) {
+      expect(JSON.parse(await readFile(w.path("packages/feature/eslint-suppressions.json"), "utf8"))).toEqual({ "src/ui/component.ts": entry });
+      if (process.platform !== "win32") expect((await stat(w.path("packages/feature/eslint-suppressions.json"))).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  test("rejects malformed suppression ledgers", async () => {
+    const w = await packages({ "apps/web/eslint-suppressions.json": '{"src/component.ts":{"complexity":{"count":-1}}}' });
+    await expect(analyze(packageRequest(w))).rejects.toThrow("INVALID_SUPPRESSIONS");
+  });
+
   test("rejects a changed alias binding even when the target project compiles", async () => {
     const w = await packages({
       "apps/web/tsconfig.json": config({ compilerOptions: { ...options, paths: { "@/*": ["./src/*"] } } }),

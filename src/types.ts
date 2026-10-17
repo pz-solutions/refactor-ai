@@ -13,6 +13,8 @@ export interface RefactorRequest {
   /** Imported export names, before mapping, to their destination names. */
   map?: Record<string, string>;
   only?: string[];
+  /** Report affected test mocks (default), or add a parallel destination mock. */
+  mocks?: "report" | "add";
   /** Internal marker: file defaults to project directory when scope is omitted. */
   projectScope?: boolean;
   position?: number;
