@@ -15,6 +15,7 @@ Deterministic refactorings exposed through skills and a CLI written in TypeScrip
 | Move a type between directories / projects | Yes, TypeScript's “Move to file” action | Yes, Roslyn with planned `.csproj` edits |
 | Move whole modules or directories between workspace packages | Yes, including package exports and import updates | Not yet |
 | Match a filename to its declared type | Yes, including import updates | Yes, including explicit `Compile` entries |
+| Inline shim re-exports into their callers | Yes, with package entry preservation | Not yet |
 | Match a namespace to the project structure | Not applicable to ES modules | Yes, including semantic reference updates |
 
 ## Getting started
@@ -154,6 +155,7 @@ Ready-to-use runner instructions are included in the repository:
 - [refactor-sync-namespace](skills/refactor-sync-namespace/SKILL.md)
 - [refactor-move-type](skills/refactor-move-type/SKILL.md)
 - [refactor-move-file](skills/refactor-move-file/SKILL.md)
+- [refactor-inline-reexports](skills/refactor-inline-reexports/SKILL.md)
 
 Each skill is a self-contained directory with `SKILL.md`, a Node launcher in `scripts/refactor.mjs`, and the built CLI and npm lockfile in `assets/runtime/`. Skills supporting C# also include Roslyn helper sources in `assets/dotnet/`. They depend on files within their own directory and can run independently of the original checkout.
 
@@ -182,7 +184,7 @@ For authors: `bun run package:skills` rebuilds the CLI and refreshes the resourc
 - Planning transforms code in memory and compares compiler errors before and after the change. `validate` checks snapshot freshness and the stored analysis result; it does not automatically run an arbitrary project's tests. The demo and regression tests separately verify example behavior.
 - Apply executes the exact stored plan and rejects changed snapshots and new errors. The snapshot covers regular files under the root, excluding `.git`, `node_modules`, `bin`, `obj`, `dist` and `.refactor-ai`. Dependencies are represented by manifests and lockfiles; changes to libraries outside the root are not fully fingerprinted.
 - Rename uses symbols and references. Comments and strings remain unchanged; API consumers outside the loaded project, reflection and dynamic JS references are not automatically updated.
-- TS `rename-file`, `move-type` and `move-file` validate the source and destination configurations and the loaded project-reference graph, with declarations built in memory. Other TS operations still reject project references. C# analyzes the loaded MSBuild configuration rather than every possible compilation condition; select a `.sln` to include dependent projects.
+- TS `rename-file`, `move-type`, `move-file` and `inline-reexports` validate the source and destination configurations and the loaded project-reference graph, with declarations built in memory. Other TS operations still reject project references. C# analyzes the loaded MSBuild configuration rather than every possible compilation condition; select a `.sln` to include dependent projects.
 - Additional TS/JS configurations beside a participating project, such as `tsconfig.build.json`, are updated and validated when they cover the affected file. Discovered callers importing that file also join the analysis. Other configurations covering it cause rejection rather than leaving unchecked changes.
 - TS/JS type moves support declarations in ES modules; CommonJS source code, merged declarations and types inside namespaces are rejected. Compiling ES modules to CommonJS is supported. Projects in the shared analysis must have compatible module-resolution options.
 - C# type moves and namespace changes reject, among other cases, partial declarations spread across files, conditional compilation, and multiple or nested namespaces. `.csproj` edits support standard SDK globbing or explicit, unconditional `Compile` entries; unknown MSBuild rules, dependency cycles and new compiler errors cause plan rejection.
@@ -208,3 +210,16 @@ bun run test:skills  # separate installation test; requires network access, npm/
 ```
 
 See the [recorded demonstration with diffs](docs/mvp-demo.txt), [architecture and development sequence](docs/refactoring-toolkit-plan.md), and research on [ReSharper/Roslyn](docs/research/resharper-roslyn-catalog.md), [TypeScript](docs/research/typescript-engine.md) and [C#](docs/research/csharp-engine.md). Research documents describe findings from before implementation; the table above and `capabilities` show the current feature set.
+
+`plan inline-reexports --project ./tsconfig.json --file ./src/shim.ts` rewrites
+workspace imports and re-exports to the shim's symbol origins, splitting declarations
+by origin. Relative chains resolve through the checker; bare/package specifiers
+retain the public entry used by the shim. Quotes, aliases, type modifiers and
+relative extension conventions are preserved. Pure, unreferenced re-export shims
+are deleted (schemaVersion 2), with literal config file lists updated; `--keep`
+retains them. Mixed modules retain all original re-exports. Side-effect imports
+stay unchanged with a note; dynamic/import-type references also prevent deletion.
+Namespace imports require a pure single-origin `export *` shim whose origin has
+no default export. Import/export attributes are unsupported. Compiler validation
+does not verify module initialization effects, directives such as `"use client"`,
+or consumers outside the loaded workspace; verify application behavior.

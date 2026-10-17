@@ -26,7 +26,7 @@ Options:
 Produces @${defaultScope}/cli (both backends), eight @${defaultScope}/ts-<operation>
 packages for TypeScript/JavaScript, and six @${defaultScope}/csharp-<operation> packages.
 TS operations: rename, imports, format, extract-function, extract-variable,
-rename-file, move-type and move-file. C# operations: rename, imports, format, rename-file,
+rename-file, move-type, move-file and inline-reexports. C# operations: rename, imports, format, rename-file,
 sync-namespace and move-type. Each package declares one executable and exports createRefactor with TypeScript
 declarations for custom scripts. Imports do not execute the CLI or load a project.
 

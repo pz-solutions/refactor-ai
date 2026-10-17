@@ -70,6 +70,16 @@ export const operationHelp: Record<Operation, OperationHelp> = {
       "plan extract-variable --project examples/typescript/tsconfig.json --file examples/typescript/math.ts --at 2:10 --end 2:22 --name total",
     ],
   },
+  "inline-reexports": {
+    description: "Import re-exported bindings directly from their origin modules.",
+    support: "TypeScript and JavaScript",
+    required: "[--keep]",
+    details: "Follows compiler-resolved aliases and relative export * chains, stopping at bare/package entries. Splits mixed imports by origin, retaining type modifiers, aliases, quotes and extension conventions. Mixed modules retain all re-exports. Unreferenced pure shims are deleted and config file lists updated unless --keep is supplied. Side-effect imports stay with a note. Namespace imports require a pure single-origin export * shim with no default export at the origin. Dynamic imports and import types remain references and prevent deletion. New compiler errors are rejected; run application tests for initialization behavior and external consumers.",
+    examples: [
+      "plan inline-reexports --project ./tsconfig.json --file ./src/shim.ts",
+      "plan inline-reexports --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/shim.ts --keep",
+    ],
+  },
   "rename-file": {
     description: "Rename a source file to match a selected declared type.",
     support: "TypeScript, JavaScript and C#",
@@ -136,6 +146,7 @@ function optionsText(language?: Language): string {
     : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln";
   return `  --project <config>       Required for capabilities and plan; ${project}.
 ${language !== "csharp" ? "                           Named TS configurations are supported by file/type operations.\n" : ""}  --file <source>          Required for plan; source file (or directory for move-file).
+  --keep                   Retain the shim for inline-reexports.
   --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
   --at <line:column>       Symbol/type position or extraction start, 1-based UTF-16.

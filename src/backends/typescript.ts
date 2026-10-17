@@ -434,7 +434,7 @@ function changedFiles(state: ProjectState, originals: Map<string, string | undef
 }
 
 export async function analyze(request: RefactorRequest): Promise<BackendResult> {
-  if (request.operation === "rename-file" || request.operation === "move-type" || request.operation === "move-file") return analyzeFileOperation(request);
+  if (request.operation === "rename-file" || request.operation === "move-type" || request.operation === "move-file" || request.operation === "inline-reexports") return analyzeFileOperation(request);
   if (request.operation === "sync-namespace") {
     fail("UNSUPPORTED_OPERATION", "sync-namespace is C# only; ES modules have no namespace-to-directory convention");
   }

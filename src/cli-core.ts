@@ -14,6 +14,7 @@ function parse(args: string[]): { command: string; operation?: string; flags: Re
   const allowed = new Set(["project", "file", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace"]);
   while (args.length) {
     const key = args.shift()!;
+    if (key === "--keep" && flags.keep === undefined) { flags.keep = "true"; continue; }
     const value = args.shift();
     if (!key.startsWith("--") || !allowed.has(key.slice(2)) || !value || value.startsWith("--") || flags[key.slice(2)] !== undefined) {
       throw new Error(`INVALID_ARGUMENT: ${key}`);
@@ -59,6 +60,7 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
   if (command !== "plan") throw new Error(`INVALID_ARGUMENT: unknown command ${command}`);
   const plan = await api.plan({
     project: required(flags, "project"), file: required(flags, "file"), operation: operation as Operation,
+    keep: flags.keep === "true" ? true : undefined,
     root: flags.root, at: flags.at, end: flags.end, name: flags.name,
     mode: flags.mode as "sort" | "remove-unused" | undefined, target: flags.to,
     targetProject: flags["target-project"], typeName: flags.type, rootNamespace: flags["root-namespace"],

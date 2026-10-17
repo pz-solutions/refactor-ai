@@ -15,6 +15,7 @@ The npm distribution complements self-contained agent skills. It uses the same T
 | `@refactor-ai/ts-rename-file` | `refactor-ts-rename-file` | `plan` |
 | `@refactor-ai/ts-move-file` | `refactor-ts-move-file` | `plan` |
 | `@refactor-ai/ts-move-type` | `refactor-ts-move-type` | `plan` |
+| `@refactor-ai/ts-inline-reexports` | `refactor-ts-inline-reexports` | `plan` |
 | `@refactor-ai/csharp-rename` | `refactor-csharp-rename` | `plan` |
 | `@refactor-ai/csharp-imports` | `refactor-csharp-imports` | `plan` |
 | `@refactor-ai/csharp-format` | `refactor-csharp-format` | `plan` |
@@ -117,3 +118,6 @@ Replace `v0.1.3` with the selected version's Git tag. The release runner targets
 Use `--scope` to generate packages for another organization. The integration tests regenerate the default scope; regenerate any custom release afterwards. Individual packages can still be published with `npm publish ./dist/npm/ts-rename --access public`, but direct npm publication bypasses the runner's cross-package/version checks. A dry run inspects publication content and does not reserve a registry name/version or check channel advancement. npm account permissions and registry authentication remain the publisher's responsibility. Builds and tests never publish packages or change registry state.
 
 References: npm's [`bin` documentation](https://docs.npmjs.com/cli/v10/configuring-npm/package-json#bin), [`npm exec` / npx executable inference](https://docs.npmjs.com/cli/v10/commands/npm-exec), and [`npm publish`](https://docs.npmjs.com/cli/v10/commands/npm-publish).
+
+`@refactor-ai/ts-inline-reexports` provides `refactor-ts-inline-reexports` and the
+operation-scoped `createRefactor` API for TypeScript/JavaScript shim elimination.

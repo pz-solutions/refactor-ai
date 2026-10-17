@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 const repo = resolve(import.meta.dir, "..");
 let workspace: string;
 const tarballs = new Map<string, string>();
-const tsOperations = ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file"];
+const tsOperations = ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports"];
 const csharpOperations = ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"];
 const distributions = [
   { name: "cli", language: "all" },
@@ -151,7 +151,7 @@ for (const language of ["typescript", "javascript", "csharp"]) {
   }, 120_000);
 }
 
-test("all fifteen tarballs expose language-specific help through npx", () => {
+test("all generated tarballs expose language-specific help through npx", () => {
   for (const { name, language } of distributions) {
     const help = npx(name, ["--help"]);
     expect(help).toContain(`npx @refactor-ai/${name}`);
@@ -172,7 +172,7 @@ test("all fifteen tarballs expose language-specific help through npx", () => {
   }
 }, 120_000);
 
-test("all fifteen prerelease packages inherit the beta version and default to next", async () => {
+test("all generated prerelease packages inherit the beta version and default to next", async () => {
   const checkout = join(workspace, "beta-author");
   await mkdir(join(checkout, "scripts"), { recursive: true });
   await cp(join(repo, "docs"), join(checkout, "docs"), { recursive: true });

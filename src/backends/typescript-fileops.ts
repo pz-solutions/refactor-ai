@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { inlineReexports } from "./typescript-inline-reexports";
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { BackendResult, Capability, Diagnostic, RefactorRequest } from "../types";
@@ -9,6 +10,7 @@ import { portablePath } from "./typescript-paths";
 
 export const fileCapabilities: Capability[] = [
   { operation: "move-file", description: "Move whole TS/JS modules or directories within or between workspace packages, updating imports, exports and project file lists." },
+  { operation: "inline-reexports", description: "Inline shim re-exports into workspace callers, deleting unreferenced pure shims unless kept." },
   {
     operation: "rename-file",
     description: "Rename a TS/JS file after its declared type (TS class, interface, type alias or enum; JS class), updating imports in all projects that reference it.",
@@ -883,6 +885,11 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     if (request.operation === "rename-file") renamed = renameFile(context, request).renamed;
     else if (request.operation === "move-type") moveType(context, request);
     else if (movingFiles) moveFile(context, request, movingFiles);
+    else if (request.operation === "inline-reexports") {
+      const before = membership(ws);
+      const deleted = inlineReexports(ws, file, sourceFile, context.notes, request.keep);
+      assertMembership(ws, before, [], deleted ? [file] : []);
+    }
     else fail("UNSUPPORTED_OPERATION", String(request.operation));
 
     const written = ws.vfs.changes().filter((change) => change.after !== null && !/\.json$/i.test(change.path)).map((change) => change.path);
