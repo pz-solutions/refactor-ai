@@ -1,3 +1,4 @@
+import type { ReadSetEntry } from "./core/read-set.js";
 export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "move-file" | "inline-reexports" | "retarget-import";
 export interface RefactorRequest {
     /** Opt-in native diagnostics; edits always use pinned TypeScript 5.9.3. */
@@ -11,7 +12,7 @@ export interface RefactorRequest {
     /** Module specifiers for retarget-import; exact matches only. */
     from?: string;
     to?: string;
-    /** Imported export names, before mapping, to their destination names. */
+    /** retarget-import: export names; move-file: exact module specifiers. */
     map?: Record<string, string>;
     only?: string[];
     /** Report affected test mocks (default), or add a parallel destination mock. */
@@ -43,6 +44,8 @@ export interface FileChange {
     after: string | null;
 }
 export interface BackendResult {
+    /** Exact compiler filesystem observations, including negative probes. */
+    readSet?: ReadSetEntry[];
     checker?: CheckerIdentity;
     backend: string;
     version: string;

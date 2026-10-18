@@ -74,12 +74,12 @@ Paths resolve against the custom script process's current working directory. Ret
 | `typeName` | Select a declared type when a file has several declarations. |
 | `keep` | Boolean, valid only for `inline-reexports`; retain the shim after retargeting its callers. Defaults to false. |
 | `from`, `to` | Exact source and destination module specifiers; required for retarget-import. Wildcard prefixes are rejected. |
-| `map` | retarget-import export mapping object, e.g. `{ NextIntlClientProvider: "IntlProvider" }`. Unaliased bindings and semantic usages rename; explicit local aliases remain unchanged. |
-| `only` | retarget-import array of pre-map export names. Other bindings stay on the source module; declarations split as needed. Default/namespace imports require this option absent. |
+| `map` | move-file: exact module mapping object scoped to moved imports/re-exports, e.g. `{ "@/lib/hooks": "@scope/features/hooks", "next-intl": "use-intl" }`. retarget-import: export mapping object, e.g. `{ NextIntlClientProvider: "IntlProvider" }`. Unaliased bindings and semantic usages rename; explicit local aliases remain unchanged. |
+| `only` | For retarget-import or move-file mappings: array of original export names. Other bindings stay on the source module; declarations split as needed. Default/namespace imports require this option absent. |
 | `mocks` | retarget-import: `"report"` (default) lists affected test mocks; `"add"` inserts parallel destination mocks with the same factory text. |
 | `rootNamespace` | Override the C# project's namespace convention. |
 
-Example: `await refactor.plan({ operation: "move-file", project: "./apps/web/tsconfig.json", root: ".", file: "./apps/web/src/components", target: "./packages/feature/src/components", targetProject: "./packages/feature/tsconfig.json" })`. The `@refactor-ai/ts-move-file` package and `refactor-move-file` skill select this operation automatically. Directory moves include non-source UTF-8 files. Cross-package importers use package exports (missing exact entries become planned manifest edits) and must declare the destination dependency. Unresolved source-project aliases fail with `NEW_DIAGNOSTICS` and an alias hint. Moved files use relative imports for their destination package’s own bare specifiers, following that package’s extension style. Matching entries in the nearest ancestor `eslint-suppressions.json` transfer to the destination’s nearest ledger, merging rule counts. A missing destination ledger is created only for a package with `eslint.config.*`; otherwise source entries are removed with a review note. Ledger edits use two-space JSON and a trailing newline, retaining existing key order (sorted ledgers remain sorted).
+Example: `await refactor.plan({ operation: "move-file", project: "./apps/web/tsconfig.json", root: ".", file: "./apps/web/src/components", target: "./packages/feature/src/components", targetProject: "./packages/feature/tsconfig.json" })`. The `@refactor-ai/ts-move-file` package and `refactor-move-file` skill select this operation automatically. Directory moves include non-source UTF-8 files. Cross-package importers use package exports (missing exact entries become planned manifest edits) and must declare the destination dependency. Use repeatable CLI `--map from=to` (API `map`) to prepare aliases and move in one plan. Module maps are simultaneous, exact and scoped to moved files. Root `.refactor-ai/equivalents.json` supplies defaults only when the destination declares the equivalent; explicit maps win. Unresolved source-project aliases fail early with `MOVE_IMPORT_UNRESOLVED`; missing dependencies fail `MISSING_DEPENDENCY`, suggesting a declared equivalent where available. Moved files use relative imports for their destination package’s own bare specifiers, following that package’s extension style. Matching entries in the nearest ancestor `eslint-suppressions.json` transfer to the destination’s nearest ledger, merging rule counts. A missing destination ledger is created only for a package with `eslint.config.*`; otherwise source entries are removed with a review note. Ledger edits use two-space JSON and a trailing newline, retaining existing key order (sorted ledgers remain sorted).
 
 Read the operation's CLI `--help` for engine-specific support and limitations. TypeScript consumers can import `RefactorApi`, `PlanOptions`, `Plan`, `ValidationResult`, `ApplyResult`, `Capability`, `Diagnostic`, `FileChange` and `Operation` as types from the same entry point.
 
@@ -129,7 +129,7 @@ Source changes come from the compiler engine. Custom scripts select operations a
 
 ## Saved plans
 
-The returned plan is the same JSON schema the CLI uses. To persist a plan, write it under `<root>/.refactor-ai/` or outside the project root; another location inside the project changes its snapshot. Keep the plan unchanged and validate it before applying.
+The returned plan is the same JSON schema the CLI uses. To persist a plan, write it under `<root>/.refactor-ai/` or outside the project root; another location inside the project can change observed file membership or a legacy whole-root snapshot. Keep the plan unchanged and validate it before applying.
 
 ```js
 import { mkdir, writeFile } from "node:fs/promises";
@@ -164,3 +164,5 @@ with no default at its origin (`NAMESPACE_IMPORT_UNSUPPORTED` otherwise).
 Import/export attributes are unsupported. Resolution changes and new compiler
 errors throw; application initialization behavior, directives and external
 consumers require separate verification.
+
+TS plans use schema 3 and store `readSet`: deterministic compiler filesystem observations (content, missing files, configs, package metadata, symlink resolution and relevant directory queries). Validation/apply replays those reads and checks edited/created/deleted paths; unrelated files outside the read set may change. Every source loaded for graph discovery or checking remains an input, even when its diagnostics were outside the TS5 affected closure. Empty plans skip freshness checks. Legacy schema 1/2 and backends without read tracking retain whole-root freshness.
