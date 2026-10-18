@@ -21,4 +21,3 @@ export function installationHint(root: string, file: string): string {
   if (!pkg || existsSync(resolve(pkg.directory, "node_modules"))) return "";
   return `; ${pkg.directory}/node_modules is missing; run the workspace package manager install from ${root}`;
 }
-
