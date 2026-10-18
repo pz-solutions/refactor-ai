@@ -68,6 +68,80 @@ describe("move-file", () => {
     expect(existsSync(w.path("src/ui"))).toBe(false);
   });
 
+  test("maps moved imports in the same plan with caller rewrites", async () => {
+    const w = await packages({
+      "apps/web/tsconfig.json": config({ compilerOptions: { ...options, baseUrl: ".", paths: { "@/*": ["src/*"] } } }),
+      "apps/web/src/component.ts": 'import { existing, local } from "@/helpers"; export const component = () => existing + local;\n',
+      "apps/web/src/helpers.ts": 'export const existing = 1; export const local = 2;',
+      "packages/feature/src/existing.ts": 'export const existing = 1; export const local = 2;',
+    });
+    const api = createRefactorApi({ loadBackend });
+    const plan = await api.plan({ ...packageRequest(w), map: { "@/helpers": "@scope/feature/existing" } });
+    expect(plan.validation.status).toBe("passed");
+    expect(changed(plan, w.path("packages/feature/src/ui/component.ts"))).toContain('../existing');
+    expect(changed(plan, w.path("apps/web/src/helpers.ts"))).toBeUndefined();
+    expect(changed(plan, w.path("apps/web/src/use.ts"))).toContain('@scope/feature/ui/component');
+  });
+
+  test("--only splits moved declarations and preserves comments, type imports and explicit aliases", async () => {
+    const w = await workspace({
+      "tsconfig.json": config(),
+      "src/component.ts": '"use client";\nimport { /* selected */ a as value, b } from "./old";\nimport type { Options } from "./old";\nexport { a as publicValue, b as keep } from "./old";\nexport const component = (o: Options) => value + b + o.count;\n',
+      "src/old.ts": 'export const a = 1, b = 2; export interface Options { count: number }',
+      "src/new.ts": 'export const a = 3; export interface Options { count: number }',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan({ ...request(w), map: { "./old": "./new" }, only: ["a", "Options"] });
+    const text = changed(plan, w.path("src/ui/component.ts"))!;
+    expect(text).toContain('"use client"');
+    expect(text).toContain('/* selected */ a as value');
+    expect(text).toContain('from "../new"');
+    expect(text).toContain('b } from "../old"');
+    expect(text).toContain('a as publicValue');
+    expect(text).toContain('import type { Options }');
+    expect(plan.validation.status).toBe("passed");
+  });
+
+  test("directory module maps are simultaneous, repeatable, scoped to moved files and reject wildcard/default selection", async () => {
+    const w = await workspace({
+      "tsconfig.json": config(),
+      "src/components/component.ts": 'import { x } from "../a"; import { y } from "../b"; export const component = x + y;',
+      "src/outside.ts": 'import { x } from "./a"; export { x };',
+      "src/a.ts": 'export const x = 1, y = 2; export default x;',
+      "src/b.ts": 'export const x = 3, y = 4;',
+    });
+    const req = request(w, { file: w.path("src/components"), target: w.path("src/ui/components"), map: { "../a": "../b", "../b": "../a" } });
+    const first = await createPlan(req, analyze), second = await createPlan(req, analyze);
+    expect(second).toEqual(first);
+    expect(changed(first, w.path("src/ui/components/component.ts"))).toContain('"../../b"');
+    expect(changed(first, w.path("src/ui/components/component.ts"))).toContain('"../../a"');
+    expect(changed(first, w.path("src/outside.ts"))).toBeUndefined();
+    await expect(analyze({ ...req, map: { "../*": "../b" } })).rejects.toThrow("UNSUPPORTED_SPECIFIER");
+    await writeFile(w.path("src/components/component.ts"), 'import value from "../a"; export const component = value;');
+    await expect(analyze({ ...req, map: { "../a": "../b" }, only: ["x"] })).rejects.toThrow("UNSUPPORTED_SELECTION");
+  });
+
+  test("workspace equivalents map declared alternatives, allow overrides and give partial-selection hints", async () => {
+    const w = await packages({
+      ".refactor-ai/equivalents.json": '{"next-intl":"use-intl"}',
+      "apps/web/package.json": '{"name":"@scope/web","dependencies":{"@scope/feature":"workspace:*","next-intl":"^4"}}',
+      "packages/feature/package.json": '{"name":"@scope/feature","exports":{"./existing":"./src/existing.ts"},"dependencies":{"use-intl":"^4"}}',
+      "apps/web/src/component.ts": 'import { useTranslations, frameworkOnly } from "next-intl"; export const component = useTranslations() + frameworkOnly;',
+      "apps/web/node_modules/next-intl/package.json": '{"name":"next-intl","types":"index.d.ts"}',
+      "apps/web/node_modules/next-intl/index.d.ts": 'export function useTranslations(): number; export const frameworkOnly: number;',
+      "packages/feature/node_modules/use-intl/package.json": '{"name":"use-intl","types":"index.d.ts"}',
+      "packages/feature/node_modules/use-intl/index.d.ts": 'export function useTranslations(): number; export const frameworkOnly: number;',
+    });
+    const plan = await createPlan(packageRequest(w), analyze);
+    expect(changed(plan, w.path("packages/feature/src/ui/component.ts"))).toContain('from "use-intl"');
+    expect(plan.readSet!.some(input => input.args[0] === w.path(".refactor-ai/equivalents.json"))).toBe(true);
+    await expect(analyze(packageRequest(w, { only: ["useTranslations"] }))).rejects.toThrow("destination declares use-intl; map next-intl=use-intl");
+    await expect(analyze(packageRequest(w, { map: { "next-intl": "@scope/feature/existing" } }))).rejects.toThrow("NEW_DIAGNOSTICS");
+    await writeFile(w.path("packages/feature/package.json"), '{"name":"@scope/feature","exports":{"./existing":"./src/existing.ts"}}');
+    await expect(analyze(packageRequest(w))).rejects.toThrow("add next-intl@^4");
+    await writeFile(w.path(".refactor-ai/equivalents.json"), '{"next-intl":null}');
+    await expect(analyze(packageRequest(w))).rejects.toThrow("INVALID_EQUIVALENTS");
+  });
+
   test("directory API plans preserve nested layout and assets, apply once, and retain individual file modes", async () => {
     const w = await workspace({
       "tsconfig.json": config(),
@@ -81,7 +155,7 @@ describe("move-file", () => {
     await chmod(w.path("src/components/nested/component.ts"), 0o750);
     const api = createRefactorApi({ loadBackend });
     const plan = await api.plan({ ...request(w, { file: w.path("src/components"), target: w.path("src/ui/components") }) });
-    expect(plan.schemaVersion).toBe(2);
+    expect(plan.schemaVersion).toBe(3);
     expect(plan.validation.status).toBe("passed");
     expect(preview(plan)).toContain("README.md");
     expect(changed(plan, w.path("src/ui/components/nested/component.ts"))).toContain('"../../../helper"');

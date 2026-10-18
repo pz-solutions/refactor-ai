@@ -1,6 +1,8 @@
+import { CompilerInputs } from "./typescript-diagnostics-cache";
+import { mapMoveImports } from "./typescript-retarget-import";
 import ts from "typescript";
 import { timed } from "./typescript-timing";
-import { precheckMove } from "./typescript-prechecks";
+import { moveMappings, precheckMove } from "./typescript-prechecks";
 import { inlineReexports } from "./typescript-inline-reexports";
 import { bothIdentity, loadTs7Checker, ts7Identity } from "./typescript-ts7";
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
@@ -788,6 +790,12 @@ function moveFile(context: Context, request: RefactorRequest, renames: [string, 
     for (const key of keys) beforeOwners.set(key, [...(beforeOwners.get(key) ?? []), config]);
   }
   const graphBefore = projectGraph(ws, userFiles(ws), path => ws.ownersOf(path));
+  for (const [from, to] of renames) {
+    const source = parseFile(ws, from);
+    if (!source) continue;
+    const mapped = mapMoveImports(source, moveMappings(root, to, request.map, ws.vfs.inputs.sys), request.only);
+    if (mapped !== source.text) ws.vfs.write(from, mapped);
+  }
   const imports = relocationImports(ws, renames);
   const mapping = new Map(renames.map(([from, to]) => [ws.vfs.key(from), to]));
   const relocated = (path: string) => mapping.get(ws.vfs.key(path)) ?? path;
@@ -906,10 +914,11 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     : sourceConfig;
   const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
   if (request.operation === "move-type" && request.target && isAbsolute(request.target) && existsSync(request.target)) affected.push(resolve(request.target));
-  if (movingFiles || sourceConfig !== targetConfig) precheckMove(root, sourceConfig, targetConfig, movingFiles ?? []);
+  const inputs = new CompilerInputs(true);
+  if (movingFiles || sourceConfig !== targetConfig) precheckMove(root, sourceConfig, targetConfig, movingFiles ?? [], request, inputs.sys);
   const checkerMode = request.checker === "both" ? "both" : "ts7";
   const nativeChecker = request.checker === "ts7" || request.checker === "both" ? await loadTs7Checker(checkerMode) : undefined;
-  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode));
+  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode, inputs));
   try {
     if (!movingFiles && !ws.vfs.fileExists(file)) fail("FILE_NOT_FOUND", file);
     const selected = movingFiles ? movingFiles.map(([from]) => from).filter(path => /\.[cm]?[jt]sx?$/.test(path)) : [file];
@@ -979,6 +988,7 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     if (renamed) context.notes.push(`Renamed ${relative(root, renamed[0])} to ${relative(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
     timed("workspace.inputs", () => ws.vfs.assertStableMetadata());
     return {
+      readSet: inputs.snapshot(),
       backend: "typescript",
       checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5", version: ts.version },
       version: ts.version,

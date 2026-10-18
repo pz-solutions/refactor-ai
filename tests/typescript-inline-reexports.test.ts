@@ -25,7 +25,7 @@ function after(result: Pick<BackendResult, "changes">, path: string) { return re
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("inline-reexports", () => {
-  test("deletes pure star shims, preserves named/type aliases, updates config lists and emits schema 2 without writes", async () => {
+  test("deletes pure star shims, preserves named/type aliases, updates config lists and records schema 3 reads without writes", async () => {
     const w = await workspace({
       "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true, module: "esnext", moduleResolution: "bundler" }, files: ["src/shim.ts", "src/origin.ts", "src/use.ts"] }),
       "src/shim.ts": '"use client";\n// public shim\nexport * from "./origin";\n',
@@ -33,7 +33,7 @@ describe("inline-reexports", () => {
       "src/use.ts": "import { a as value, type Shape } from './shim';\nimport type { Shape as S } from './shim';\nexport const result: Shape = { id: value }; export type T = S;\n",
     });
     const plan = await createPlan(w.request, analyze);
-    expect(plan.schemaVersion).toBe(2);
+    expect(plan.schemaVersion).toBe(3);
     expect(plan.validation.status).toBe("passed");
     expect(after(plan, w.path("src/shim.ts"))).toBeNull();
     expect(after(plan, w.path("src/use.ts"))).toBe("import { a as value, type Shape } from './origin';\nimport type { Shape as S } from './origin';\nexport const result: Shape = { id: value }; export type T = S;\n");

@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { installationHint } from "./typescript-prechecks";
+import { installationHint } from "./typescript-package-inputs";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { RefactorRequest } from "../types";
@@ -10,6 +10,7 @@ import { addParallelMocks, affectedMockFiles } from "./typescript-retarget-mocks
 type Declaration = ts.ImportDeclaration | ts.ExportDeclaration;
 type Member = ts.ImportSpecifier | ts.ExportSpecifier;
 interface Context {
+  sys?: ts.System;
   service: ts.LanguageService;
   options: ts.CompilerOptions;
   root: string;
@@ -227,7 +228,7 @@ export function retargetImports(context: Context, request: RefactorRequest): str
   for (const source of affected) {
     for (const { declaration, target } of selections(source, request)) {
       const mode = ts.getModeForUsageLocation(source, declaration.moduleSpecifier! as ts.StringLiteral, context.options);
-      if (!ts.resolveModuleName(target, source.fileName, context.options, ts.sys, cache, undefined, mode).resolvedModule) {
+      if (!ts.resolveModuleName(target, source.fileName, context.options, context.sys ?? ts.sys, cache, undefined, mode).resolvedModule) {
         unresolved.push(`${source.fileName} (${target})`);
       }
     }
@@ -255,4 +256,27 @@ export function retargetImports(context: Context, request: RefactorRequest): str
     notes.push(`Tests mocking ${request.from} import retargeted files: ${mocks.join(", ")}. Review mocks or use --mocks add.`);
   }
   return notes;
+}
+
+/** Exact, simultaneous module mappings; --only uses the retarget-import selection rules. */
+export function mapMoveImports(source: ts.SourceFile, mappings: Record<string, string>, only?: string[]): string {
+  if (!mappings || typeof mappings !== "object" || Array.isArray(mappings)
+    || Object.entries(mappings).some(([from, to]) => !from || typeof to !== "string" || !to)) fail("INVALID_REQUEST", "module mappings must contain nonempty from=to strings");
+  validate({ operation: "retarget-import", root: "", project: "", file: source.fileName, from: "refactor-ai:source", to: "refactor-ai:target", only });
+  let text = source.text;
+  const pending: [string, string][] = [];
+  for (const [index, [from, to]] of Object.entries(mappings).entries()) {
+    const request: RefactorRequest = { operation: "retarget-import", root: "", project: "", file: source.fileName, from, to, only };
+    validate(request);
+    let temporary = `refactor-ai:move-map:${index}`;
+    while (text.includes(temporary) || Object.hasOwn(mappings, temporary) || Object.values(mappings).includes(temporary)) temporary += ":";
+    text = transformFile(ts.createSourceFile(source.fileName, text, ts.ScriptTarget.Latest, true), { ...request, to: temporary }, new Set());
+    pending.push([temporary, to]);
+  }
+  for (const [from, to] of pending) {
+    text = transformFile(ts.createSourceFile(source.fileName, text, ts.ScriptTarget.Latest, true), {
+      operation: "retarget-import", root: "", project: "", file: source.fileName, from, to,
+    }, new Set());
+  }
+  return text;
 }

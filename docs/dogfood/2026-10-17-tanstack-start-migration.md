@@ -523,3 +523,175 @@ Queued follow-up work is F40 mapping/equivalents, F41 empty-apply/read-set
 staleness and F42 the owner-return-url scenario; F43 records the first zero-manual-
 move slice and the source-retarget-then-move skill recipe. F35 remains deferred
 until a complete read-set proof is available.
+
+## Performance round 3 (2026-10-18)
+
+### F46 — prepare compatible imports and move in one plan
+
+`move-file --map from=to` now accepts repeatable exact **module** mappings in the
+CLI and a `map` object in the API. It transforms only the moved files' static
+imports/re-exports before relocation checks and reference preservation. It reuses
+retarget-import's declaration transform, including `--only` original export names,
+splitting, comments, type-only imports and explicit local/public aliases. Mappings
+are simultaneous: swaps/chains do not cascade. Other files receive only the normal
+move's caller rewrites. Export/binding renames and runtime adapters still need
+source preparation; a module map does not establish API/runtime equivalence.
+
+Root `.refactor-ai/equivalents.json`, e.g. `{"next-intl":"use-intl"}`, supplies
+default maps only when the destination manifest declares the alternative. Explicit
+maps override defaults. Missing-dependency errors suggest the declared equivalent
+(`destination declares use-intl; map next-intl=use-intl`) rather than adding the
+framework package. A partial `--only` can leave an unmapped binding and receive
+this hint. Undeclared alternatives do not become defaults; genuine dependencies
+such as sonner still need declaration/installation or an API-compatible mapping.
+Malformed configuration and unsupported selections fail before program loading.
+The absent/present equivalents file is itself a recorded input.
+
+### F47 — read-set freshness, including genuinely empty apply
+
+New TS plans use schema 3. `snapshot` holds edit preconditions, while `readSet`
+records deterministic compiler filesystem observations: file contents, configs,
+package manifests, negative file/directory probes, symlink resolution and relevant
+matching directory queries. Discovery uses a config-name glob instead of treating
+every directory entry under the workspace as a compiler input. Native callbacks
+also record their disk reads even when Go performs the actual read. Cached disk
+observations are immutable within one analysis and replayed before plan creation
+and application. VFS overlays/generated declarations are not mistaken for disk
+changes. Imported libraries and ignored generator inputs remain protected.
+
+Unrelated files outside the recorded reads may change, appear or disappear,
+including between backend analysis and plan serialization. Such changes also no
+longer change a new plan's ID. Tests prove that changed transitive importers,
+configs, dependencies, new importers, generator roots and negative lookups still
+invalidate; late destination/case collisions and symlink replacements still fail.
+All graph-discovery/compiler sources remain inputs: this does **not** promise that
+an arbitrary test inside a loaded TS program can change safely. Empty plans skip
+freshness checks even after config changes/source deletion. Legacy schema 1/2 and
+backends without observed reads (including Roslyn) retain conservative whole-root
+freshness for nonempty plans; they are not silently weakened.
+
+### F48 — native validation lifetime and move overhead
+
+TS7-only mode already checks every user source, so constructing TS5 before/after
+validation graphs did not narrow native diagnostics. It now builds original
+validation programs only when a diagnostic baseline or output-layout proof needs
+them. A clean move skips that work. Native participants in one diagnostics call
+share a session/snapshot opened with all their configs; it closes in `finally`
+before edits, original-baseline checking or a later validation call. Programs from
+different VFS views never share a native session. TS5 membership comparison,
+full native diagnostics, audit parity and project-reference rejection remain.
+
+Read tracking initially increased latency (a pilot took 34.2 s). Avoiding repeated
+compiler filesystem queries, replaying metadata once per guard and omitting the
+unused whole-root **after** snapshot recovered that overhead. String-input hashing
+avoids JSON-escaping full source text. Pilot samples are not the final benchmark.
+The final paired series below uses no concurrent tests started by this agent.
+
+### F49 — reproducible round-three measurements
+
+The runner is `scripts/bench-r3.mjs`. It records three sequential r2/r3 pairs for
+an in-package formatter move and a cross-package KSeF forwarding-module move.
+Both are current files in the read-only target; the original KSeF implementation
+has already migrated, so the cross-package scenario explicitly moves its remaining
+app forwarding module. These are not measurements of the historical full owner
+slice. Every sample records target commit/status, binary hashes, checker identity,
+validation, edit hash, read count, load averages and phase times. Full plans and
+stderr/stdout stay under `/tmp/refactor-r3-final-bench`; compact records belong in
+`docs/dogfood/perf-r3-2026-10-18/`. Plans are never applied to uber-platform.
+
+```sh
+node scripts/bench-r3.mjs \
+  /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92 \
+  /tmp/refactor-r3-baseline/cli.mjs "$PWD/dist/cli.js" \
+  /tmp/refactor-r3-final-bench
+```
+
+The r2 CLI is copied from the untouched 780dd67 distribution before rebuilding
+this worktree; its optional dependencies resolve through a temporary symlink to
+this worktree's node_modules. New schema-3 snapshots intentionally differ in scope
+from r2. Compare exact edit hashes and successful validation, not snapshot hashes
+across schemas. Each variant must also be deterministic across all repetitions on
+the same target state. Rejected plans are retained and never counted as speed wins.
+
+### F50 — real owner-detail plan and the changed target state
+
+The historical log's source app component is now an adapter; the implementation
+and invitation files have already moved into app-features. Restoring those files
+would violate this round's read-only-target constraint. The actual current
+owner-detail implementation nevertheless produces a successful **single** move
+plan with repeated module mappings, caller/export rewrites and suppression-ledger
+transfer, validated across three projects, with zero source writes:
+
+```sh
+cd /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92
+node /home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js plan move-file \
+  --project packages/app-features/tsconfig.json --root . \
+  --file packages/app-features/src/owners/owner-detail-client.tsx \
+  --to packages/app-features/src/owners/detail/owner-detail-client.tsx \
+  --map '../shared/convex-hooks/owner=@uber-platform/app-features/shared/convex-hooks/owner' \
+  --map '../shell/organization-context=@uber-platform/app-features/shell/organization-context' \
+  --checker ts7 --out /tmp/refactor-r3-owner-detail-map.json
+```
+
+Result: `planned`, validation `passed`, seven changes, three projects, 64,667
+recorded reads, plan ID
+`ba5193c86c07c990cdab7413ee01fae35c95a83c3df11f0a19250178bc458a9e`.
+The two mapped self-package imports normalize to `../../shared/convex-hooks/owner`
+and `../../shell/organization-context` at the new path. This demonstrates the
+current file's combined map/move workflow, not a replay of the original app-to-
+package extraction. App-only routing and notification ports in that original
+slice still require real adapters; map does not invent them. No apply was run.
+
+### Final round-three results and verification
+
+Seconds, median (min–max), **three successful pairs per scenario**, TS7 only,
+Node 22.23.3, cold processes, persistent cache off, OS cache retained:
+
+| Scenario | R2 on current target | R3 | Delta |
+| --- | --- | --- | --- |
+| In-package formatter move | 28.85 (28.22–29.11) | 28.56 (28.34–29.09) | −0.29 s (−1.0%) |
+| Cross-package KSeF forwarding module | 25.48 (21.66–25.74) | 28.06 (27.56–33.76) | +2.58 s (+10.1%) |
+
+Both requested medians meet 30 s. This is **not** an across-the-board latency win:
+the additional read-set guarantees cost time, and cross-package regresses in the
+paired current-target series. One cross-package run exceeds 30 s. The historical
+40.45 s R2 formatter median is background, not the control for this series: the
+fresh R2 control already takes 28.85 s under current machine/toolchain conditions.
+Do not attribute the full historical reduction to this patch.
+
+All 12 plans passed, exact edit hashes match across variants, and each variant's
+three repeated plan IDs match. The target stays clean at
+`8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47` throughout. New read counts are 64,648
+(in-package) and 62,965 (cross-package); this remains sizeable plan metadata.
+Phase medians expose the tradeoff: in-package native diagnostics 10.19 → 9.67 s,
+validation 11.59 → 10.76 s, preparation 0.75 → 0 s, but metadata guarding
+0.04 → 0.76 s. Cross-package discovery 5.53 → 6.78 s and validation
+9.48 → 11.29 s offset preparation 1.42 → 0 s. Phase medians need not sum to the
+complete-process median; shared-machine load and GC remain material.
+
+Verification: `bun run typecheck`, `bun run build` and the complete
+`.NET8`/npm11 `bun test --timeout 60000` pass: **310/310 tests**, 1,435 assertions,
+20 files, 251.53 s. The temporary toolchain uses .NET 8.0.426 and npm 11.21.1,
+with `npm_execpath` explicitly set as in round two. The move skill passes
+`quick_validate.py`; `git diff --check` is clean. No tests were weakened to hide
+schema changes: legacy schema tests remain, while new TS plans explicitly expect
+schema 3. Installed skills and npm package relocation tests verify compiler lookup
+from their own runtime, without bundling TypeScript into the lightweight skill API
+wrapper or adding a TS dependency to C# packages.
+
+Remaining scope: runtime adapters/export-binding renames still require preparation;
+read files inside a loaded TS program remain freshness inputs even when their
+diagnostics are outside the affected closure; Roslyn and legacy nonempty plans
+retain whole-root freshness; 30 s is a measured median, not a bound on every move.
+Large read sets and cold discovery/editing remain optimization opportunities.
+
+Separate successful `--cpu-prof` captures for both scenarios are summarized in
+[profiles.json](perf-r3-2026-10-18/profiles.json); full 23–25 MB profiles stay in
+`/tmp/refactor-r3-profile`. They reproduce the same plan IDs as the paired series.
+Profiled wall times are 28.59 / 22.43 s and are **excluded** from the table. The
+Node main-thread samples show native blocking IPC in `read` (8.19 / 5.52 s), GC
+(4.12 / 3.45 s), TS scanning (0.90 / 0.76 s), path canonicalization and hashing.
+They do not measure native Go CPU. Cold parsing, retained graph/checker memory and
+resolution IO remain the useful next targets; source-parent correctness and
+filesystem-view boundaries still constrain sharing. A final rebuild preserves the
+exact CLI binary hash used in the measurements.
