@@ -9,10 +9,12 @@ Use the deterministic runner to plan, preview, validate and apply the same plan 
 
 For multi-step refactorings, consider a custom script using the [importable API](scripts/API.md).
 
-For app-to-package migrations, prepare imports while the files still belong to the source project:
+For workspace migrations, stop dev servers and let generators settle before planning. Use `--checker ts7` when the repository typechecks with TS7; the default remains TS5.
 
-1. Run `plan retarget-import` with the source `--project` and source directory as `--file`; preview and apply each plan. Replace app-only aliases with exported package imports. Use an alternative dependency (for example next-intl → use-intl) only when its API fits the call sites and the destination declares it. Compiler validation does not establish runtime API compatibility.
-2. Once moved files' imports resolve from the destination, plan `move-file` with `--target-project`. Move shared dependencies before their consumers; preview package exports and caller rewrites, then apply.
-3. Run the destination's typecheck and affected application tests. An unresolved alias or missing dependency from the precheck identifies source preparation still needed; replan after fixing it.
+1. Prefer one `move-file` plan with repeatable exact module mappings, for example `--map @/lib/convex-hooks=@scope/features/hooks --map next-intl=use-intl`. Mappings affect only moved files’ imports/re-exports. `--only Name,Name` selects original named exports and splits declarations using retarget-import semantics; default/namespace imports require it absent. Root `.refactor-ai/equivalents.json` (for example `{"next-intl":"use-intl"}`) supplies defaults only for alternatives the destination declares; explicit mappings win. Use alternatives only when their APIs fit the call sites: compiler validation does not prove runtime compatibility.
+2. If preparation needs export/binding renames or runtime adapters, retarget aliases first in the source project (`plan retarget-import --file <source-dir>`), preview/apply, then move. Move shared dependencies before their consumers. Preview package exports and caller rewrites alongside the moved imports before applying.
+3. Run the destination’s typecheck and affected application tests. Missing dependencies and unresolved aliases identify preparation still needed; fix and replan.
+
+New TS plans record compiler reads, including configs, dependencies and negative resolution probes. Unrelated files outside that read set can change; changes to read inputs or edited paths require replanning. Empty plans apply successfully despite other changes. Legacy plans and backends without read tracking retain whole-root freshness.
 
 In a monorepo set `--root` to the workspace root. After `apply`, run the project's own formatter and linter on the changed files; the engine formats with the TypeScript formatter.

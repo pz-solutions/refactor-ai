@@ -1,0 +1,483 @@
+{
+  "mode": "cold Node processes, ts7, cache off, OS cache retained, paired sequential runs, no apply",
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "node": "v22.23.3",
+  "beforeHash": "77f8e071314c83e05d20f86aee4d5aa09f299cf9bc475af446fda16a09fac216",
+  "afterHash": "831e1171fb3ca817cac198b11adadfe53617b53459aad7a344cd4db9f713ea63",
+  "samples": [
+    {
+      "scenario": "in-package",
+      "run": 1,
+      "variant": "r2",
+      "ms": 29112,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        4.95,
+        5.88,
+        6.68
+      ],
+      "phases": {
+        "workspace.load": 7639,
+        "workspace.program": 4473,
+        "workspace.prepare": 889,
+        "workspace.move": 2414,
+        "workspace.external-projects": 534,
+        "diagnostics.ts7": 10623,
+        "workspace.validate": 11982,
+        "workspace.inputs": 41
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "bcb3fbcadc40ad0cedb3bfaadebab8666c780a0ae62df76bf4f75e060984e43c",
+        "id": "666e6493fbd86e392c60a5c55117d06ff2e0d098c41348b2fcb43bb366b6d888",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 22
+      }
+    },
+    {
+      "scenario": "in-package",
+      "run": 1,
+      "variant": "r3",
+      "ms": 28559,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        4.37,
+        5.65,
+        6.58
+      ],
+      "phases": {
+        "workspace.load": 8029,
+        "workspace.program": 3658,
+        "workspace.prepare": 0,
+        "workspace.move": 2399,
+        "workspace.external-projects": 545,
+        "diagnostics.ts7": 9763,
+        "workspace.validate": 10837,
+        "workspace.inputs": 854
+      },
+      "outcome": {
+        "snapshotHash": "0a7f8babadf83c80acead627b7ab16e95b258a23a033bf425ab6d4d7b021c93a",
+        "editHash": "bcb3fbcadc40ad0cedb3bfaadebab8666c780a0ae62df76bf4f75e060984e43c",
+        "id": "4c68bf49e24cedc3e80e7db2db1332465de45c22a18ea9720d097e8d9cb3f9ad",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 22,
+        "readSet": 64648
+      }
+    },
+    {
+      "scenario": "in-package",
+      "run": 2,
+      "variant": "r2",
+      "ms": 28848,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        4.89,
+        5.64,
+        6.54
+      ],
+      "phases": {
+        "workspace.load": 8256,
+        "workspace.program": 4046,
+        "workspace.prepare": 739,
+        "workspace.move": 2431,
+        "workspace.external-projects": 586,
+        "diagnostics.ts7": 10102,
+        "workspace.validate": 11399,
+        "workspace.inputs": 36
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "bcb3fbcadc40ad0cedb3bfaadebab8666c780a0ae62df76bf4f75e060984e43c",
+        "id": "666e6493fbd86e392c60a5c55117d06ff2e0d098c41348b2fcb43bb366b6d888",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 22
+      }
+    },
+    {
+      "scenario": "in-package",
+      "run": 2,
+      "variant": "r3",
+      "ms": 28339,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        5.04,
+        5.62,
+        6.51
+      ],
+      "phases": {
+        "workspace.load": 8047,
+        "workspace.program": 3718,
+        "workspace.prepare": 0,
+        "workspace.move": 2404,
+        "workspace.external-projects": 559,
+        "diagnostics.ts7": 9668,
+        "workspace.validate": 10762,
+        "workspace.inputs": 759
+      },
+      "outcome": {
+        "snapshotHash": "0a7f8babadf83c80acead627b7ab16e95b258a23a033bf425ab6d4d7b021c93a",
+        "editHash": "bcb3fbcadc40ad0cedb3bfaadebab8666c780a0ae62df76bf4f75e060984e43c",
+        "id": "4c68bf49e24cedc3e80e7db2db1332465de45c22a18ea9720d097e8d9cb3f9ad",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 22,
+        "readSet": 64648
+      }
+    },
+    {
+      "scenario": "in-package",
+      "run": 3,
+      "variant": "r2",
+      "ms": 28221,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        4.85,
+        5.52,
+        6.45
+      ],
+      "phases": {
+        "workspace.load": 7874,
+        "workspace.program": 3830,
+        "workspace.prepare": 748,
+        "workspace.move": 2296,
+        "workspace.external-projects": 561,
+        "diagnostics.ts7": 10193,
+        "workspace.validate": 11593,
+        "workspace.inputs": 39
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "bcb3fbcadc40ad0cedb3bfaadebab8666c780a0ae62df76bf4f75e060984e43c",
+        "id": "666e6493fbd86e392c60a5c55117d06ff2e0d098c41348b2fcb43bb366b6d888",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 22
+      }
+    },
+    {
+      "scenario": "in-package",
+      "run": 3,
+      "variant": "r3",
+      "ms": 29086,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        4.17,
+        5.3,
+        6.35
+      ],
+      "phases": {
+        "workspace.load": 8031,
+        "workspace.program": 4752,
+        "workspace.prepare": 0,
+        "workspace.move": 2470,
+        "workspace.external-projects": 561,
+        "diagnostics.ts7": 9395,
+        "workspace.validate": 10473,
+        "workspace.inputs": 761
+      },
+      "outcome": {
+        "snapshotHash": "0a7f8babadf83c80acead627b7ab16e95b258a23a033bf425ab6d4d7b021c93a",
+        "editHash": "bcb3fbcadc40ad0cedb3bfaadebab8666c780a0ae62df76bf4f75e060984e43c",
+        "id": "4c68bf49e24cedc3e80e7db2db1332465de45c22a18ea9720d097e8d9cb3f9ad",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 22,
+        "readSet": 64648
+      }
+    },
+    {
+      "scenario": "cross-package",
+      "run": 1,
+      "variant": "r2",
+      "ms": 21662,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        4.42,
+        5.25,
+        6.3
+      ],
+      "phases": {
+        "workspace.load": 5388,
+        "workspace.program": 3148,
+        "workspace.prepare": 1195,
+        "workspace.move": 1991,
+        "workspace.external-projects": 853,
+        "diagnostics.ts7": 6785,
+        "workspace.validate": 7622,
+        "workspace.inputs": 42
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "976525ce0452741517a7f91395f5e66ed24691965f358bba74e63ecbb6a60a35",
+        "id": "522319dd693f0b7c861ed0b200d7a51ba680abf8a8f67227127c1178f683b395",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 10
+      }
+    },
+    {
+      "scenario": "cross-package",
+      "run": 1,
+      "variant": "r3",
+      "ms": 27564,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        4.21,
+        5.15,
+        6.24
+      ],
+      "phases": {
+        "workspace.load": 7720,
+        "workspace.program": 3801,
+        "workspace.prepare": 0,
+        "workspace.move": 2269,
+        "workspace.external-projects": 934,
+        "diagnostics.ts7": 7056,
+        "workspace.validate": 9640,
+        "workspace.inputs": 746
+      },
+      "outcome": {
+        "snapshotHash": "94e2336cbee8eb6b354a098f33a63619173e4f43b5efea7856c932602de9cdec",
+        "editHash": "976525ce0452741517a7f91395f5e66ed24691965f358bba74e63ecbb6a60a35",
+        "id": "8b4232edaf9ffbd426c30068ed11332cbb058d1dde2794ec4420865bb57c4f20",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 10,
+        "readSet": 62965
+      }
+    },
+    {
+      "scenario": "cross-package",
+      "run": 2,
+      "variant": "r2",
+      "ms": 25479,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        6,
+        5.55,
+        6.34
+      ],
+      "phases": {
+        "workspace.load": 5525,
+        "workspace.program": 3917,
+        "workspace.prepare": 1583,
+        "workspace.move": 2080,
+        "workspace.external-projects": 918,
+        "diagnostics.ts7": 8690,
+        "workspace.validate": 10172,
+        "workspace.inputs": 45
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "976525ce0452741517a7f91395f5e66ed24691965f358bba74e63ecbb6a60a35",
+        "id": "522319dd693f0b7c861ed0b200d7a51ba680abf8a8f67227127c1178f683b395",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 10
+      }
+    },
+    {
+      "scenario": "cross-package",
+      "run": 2,
+      "variant": "r3",
+      "ms": 33762,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        6.61,
+        5.72,
+        6.38
+      ],
+      "phases": {
+        "workspace.load": 6476,
+        "workspace.program": 5047,
+        "workspace.prepare": 0,
+        "workspace.move": 3246,
+        "workspace.external-projects": 2193,
+        "diagnostics.ts7": 9233,
+        "workspace.validate": 13712,
+        "workspace.inputs": 833
+      },
+      "outcome": {
+        "snapshotHash": "94e2336cbee8eb6b354a098f33a63619173e4f43b5efea7856c932602de9cdec",
+        "editHash": "976525ce0452741517a7f91395f5e66ed24691965f358bba74e63ecbb6a60a35",
+        "id": "8b4232edaf9ffbd426c30068ed11332cbb058d1dde2794ec4420865bb57c4f20",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 10,
+        "readSet": 62965
+      }
+    },
+    {
+      "scenario": "cross-package",
+      "run": 3,
+      "variant": "r2",
+      "ms": 25738,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        11.59,
+        7.12,
+        6.82
+      ],
+      "phases": {
+        "workspace.load": 6234,
+        "workspace.program": 3838,
+        "workspace.prepare": 1422,
+        "workspace.move": 2297,
+        "workspace.external-projects": 1042,
+        "diagnostics.ts7": 8527,
+        "workspace.validate": 9476,
+        "workspace.inputs": 41
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "976525ce0452741517a7f91395f5e66ed24691965f358bba74e63ecbb6a60a35",
+        "id": "522319dd693f0b7c861ed0b200d7a51ba680abf8a8f67227127c1178f683b395",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 10
+      }
+    },
+    {
+      "scenario": "cross-package",
+      "run": 3,
+      "variant": "r3",
+      "ms": 28056,
+      "status": 0,
+      "commit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+      "statusBefore": "",
+      "statusAfter": "",
+      "machineLoad": [
+        9.84,
+        7.06,
+        6.81
+      ],
+      "phases": {
+        "workspace.load": 6777,
+        "workspace.program": 3715,
+        "workspace.prepare": 0,
+        "workspace.move": 2337,
+        "workspace.external-projects": 1005,
+        "diagnostics.ts7": 8259,
+        "workspace.validate": 11287,
+        "workspace.inputs": 862
+      },
+      "outcome": {
+        "snapshotHash": "94e2336cbee8eb6b354a098f33a63619173e4f43b5efea7856c932602de9cdec",
+        "editHash": "976525ce0452741517a7f91395f5e66ed24691965f358bba74e63ecbb6a60a35",
+        "id": "8b4232edaf9ffbd426c30068ed11332cbb058d1dde2794ec4420865bb57c4f20",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "files": 10,
+        "readSet": 62965
+      }
+    }
+  ]
+}

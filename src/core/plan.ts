@@ -1,3 +1,4 @@
+import { assertReadSetFresh, assertReadSetShape, type ReadSetEntry } from "./read-set";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { createTwoFilesPatch } from "diff";
@@ -8,11 +9,15 @@ import { assertRegularPath, canonicalMissing, inside, sha256, snapshot, snapshot
  * Schema 1: edits and file creations (`after` is always a string).
  * Schema 2: adds deletions (`after: null`) and creations below parent
  * directories that do not exist yet. New plans use 2 only when a change
- * creates or deletes a file, so edit-only plans stay readable by older tools.
+ * creates or deletes a file. Schema 3 adds recorded compiler reads (including
+ * negative probes and matching directory queries) for scoped freshness. Backends
+ * without read tracking and legacy schema 1/2 plans retain whole-root freshness.
  */
-export type PlanSchemaVersion = 1 | 2;
+export type PlanSchemaVersion = 1 | 2 | 3;
 
 export interface Plan {
+  /** Schema 3: exact filesystem reads used for analysis, instead of whole-root freshness. */
+  readSet?: ReadSetEntry[];
   checker?: CheckerIdentity;
   schemaVersion: PlanSchemaVersion;
   id: string;
@@ -89,13 +94,15 @@ function caseConflict(root: string, files: Snapshot["files"], changes: FileChang
 
 /** Structural and integrity validation shared by loadPlan and applyPlan. */
 export function assertPlanShape(plan: Plan): void {
-  if ((plan?.schemaVersion !== 1 && plan?.schemaVersion !== 2) || !plan.request || typeof plan.request.root !== "string" ||
+  if ((plan?.schemaVersion !== 1 && plan?.schemaVersion !== 2 && plan?.schemaVersion !== 3) || !plan.request || typeof plan.request.root !== "string" ||
       !Array.isArray(plan.changes) || !plan.snapshot || !plan.validation ||
       !Array.isArray(plan.diagnosticsBefore) || !Array.isArray(plan.diagnosticsAfter)) {
     throw new Error("INVALID_PLAN: unsupported or malformed plan");
   }
   if (plan.id !== planId(plan)) throw new Error("INVALID_PLAN: plan integrity check failed");
   if (plan.snapshot.hash !== sha256(JSON.stringify(plan.snapshot.files))) throw new Error("INVALID_PLAN: invalid snapshot");
+  if (plan.schemaVersion === 3) assertReadSetShape(plan.readSet!);
+  else if (plan.readSet !== undefined) throw new Error("INVALID_PLAN: read set requires schema 3");
   const added = newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter);
   if (JSON.stringify(added) !== JSON.stringify(plan.validation.newDiagnostics) ||
       plan.validation.status !== (added.length ? "failed" : "passed")) {
@@ -158,13 +165,15 @@ const fileId = (stat: { dev: number; ino: number }) => `${stat.dev}:${stat.ino}`
 export async function createPlan(
   request: RefactorRequest,
   analyze: (request: RefactorRequest) => Promise<BackendResult>,
+  compilerBase?: string,
 ): Promise<Plan> {
   request = await canonicalRequest(request);
   const root = request.root;
   const before = await snapshot(root);
   const result = await analyze(request);
-  const after = await snapshot(root);
-  if (after.hash !== before.hash) throw new Error(`STALE_SNAPSHOT: project changed during analysis: ${snapshotChanges(before, after)}; retry after writers settle (including dev-server generators)`);
+  const after = result.readSet || !result.changes.length ? before : await snapshot(root);
+  if (result.changes.length && result.readSet) await assertReadSetFresh(result.readSet, compilerBase);
+  if (result.changes.length && !result.readSet && after.hash !== before.hash) throw new Error(`STALE_SNAPSHOT: project changed during analysis: ${snapshotChanges(before, after)}; retry after writers settle (including dev-server generators)`);
   const seen = new Set<string>();
   const changes: Plan["changes"] = [];
   for (const change of result.changes) {
@@ -214,9 +223,15 @@ export async function createPlan(
   const conflict = caseConflict(root, before.files, changes);
   if (conflict) throw new Error(`CASE_CONFLICT: ${conflict} differs only by case from another path`);
   const added = newDiagnostics(result.diagnosticsBefore, result.diagnosticsAfter);
+  // Schema 3 keeps only edit preconditions in snapshot; compiler reads have
+  // their own observations. Unrelated root content cannot affect the plan ID.
+  const files = Object.fromEntries(changes.filter(change => change.before !== null)
+    .map(change => [relative(root, change.path), before.files[relative(root, change.path)]!]));
+  const plannedSnapshot = result.readSet ? { files, hash: sha256(JSON.stringify(files)) } : before;
   const body: Omit<Plan, "id"> = {
-    schemaVersion: changes.some(c => c.before === null || c.after === null) ? 2 : 1, request, backend: result.backend, backendVersion: result.version,
-    snapshot: before, changes, fileModes,
+    ...(result.readSet ? { readSet: JSON.parse(JSON.stringify(result.readSet)) as ReadSetEntry[] } : {}),
+    schemaVersion: result.readSet ? 3 : changes.some(c => c.before === null || c.after === null) ? 2 : 1, request, backend: result.backend, backendVersion: result.version,
+    snapshot: plannedSnapshot, changes, fileModes,
     ...(result.checker ? { checker: { ...result.checker } } : {}),
     validation: { status: added.length ? "failed" : "passed", newDiagnostics: added },
     diagnosticsBefore: result.diagnosticsBefore,
@@ -237,10 +252,29 @@ export async function loadPlan(path: string): Promise<Plan> {
   return plan;
 }
 
-export async function assertFresh(plan: Plan): Promise<void> {
+export async function assertFresh(plan: Plan, compilerBase?: string): Promise<void> {
   if (plan.id !== planId(plan)) throw new Error("INVALID_PLAN: plan integrity check failed");
   if ((await realpath(plan.request.root)) !== plan.request.root) throw new Error("INVALID_PLAN: noncanonical root");
-  const current = await snapshot(plan.request.root);
+  if (!plan.changes.length) return;
+  if (plan.readSet) {
+    for (const change of plan.changes) {
+      await assertRegularPath(plan.request.root, change.path, change.before === null).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`STALE_SNAPSHOT: removed ${change.path}`);
+        throw error;
+      });
+      const text = await readFile(change.path).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      });
+      if (text === null ? change.before !== null : change.before === null || sha256(text) !== sha256(change.before)) throw new Error(`STALE_SNAPSHOT: changed ${change.path}`);
+    }
+  }
+  if (plan.readSet) await assertReadSetFresh(plan.readSet, compilerBase);
+  if (plan.readSet && plan.changes.some(change => change.before === null)) {
+    const conflict = caseConflict(plan.request.root, (await snapshot(plan.request.root)).files, plan.changes);
+    if (conflict) throw new Error(`STALE_SNAPSHOT: case-insensitive path collision: ${conflict}`);
+  }
+  const current = plan.readSet ? plan.snapshot : await snapshot(plan.request.root);
   if (current.hash !== plan.snapshot.hash) throw new Error(`STALE_SNAPSHOT: project changed: ${snapshotChanges(plan.snapshot, current)}; create a new plan after writers settle`);
   for (const [path, modes] of Object.entries(plan.fileModes ?? {})) {
     if (modes.before !== null && ((await lstat(path)).mode & 0o777) !== modes.before) {

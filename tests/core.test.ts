@@ -43,7 +43,7 @@ describe("deterministic plan and apply core", () => {
 
   test("detects a stale snapshot when an untouched project config changes", async () => {
     const p = await fixture({ "src.ts": "const oldName = 1;\n", "tsconfig.json": "{\"compilerOptions\":{}}\n" });
-    const plan = await createPlan(request(p), async () => result([]));
+    const plan = await createPlan(request(p), async () => result([{ path: p.file, before: "const oldName = 1;\n", after: "const newName = 1;\n" }]));
     await writeFile(p.project, "{\"compilerOptions\":{\"strict\":true}}\n");
 
     await expect(assertFresh(plan)).rejects.toThrow(/STALE_SNAPSHOT:.*changed tsconfig.json/);
@@ -53,7 +53,7 @@ describe("deterministic plan and apply core", () => {
     const p = await fixture({ "src.ts": "one\n", "next-env.d.ts": "// before\n", "tsconfig.json": "{}\n" });
     await expect(createPlan(request(p), async () => {
       await writeFile(join(p.root, "next-env.d.ts"), "// dev server output\n");
-      return result([]);
+      return result([{ path: p.file, before: "one\n", after: "two\n" }]);
     })).rejects.toThrow(/STALE_SNAPSHOT:.*changed next-env\.d\.ts \[generated candidate\].*dev-server generators/);
   });
 
@@ -109,6 +109,15 @@ describe("deterministic plan and apply core", () => {
     expect(await readFile(p.file, "utf8")).toBe("const 😀 = 2;\r\n");
     expect(await readFile(join(p.root, "other.ts"), "utf8")).toBe("export const newName = 1;\r\n");
     await expect(applyPlan(plan)).rejects.toThrow("STALE_SNAPSHOT");
+  });
+
+  test("empty plans apply despite unrelated edits, additions and deletions", async () => {
+    const p = await fixture({ "src.ts": "one\n", "other.ts": "old\n", "tsconfig.json": "{}\n" });
+    const plan = await createPlan(request(p), async () => result([]));
+    await writeFile(join(p.root, "other.ts"), "changed\n");
+    await writeFile(join(p.root, "new.ts"), "new\n");
+    await rm(p.file);
+    expect(await applyPlan(plan)).toEqual({ status: "applied", files: [], journal: null });
   });
 
   test("rejects stale apply without writing any source", async () => {

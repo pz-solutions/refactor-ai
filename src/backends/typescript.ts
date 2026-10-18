@@ -106,7 +106,7 @@ function loadProject(request: RefactorRequest): ProjectState {
   if (warm && warm.inputs.unchanged()) return warm;
   if (warm) { warm.service.dispose(); warmProjects.delete(cacheKey); }
 
-  const inputs = new CompilerInputs(process.env.REFACTOR_AI_CACHE === "on" || warmMode);
+  const inputs = new CompilerInputs(true);
   const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, {
     ...inputs.sys,
     onUnRecoverableConfigFileDiagnostic(diagnostic) {
@@ -168,7 +168,7 @@ function loadProject(request: RefactorRequest): ProjectState {
 }
 
 function sourceText(state: ProjectState, path: string): string | undefined {
-  return state.overlays.get(path) ?? ts.sys.readFile(path);
+  return state.overlays.get(path) ?? state.inputs.sys.readFile(path);
 }
 
 function setOverlay(state: ProjectState, path: string, text: string): void {
@@ -233,7 +233,7 @@ function diagnostics(state: ProjectState, program: ts.Program, only?: Set<string
 
 /** User files that import each user file (directly), from the unmodified program. */
 function importersByFile(state: ProjectState, program = state.service.getProgram()!): Map<string, Set<string>> {
-  const host = ts.sys;
+  const host = state.inputs.sys;
   const cache = ts.createModuleResolutionCache(dirname(state.configPath), (name) => host.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
   const importers = new Map<string, Set<string>>();
   const link = (target: string, importer: string) => {
@@ -488,7 +488,7 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
 
     let operationNotes: string[] = [];
     switch (request.operation) {
-      case "retarget-import": operationNotes = retargetImports({ service: state.service, options: state.options, root: state.root,
+      case "retarget-import": operationNotes = retargetImports({ sys: state.inputs.sys, service: state.service, options: state.options, root: state.root,
         setText: (path, text) => setOverlay(state, path, text),
         rename: (path, position, newName) => rename(state, path, { ...request, operation: "rename", file: path, position, newName }),
       }, request); break;
@@ -500,7 +500,7 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
       default: fail("UNSUPPORTED_OPERATION", String(request.operation));
     }
 
-    for (const path of state.overlays.keys()) if (!originals.has(path)) originals.set(path, ts.sys.readFile(path));
+    for (const path of state.overlays.keys()) if (!originals.has(path)) originals.set(path, state.inputs.sys.readFile(path));
     // Validate the changed files and everything that (transitively) imports them; unrelated files cannot change.
     let afterProgram: ts.Program | undefined = state.service.getProgram()!;
     for (const [target, callers] of importersByFile(state, afterProgram)) {
@@ -555,8 +555,12 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
     if ([".js", ".jsx", ".mjs", ".cjs"].includes(extension) && ["rename", "extract-function", "extract-variable"].includes(request.operation)) {
       notes.push("JavaScript analysis is semantic only for symbols TypeScript can resolve; dynamic properties, reflection, and string-based references are not changed.");
     }
-    if (nativeVfs) timed("inputs.check", () => nativeVfs.assertStableMetadata());
+    if (changedFiles(state, originals).length) {
+      if (!state.inputs.unchanged()) fail("STALE_PROJECT_INPUTS", "a compiler read changed during analysis; retry after writers/generators settle");
+      if (nativeVfs) timed("inputs.check", () => nativeVfs.assertStableMetadata());
+    }
     return {
+      readSet: [...state.inputs.snapshot(), ...(nativeVfs?.inputs.snapshot() ?? [])],
       backend: "typescript",
       checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5", version: ts.version },
       version: ts.version,

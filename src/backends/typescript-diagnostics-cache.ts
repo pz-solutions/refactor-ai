@@ -1,19 +1,16 @@
+import { inputMethods as methods, inputHash as hash, type ReadSetEntry as Input } from "../core/read-set";
 import ts from "typescript";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Diagnostic } from "../types";
 
-const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value) ?? "undefined").digest("hex");
-type Method = "readFile" | "fileExists" | "directoryExists" | "getDirectories" | "readDirectory" | "realpath";
-const methods = ["readFile", "fileExists", "directoryExists", "getDirectories", "readDirectory", "realpath"] as const;
-interface Input { method: Method; args: any[]; digest: string; }
 interface Entry { version: 1; key: string; inputs: Input[]; diagnostics: Diagnostic[]; checksum: string; }
 
-/** Observe compiler filesystem inputs, including negative resolution probes and directory membership. */
+/** Immutable disk view per analysis; replay observed inputs before returning/applying a plan. */
 export class CompilerInputs {
   private readonly inputs = new Map<string, Input>();
-  private consistent = true;
+  private readonly values = new Map<string, unknown>();
   readonly sys: ts.System;
 
   constructor(readonly enabled = process.env.REFACTOR_AI_CACHE === "on") {
@@ -23,25 +20,27 @@ export class CompilerInputs {
       const original = ts.sys[method];
       if (!original) continue;
       (this.sys as any)[method] = (...args: any[]) => {
+        const key = JSON.stringify([method, args]);
+        if (this.values.has(key)) return this.values.get(key);
         const value = (original as Function)(...args);
-        const key = JSON.stringify([method, args]), digest = hash(value);
-        if (this.inputs.has(key) && this.inputs.get(key)!.digest !== digest) this.consistent = false;
-        this.inputs.set(key, { method, args, digest });
+        this.inputs.set(key, { method, args: structuredClone(args), digest: hash(value) });
+        this.values.set(key, value);
         return value;
       };
     }
   }
 
-  snapshot(): Input[] { return [...this.inputs.values()]; }
+  snapshot(): Input[] { return [...this.inputs.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, input]) => input); }
+  changed(): Input | undefined { return this.snapshot().find(input => !current(input)); }
   unchanged(): boolean {
-    try { return this.consistent && this.snapshot().every(current); } catch { return false; }
+    try { return this.snapshot().every(current); } catch { return false; }
   }
 }
 
 function current(input: Input): boolean {
   if (!input || !methods.includes(input.method) || !Array.isArray(input.args) || typeof input.digest !== "string") return false;
   const method = ts.sys[input.method];
-  return !!method && hash((method as Function)(...input.args)) === input.digest;
+  return !!method && hash((method as Function)(...input.args.map(value => value === null ? undefined : value))) === input.digest;
 }
 
 /** Avoid following a cache directory or entry symlink, including an overridden location. */

@@ -52,8 +52,8 @@ test("API rejects modified and stale plans and reads unchanged CLI-compatible JS
   expect(() => api.preview(modified)).toThrow("INVALID_PLAN");
   await expect(api.apply(modified)).rejects.toThrow("INVALID_PLAN");
   await writeFile(join(root, "new.ts"), "export const extra = 1;\n");
-  await expect(api.validate(plan)).rejects.toThrow("STALE_SNAPSHOT");
-  await expect(api.apply(plan)).rejects.toThrow("STALE_SNAPSHOT");
+  await expect(api.validate(plan)).rejects.toThrow("STALE_PROJECT_INPUTS");
+  await expect(api.apply(plan)).rejects.toThrow("STALE_PROJECT_INPUTS");
   expect(await readFile(file, "utf8")).toContain("function add");
 });
 
