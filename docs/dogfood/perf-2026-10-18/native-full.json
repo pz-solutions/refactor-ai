@@ -1,0 +1,83 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "project": "packages/app-features/tsconfig.json",
+  "runs": 2,
+  "results": [
+    {
+      "checker": "ts-5.9.3",
+      "samples": [
+        {
+          "ms": 17349,
+          "status": 0,
+          "diagnostics": [],
+          "maxRssKb": 869472,
+          "log": "/tmp/rai-checkers-py2fH7/ts-5.9.3-0.txt"
+        },
+        {
+          "ms": 20437,
+          "status": 0,
+          "diagnostics": [],
+          "maxRssKb": 858504,
+          "log": "/tmp/rai-checkers-py2fH7/ts-5.9.3-1.txt"
+        }
+      ]
+    },
+    {
+      "checker": "tsgo",
+      "samples": [
+        {
+          "ms": 3285,
+          "status": 0,
+          "diagnostics": [],
+          "maxRssKb": 1003288,
+          "log": "/tmp/rai-checkers-py2fH7/tsgo-0.txt"
+        },
+        {
+          "ms": 3644,
+          "status": 0,
+          "diagnostics": [],
+          "maxRssKb": 1009364,
+          "log": "/tmp/rai-checkers-py2fH7/tsgo-1.txt"
+        }
+      ]
+    },
+    {
+      "checker": "peer",
+      "samples": [
+        {
+          "ms": 3157,
+          "status": 0,
+          "diagnostics": [],
+          "maxRssKb": 901876,
+          "log": "/tmp/rai-checkers-py2fH7/peer-0.txt"
+        },
+        {
+          "ms": 2895,
+          "status": 0,
+          "diagnostics": [],
+          "maxRssKb": 919704,
+          "log": "/tmp/rai-checkers-py2fH7/peer-1.txt"
+        }
+      ]
+    },
+    {
+      "checker": "rust",
+      "samples": [
+        {
+          "ms": 1370,
+          "status": 0,
+          "diagnostics": [],
+          "maxRssKb": 599196,
+          "log": "/tmp/rai-checkers-py2fH7/rust-0.txt"
+        },
+        {
+          "ms": 1415,
+          "status": 0,
+          "diagnostics": [],
+          "maxRssKb": 597020,
+          "log": "/tmp/rai-checkers-py2fH7/rust-1.txt"
+        }
+      ]
+    }
+  ]
+}

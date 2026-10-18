@@ -53,22 +53,27 @@ async function canonicalDirectory(path: string): Promise<string> {
 
 export interface CliContext extends RefactorContext {
   invocation?: string;
+  write?: (text: string) => void;
+  setExitCode?: (code: number) => void;
 }
 
 export async function runCli(args: string[], context: CliContext): Promise<void> {
-  if (helpRequested(args)) { process.stdout.write(renderHelp(args, context.invocation, undefined, context.language)); return; }
+  const write = context.write ?? ((text: string) => { process.stdout.write(text); });
+  const log = (value: unknown) => context.write ? write(JSON.stringify(value, null, 2) + "\n") : console.log(JSON.stringify(value, null, 2));
+  const setExitCode = context.setExitCode ?? ((code: number) => { process.exitCode = code; });
+  if (helpRequested(args)) { write(renderHelp(args, context.invocation, undefined, context.language)); return; }
   const { command, operation, flags } = parse([...args]);
   const api = createRefactorApi(context);
   if (["preview", "validate", "apply"].includes(command)) {
     const plan = await api.loadPlan(required(flags, "plan"));
-    if (command === "preview") { process.stdout.write(api.preview(plan) || "No changes.\n"); return; }
-    if (command === "apply") { console.log(JSON.stringify(await api.apply(plan), null, 2)); return; }
-    console.log(JSON.stringify(await api.validate(plan), null, 2));
-    if (plan.validation.status !== "passed") process.exitCode = 1;
+    if (command === "preview") { write(api.preview(plan) || "No changes.\n"); return; }
+    if (command === "apply") { log(await api.apply(plan)); return; }
+    log(await api.validate(plan));
+    if (plan.validation.status !== "passed") setExitCode(1);
     return;
   }
   if (command === "capabilities") {
-    console.log(JSON.stringify(await api.capabilities(required(flags, "project")), null, 2));
+    log(await api.capabilities(required(flags, "project")));
     return;
   }
   if (command !== "plan") throw new Error(`INVALID_ARGUMENT: unknown command ${command}`);
@@ -107,9 +112,9 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
   });
   if (outputStat?.isSymbolicLink()) throw new Error("SYMLINK_UNSUPPORTED: plan output file");
   await writeFile(output, JSON.stringify(plan, null, 2) + "\n");
-  console.log(JSON.stringify({
+  log({
     status: "planned", plan: output, id: plan.id, backend: plan.backend,
     files: plan.changes.map(c => c.path), validation: plan.validation, notes: plan.notes
-  }, null, 2));
-  if (plan.validation.status !== "passed") process.exitCode = 1;
+  });
+  if (plan.validation.status !== "passed") setExitCode(1);
 }

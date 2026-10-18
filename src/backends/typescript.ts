@@ -1,4 +1,6 @@
 import ts from "typescript";
+import { timed } from "./typescript-timing";
+import { baselineDiagnostics, CompilerInputs } from "./typescript-diagnostics-cache";
 import { statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
 import type { BackendResult, Capability, Diagnostic, FileChange, RefactorRequest } from "../types";
@@ -34,6 +36,7 @@ const formatOptions: ts.FormatCodeSettings = {
 };
 
 interface ProjectState {
+  inputs: CompilerInputs;
   configPath: string;
   root: string;
   fileNames: string[];
@@ -42,6 +45,18 @@ interface ProjectState {
   versions: Map<string, number>;
   service: ts.LanguageService;
   bumpProjectVersion(): void;
+}
+
+let warmMode = false;
+const warmProjects = new Map<string, ProjectState>();
+
+/** Explicit server lifetime; ordinary CLI/API calls still release their programs. */
+export function setWarmMode(enabled: boolean): void {
+  warmMode = enabled;
+  if (!enabled) {
+    for (const state of warmProjects.values()) state.service.dispose();
+    warmProjects.clear();
+  }
 }
 
 function fail(code: string, reason: string): never {
@@ -84,9 +99,14 @@ function loadProject(request: RefactorRequest): ProjectState {
   const project = assertAbsolute("project", request.project);
   const configPath = configPathFor(project);
   if (!isInside(root, configPath)) fail("OUTSIDE_ROOT", `project config is outside ${root}`);
+  const cacheKey = `${root}\0${configPath}`;
+  const warm = warmProjects.get(cacheKey);
+  if (warm && warm.inputs.unchanged()) return warm;
+  if (warm) { warm.service.dispose(); warmProjects.delete(cacheKey); }
 
+  const inputs = new CompilerInputs(process.env.REFACTOR_AI_CACHE === "on" || warmMode);
   const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, {
-    ...ts.sys,
+    ...inputs.sys,
     onUnRecoverableConfigFileDiagnostic(diagnostic) {
       fail("INVALID_CONFIG", ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
     },
@@ -108,23 +128,24 @@ function loadProject(request: RefactorRequest): ProjectState {
     getScriptVersion: (fileName) => String(versions.get(canonical(fileName)) ?? 0),
     getScriptSnapshot(fileName) {
       const path = canonical(fileName);
-      const text = overlays.get(path) ?? ts.sys.readFile(path);
+      const text = overlays.get(path) ?? inputs.sys.readFile(path);
       return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
     },
     getCurrentDirectory: () => dirname(configPath),
     getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
-    fileExists: ts.sys.fileExists,
-    readFile: ts.sys.readFile,
-    readDirectory: ts.sys.readDirectory,
-    directoryExists: ts.sys.directoryExists,
-    getDirectories: ts.sys.getDirectories,
-    realpath: ts.sys.realpath,
+    fileExists: inputs.sys.fileExists,
+    readFile: inputs.sys.readFile,
+    readDirectory: inputs.sys.readDirectory,
+    directoryExists: inputs.sys.directoryExists,
+    getDirectories: inputs.sys.getDirectories,
+    realpath: inputs.sys.realpath,
     useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
     getNewLine: () => ts.sys.newLine,
     getProjectVersion: () => String(projectVersion),
   };
   const service = ts.createLanguageService(host, ts.createDocumentRegistry());
-  return {
+  const state: ProjectState = {
+    inputs,
     configPath,
     root,
     fileNames,
@@ -134,6 +155,14 @@ function loadProject(request: RefactorRequest): ProjectState {
     service,
     bumpProjectVersion() { projectVersion += 1; },
   };
+  if (warmMode) {
+    if (warmProjects.size >= 4) {
+      const [key, oldest] = warmProjects.entries().next().value!;
+      oldest.service.dispose(); warmProjects.delete(key);
+    }
+    warmProjects.set(cacheKey, state);
+  }
+  return state;
 }
 
 function sourceText(state: ProjectState, path: string): string | undefined {
@@ -180,26 +209,28 @@ function diagnosticRecord(diagnostic: ts.Diagnostic, fallback: string): Diagnost
   };
 }
 
-function diagnostics(state: ProjectState, only?: Set<string>): Diagnostic[] {
+function diagnostics(state: ProjectState, program: ts.Program, only?: Set<string>): Diagnostic[] {
   const records: Diagnostic[] = [];
   const add = (diagnostic: ts.Diagnostic) => {
     if (diagnostic.category !== ts.DiagnosticCategory.Error) return;
     records.push(diagnosticRecord(diagnostic, state.configPath));
   };
-  for (const item of state.service.getCompilerOptionsDiagnostics()) add(item);
-  const programFiles = state.service.getProgram()?.getSourceFiles()
+  for (const item of program.getOptionsDiagnostics()) add(item);
+  for (const item of program.getGlobalDiagnostics()) add(item);
+  const programFiles = program.getSourceFiles()
     .map((source) => canonical(source.fileName))
     .filter((path) => isInside(state.root, path) && !path.includes("/node_modules/")) ?? state.fileNames;
   for (const file of [...new Set(programFiles)].filter((path) => !only || only.has(path)).sort()) {
-    for (const item of state.service.getSyntacticDiagnostics(file)) add(item);
-    for (const item of state.service.getSemanticDiagnostics(file)) add(item);
+    const source = program.getSourceFile(file)!;
+    for (const item of program.getSyntacticDiagnostics(source)) add(item);
+    for (const item of program.getSemanticDiagnostics(source)) add(item);
+    if (state.options.declaration || state.options.composite) for (const item of program.getDeclarationDiagnostics(source)) add(item);
   }
   return records.sort((a, b) => a.file.localeCompare(b.file) || a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
 }
 
 /** User files that import each user file (directly), from the unmodified program. */
-function importersByFile(state: ProjectState): Map<string, Set<string>> {
-  const program = state.service.getProgram()!;
+function importersByFile(state: ProjectState, program = state.service.getProgram()!): Map<string, Set<string>> {
   const host = ts.sys;
   const cache = ts.createModuleResolutionCache(dirname(state.configPath), (name) => host.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
   const importers = new Map<string, Set<string>>();
@@ -226,8 +257,9 @@ function importersByFile(state: ProjectState): Map<string, Set<string>> {
 function hasGlobalEffect(text: string, path: string): boolean {
   const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false);
   if (!ts.isExternalModule(source)) return true;
-  return source.statements.some((statement) => ts.isModuleDeclaration(statement)
-    && (ts.isStringLiteral(statement.name) || (statement.flags & ts.NodeFlags.GlobalAugmentation) !== 0));
+  const visit = (node: ts.Node): boolean => (ts.isModuleDeclaration(node)
+    && (ts.isStringLiteral(node.name) || (node.flags & ts.NodeFlags.GlobalAugmentation) !== 0)) || !!ts.forEachChild(node, visit);
+  return visit(source);
 }
 
 /**
@@ -249,21 +281,6 @@ function affectedFiles(state: ProjectState, importers: Map<string, Set<string>>,
     pending.push(...(importers.get(path) ?? []));
   }
   return affected;
-}
-
-/** Diagnostics of `only` (or everything) for the unmodified sources, restoring the overlays afterwards. */
-function originalDiagnostics(state: ProjectState, only: Set<string> | undefined): Diagnostic[] {
-  const saved = new Map(state.overlays);
-  for (const path of saved.keys()) {
-    state.overlays.delete(path);
-    state.versions.set(path, (state.versions.get(path) ?? 0) + 1);
-  }
-  state.bumpProjectVersion();
-  try {
-    return diagnostics(state, only);
-  } finally {
-    for (const [path, text] of saved) setOverlay(state, path, text);
-  }
 }
 
 function validatePosition(text: string, position: number | undefined, label = "position"): number {
@@ -450,7 +467,7 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
     if (request.operation !== "retarget-import" && ![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].includes(extension)) {
       fail("UNSUPPORTED_FILE", extension || "file has no extension");
     }
-    const program = state.service.getProgram();
+    let program = state.service.getProgram();
     if (!program || (request.operation !== "retarget-import" && !program.getSourceFile(file))) fail("FILE_NOT_IN_PROJECT", file);
     const outsideUserSources = program.getSourceFiles()
       .filter((source) => !isInside(state.root, canonical(source.fileName)) && !source.isDeclarationFile)
@@ -480,9 +497,25 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
 
     for (const path of state.overlays.keys()) if (!originals.has(path)) originals.set(path, ts.sys.readFile(path));
     // Validate the changed files and everything that (transitively) imports them; unrelated files cannot change.
-    const affected = affectedFiles(state, importers, originals);
-    const diagnosticsBefore = originalDiagnostics(state, affected);
-    const diagnosticsAfter = diagnostics(state, affected);
+    let afterProgram: ts.Program | undefined = state.service.getProgram()!;
+    for (const [target, callers] of importersByFile(state, afterProgram)) {
+      importers.set(target, new Set([...(importers.get(target) ?? []), ...callers]));
+    }
+    let affected = affectedFiles(state, importers, originals);
+    const beforePaths = new Set(program.getSourceFiles().map(source => canonical(source.fileName)));
+    const afterPaths = new Set(afterProgram.getSourceFiles().map(source => canonical(source.fileName)));
+    // A newly reached ambient dependency can affect files with no import edge.
+    for (const source of [...program.getSourceFiles(), ...afterProgram.getSourceFiles()]) {
+      const path = canonical(source.fileName);
+      if (beforePaths.has(path) !== afterPaths.has(path) && !/\.json$/i.test(path) && hasGlobalEffect(source.text, path)) affected = undefined;
+    }
+    const diagnosticsAfter = timed("diagnostics.after", () => diagnostics(state, afterProgram!, affected));
+    if (diagnosticsAfter.length) { state.service.cleanupSemanticCache(); afterProgram = undefined; }
+    // A clean planned set cannot introduce an error. Only errors require the
+    // original multiset; avoid its expensive generic inference on clean plans.
+    const diagnosticsBefore = diagnosticsAfter.length
+      ? timed("diagnostics.before", () => baselineDiagnostics(state.root, state.configPath, program!, affected, state.inputs, () => diagnostics(state, program!, affected))) : [];
+    program = undefined;
     const beforeCounts = new Map<string, number>();
     for (const item of diagnosticsBefore) {
       const key = `${item.file}\0${item.code}\0${item.message}`;
@@ -498,6 +531,7 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
     if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.message}`).join("; "));
 
     const notes: string[] = operationNotes;
+    if (!diagnosticsAfter.length) notes.push("Skipped baseline diagnostics: the planned affected set has no errors.");
     if (affected) notes.push(`Validated ${affected.size} affected file(s): the changed files and their transitive importers.`);
     if (request.operation === "imports") {
       notes.push(request.mode === "sort"
@@ -516,6 +550,10 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
       notes,
     };
   } finally {
-    state.service.dispose();
+    if (warmMode) {
+      for (const path of state.overlays.keys()) state.versions.set(path, (state.versions.get(path) ?? 0) + 1);
+      state.overlays.clear();
+      state.bumpProjectVersion();
+    } else state.service.dispose();
   }
 }

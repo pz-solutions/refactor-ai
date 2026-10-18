@@ -397,7 +397,7 @@ describe("TypeScript cross-project moves", () => {
   });
 
   test("rejects referenced projects without a dedicated declaration output directory", async () => {
-    const w = await monorepo({ "packages/core/tsconfig.json": JSON.stringify({ compilerOptions: { composite: true }, include: ["src"] }) });
+    const w = await monorepo({ "packages/core/tsconfig.json": core({ outDir: undefined }) });
     await expect(analyze({
       project: w.path("packages/app/tsconfig.json"), root: w.root, file: w.path("packages/app/src/models.ts"), operation: "move-type",
       typeName: "Price", target: w.path("packages/core/src/Price.ts"), targetProject: w.path("packages/core/tsconfig.json"),
@@ -490,7 +490,7 @@ describe("TypeScript projects connected only by imports", () => {
     });
   }
 
-  for (const target of [{ jsx: "preserve" }, { module: "esnext" }, { moduleResolution: "bundler", module: "esnext" }, { allowImportingTsExtensions: true, noEmit: true }]) {
+  for (const target of [{ jsx: "preserve" }, { module: "esnext" }, { moduleResolution: "bundler", module: "esnext" }]) {
     test(`move-type rejects incompatible syntax or extension rules ${JSON.stringify(target)}`, async () => {
       const w = await sourceAndTarget({}, target);
       await expect(analyze({
@@ -499,6 +499,15 @@ describe("TypeScript projects connected only by imports", () => {
       })).rejects.toThrow(/^PROJECT_OPTIONS_INCOMPATIBLE:/);
     });
   }
+
+  test("move-type allows different allowImportingTsExtensions when no .ts import is introduced", async () => {
+    const w = await sourceAndTarget({}, { allowImportingTsExtensions: true, noEmit: true });
+    const result = await analyze({
+      project: w.path("Source/tsconfig.json"), root: w.root, file: w.path("Source/types.ts"), operation: "move-type",
+      typeName: "Widget", target: w.path("Target/Widget.ts"), targetProject: w.path("Target/tsconfig.json"),
+    });
+    expect(result.diagnosticsAfter).toEqual([]);
+  });
 
   test("move-type rejects aliases that resolve to a different compatible declaration in the target", async () => {
     const paths = { paths: { "@/*": ["./*"] } };

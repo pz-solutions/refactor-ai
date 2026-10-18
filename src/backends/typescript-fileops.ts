@@ -1,4 +1,6 @@
 import ts from "typescript";
+import { timed } from "./typescript-timing";
+import { precheckMove } from "./typescript-prechecks";
 import { inlineReexports } from "./typescript-inline-reexports";
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -8,6 +10,7 @@ import { Workspace, applyTextChanges, baseFormatOptions, configPathFor, moduleSp
 import { packageSelfImport, packageSpecifier, relativeStyle } from "./typescript-package-specifiers";
 import { moveSuppressions } from "./typescript-suppressions";
 import { portablePath } from "./typescript-paths";
+import { describeInputPath } from "../core/snapshot";
 
 export const fileCapabilities: Capability[] = [
   { operation: "move-file", description: "Move whole TS/JS modules or directories within or between workspace packages, updating imports, exports and project file lists." },
@@ -206,9 +209,9 @@ function assertMembership(ws: Workspace, before: Map<string, string[]>, renames:
     const missing = expected.filter((key) => !actual.includes(key));
     if (added.length || missing.length) {
       fail("PROJECT_MEMBERSHIP_CHANGED", `${config} would ${[
-        added.length ? `gain ${added.join(", ")}` : "",
-        missing.length ? `lose ${missing.join(", ")}` : "",
-      ].filter(Boolean).join(" and ")}; adjust include/files patterns or choose another target`);
+        added.length ? `gain ${added.map(describeInputPath).join(", ")}` : "",
+        missing.length ? `lose ${missing.map(describeInputPath).join(", ")}` : "",
+      ].filter(Boolean).join(" and ")}; adjust include/files patterns or choose another target; if a dev server regenerated these inputs, retry after its generators settle`);
     }
   }
 }
@@ -905,7 +908,8 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     : sourceConfig;
   const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
   if (request.operation === "move-type" && request.target && isAbsolute(request.target) && existsSync(request.target)) affected.push(resolve(request.target));
-  const ws = new Workspace(root, sourceConfig, targetConfig, affected);
+  if (movingFiles || sourceConfig !== targetConfig) precheckMove(root, sourceConfig, targetConfig, movingFiles ?? []);
+  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected));
   try {
     if (!movingFiles && !ws.vfs.fileExists(file)) fail("FILE_NOT_FOUND", file);
     const selected = movingFiles ? movingFiles.map(([from]) => from).filter(path => /\.[cm]?[jt]sx?$/.test(path)) : [file];
@@ -920,11 +924,11 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     const isJs = jsExtensions.includes(extension);
     const context: Context = { ws, root, file, sourceFile, isJs, notes: [] };
 
-    const validate = ws.prepareValidation();
+    const validate = timed("workspace.prepare", () => ws.prepareValidation(true));
     let renamed: [string, string] | undefined;
     if (request.operation === "rename-file") renamed = renameFile(context, request).renamed;
     else if (request.operation === "move-type") moveType(context, request);
-    else if (movingFiles) moveFile(context, request, movingFiles);
+    else if (movingFiles) timed("workspace.move", () => moveFile(context, request, movingFiles));
     else if (request.operation === "inline-reexports") {
       const before = membership(ws);
       const deleted = inlineReexports(ws, file, sourceFile, context.notes, request.keep);
@@ -934,12 +938,18 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
 
     const written = ws.vfs.changes().filter((change) => change.after !== null && !/\.json$/i.test(change.path)).map((change) => change.path);
     if (written.length) ws.assertNoUnhandledProjects(written, false);
+    if (request.operation !== "move-type" && ![...ws.participants.values()].some(item => item.references.length)) {
+      context.verify?.();
+      context.verify = undefined;
+      ws.service.cleanupSemanticCache();
+    }
     const layoutsBefore = new Map(ws.layouts);
-    const { before: diagnosticsBefore, after: diagnosticsAfter, affected: validatedFiles, affectedProjects: validatedProjects = ws.participants.size } = validate();
+    const { before: diagnosticsBefore, after: diagnosticsAfter, affected: validatedFiles, affectedProjects: validatedProjects = ws.participants.size } = timed("workspace.validate", validate);
     const renameMap = new Map((movingFiles ?? (renamed ? [renamed] : [])).map(([from, to]) => [ws.vfs.key(from), to]));
     const comparable = movingFiles ? diagnosticsBefore.map(item => ({ ...item, file: renameMap.get(ws.vfs.key(item.file)) ?? item.file })) : renamed
       ? diagnosticsBefore.map((item) => ws.vfs.samePath(item.file, renamed[0]) ? { ...item, file: renamed[1] } : item)
       : diagnosticsBefore;
+    if (!diagnosticsAfter.length && ![...ws.participants.values()].some(item => item.references.length)) context.notes.push("Skipped baseline diagnostics: the planned affected set has no errors.");
     const introduced = newDiagnostics(comparable, diagnosticsAfter);
     if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ")
       + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : ""));

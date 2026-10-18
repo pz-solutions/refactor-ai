@@ -15,6 +15,20 @@ export interface Snapshot {
   hash: string;
 }
 
+/** Labels are hints, never grounds for excluding compiler inputs or edits. */
+export function describeInputPath(path: string): string {
+  const portable = path.split(sep).join("/");
+  return /(^|\/)(next-env\.d\.ts|[^/]+\.gen\.[^/]+|_generated|\.next)(\/|$)/.test(portable)
+    ? `${path} [generated candidate]` : path;
+}
+
+export function snapshotChanges(before: Snapshot, after: Snapshot): string {
+  return [...new Set([...Object.keys(before.files), ...Object.keys(after.files)])].sort()
+    .filter(path => before.files[path] !== after.files[path])
+    .map(path => `${before.files[path] === undefined ? "added" : after.files[path] === undefined ? "removed" : "changed"} ${describeInputPath(path)}`)
+    .join(", ");
+}
+
 export function inside(root: string, file: string): string {
   const result = resolve(file);
   const rel = relative(root, result);

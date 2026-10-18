@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { installationHint } from "./typescript-prechecks";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { RefactorRequest } from "../types";
@@ -231,12 +232,19 @@ export function retargetImports(context: Context, request: RefactorRequest): str
       }
     }
   }
-  if (unresolved.length) fail("TARGET_UNRESOLVED", [...new Set(unresolved)].sort().join(", "));
+  if (unresolved.length) fail("TARGET_UNRESOLVED", [...new Set(unresolved)].sort().join(", ") + installationHint(context.root, affected[0]!.fileName));
   const mocks = affectedMockFiles(context, affected, request.from!);
-  for (const source of affected) {
-    const renamed = renameBindings(context, source.fileName, request);
-    const current = context.service.getProgram()!.getSourceFile(source.fileName)!;
-    context.setText(source.fileName, transformFile(current, request, renamed));
+  if (!request.map || Object.keys(request.map).length === 0) {
+    // No binding can change another selected file. Prepare every text from the
+    // original immutable sources before invalidating the service once per batch.
+    const edits = affected.map(source => [source.fileName, transformFile(source, request, new Set())] as const);
+    for (const [file, text] of edits) context.setText(file, text);
+  } else {
+    for (const source of affected) {
+      const renamed = renameBindings(context, source.fileName, request);
+      const current = context.service.getProgram()!.getSourceFile(source.fileName)!;
+      context.setText(source.fileName, transformFile(current, request, renamed));
+    }
   }
   const notes = affected.length ? ["Retargeted imports/re-exports; compiler validation does not prove runtime API compatibility."]
     : ["No matching imports or re-exports; no changes."];

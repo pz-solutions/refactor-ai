@@ -46,7 +46,15 @@ describe("deterministic plan and apply core", () => {
     const plan = await createPlan(request(p), async () => result([]));
     await writeFile(p.project, "{\"compilerOptions\":{\"strict\":true}}\n");
 
-    await expect(assertFresh(plan)).rejects.toThrow("STALE_SNAPSHOT");
+    await expect(assertFresh(plan)).rejects.toThrow(/STALE_SNAPSHOT:.*changed tsconfig.json/);
+  });
+
+  test("names generated inputs changed during analysis without ignoring them", async () => {
+    const p = await fixture({ "src.ts": "one\n", "next-env.d.ts": "// before\n", "tsconfig.json": "{}\n" });
+    await expect(createPlan(request(p), async () => {
+      await writeFile(join(p.root, "next-env.d.ts"), "// dev server output\n");
+      return result([]);
+    })).rejects.toThrow(/STALE_SNAPSHOT:.*changed next-env\.d\.ts \[generated candidate\].*dev-server generators/);
   });
 
   test("rejects duplicate and outside-root changes while planning", async () => {

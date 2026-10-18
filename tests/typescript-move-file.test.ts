@@ -86,7 +86,7 @@ describe("move-file", () => {
     expect(preview(plan)).toContain("README.md");
     expect(changed(plan, w.path("src/ui/components/nested/component.ts"))).toContain('"../../../helper"');
     const saved = w.path(".refactor-ai/move.json");
-    await mkdir(dirname(saved)); await writeFile(saved, JSON.stringify(plan));
+    await mkdir(dirname(saved), { recursive: true }); await writeFile(saved, JSON.stringify(plan));
     await applyPlan(await loadPlan(saved));
     expect(await readFile(w.path("src/ui/components/README.md"), "utf8")).toBe("# Components\n");
     expect(existsSync(w.path("src/components/index.ts"))).toBe(false);
@@ -191,18 +191,65 @@ describe("move-file", () => {
     expect(changed(result, w.path("apps/web/src/use.ts"))?.match(/@scope\/feature\/components\/component/g)).toHaveLength(2);
   });
 
-  test("unmoved aliases unavailable in the target report NEW_DIAGNOSTICS with the alias hint", async () => {
+  test("unmoved aliases fail before program construction with an actionable hint", async () => {
     const w = await packages({
       "apps/web/tsconfig.json": config({ compilerOptions: { ...options, paths: { "@/*": ["./src/*"] } } }),
       "apps/web/src/component.ts": 'import { helper } from "@/helper";\nexport const component = () => helper;\n',
       "apps/web/src/helper.ts": 'export const helper = 42;\n',
     });
-    await expect(analyze(packageRequest(w))).rejects.toThrow(/NEW_DIAGNOSTICS:.*@\/helper.*unresolved source-project alias imports: @\/helper/s);
+    await expect(analyze(packageRequest(w))).rejects.toThrow(/MOVE_IMPORT_UNRESOLVED:.*@\/helper.*retarget the alias/s);
   });
 
   test("fails with MISSING_DEPENDENCY", async () => {
     const w = await packages({ "apps/web/package.json": '{"name":"@scope/web"}' });
     await expect(analyze(packageRequest(w))).rejects.toThrow("MISSING_DEPENDENCY");
+  });
+
+  test("prechecks third-party dependencies with the source version and install hint", async () => {
+    const w = await packages({
+      "apps/web/package.json": '{"name":"@scope/web","dependencies":{"@scope/feature":"workspace:*","external":"^2.3.0"}}',
+      "apps/web/src/component.ts": 'import { value } from "external"; export const component = value;\n',
+      "apps/web/node_modules/external/package.json": '{"types":"index.d.ts"}',
+      "apps/web/node_modules/external/index.d.ts": 'export const value: number;\n',
+    });
+    await expect(analyze(packageRequest(w))).rejects.toThrow(/MISSING_DEPENDENCY:.*external.*\^2.3.0.*node_modules is missing/s);
+  });
+
+  test("prechecks an installed source dependency missing from the destination installation", async () => {
+    const w = await packages({
+      "apps/web/package.json": '{"name":"@scope/web","dependencies":{"@scope/feature":"workspace:*","external":"1"}}',
+      "packages/feature/package.json": '{"name":"@scope/feature","dependencies":{"external":"1"},"exports":{"./existing":"./src/existing.ts"}}',
+      "apps/web/src/component.ts": 'import { value } from "external"; export const component = value;\n',
+      "apps/web/node_modules/external/package.json": '{"types":"index.d.ts"}',
+      "apps/web/node_modules/external/index.d.ts": 'export const value: number;\n',
+    });
+    await expect(analyze(packageRequest(w))).rejects.toThrow(/MOVE_IMPORT_UNRESOLVED:.*external.*install.*node_modules is missing/s);
+  });
+
+  test("prechecks a declared source dependency even before either package is installed", async () => {
+    const w = await packages({
+      "apps/web/package.json": '{"name":"@scope/web","dependencies":{"fuse.js":"^7.1.0"}}',
+      "apps/web/src/component.ts": 'import Fuse from "fuse.js"; export const component = new Fuse([]);\n',
+    });
+    await expect(analyze(packageRequest(w))).rejects.toThrow(/MISSING_DEPENDENCY:.*add fuse\.js@\^7\.1\.0 to .*packages\/feature\/package.json.*node_modules is missing/s);
+  });
+
+  test("allowImportingTsExtensions may differ when the planned imports do not need it", async () => {
+    const w = await packages({
+      "apps/web/tsconfig.json": config({ compilerOptions: { ...options, allowImportingTsExtensions: true } }),
+    });
+    const result = await analyze(packageRequest(w));
+    expect(result.diagnosticsAfter).toEqual([]);
+    expect(changed(result, w.path("packages/feature/src/ui/component.ts"))).toContain("component");
+  });
+
+  test("participant validation still rejects a newly invalid .ts extension", async () => {
+    const w = await packages({
+      "apps/web/tsconfig.json": config({ compilerOptions: { ...options, allowImportingTsExtensions: true } }),
+      "apps/web/src/component.ts": 'import { existing } from "@scope/feature/existing"; export const component = existing;\n',
+      "packages/feature/src/style.ts": 'export { existing } from "./existing.ts";\n',
+    });
+    await expect(analyze(packageRequest(w))).rejects.toThrow(/NEW_DIAGNOSTICS:.*TS5097/s);
   });
 
   test("requires an exports field", async () => {

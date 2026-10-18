@@ -9,6 +9,9 @@
   "type": "module",
   "scripts": {
     "refactor": "node dist/cli.js",
+    "bench": "bun scripts/bench.ts",
+    "bench:warm": "bun scripts/bench-warm.ts",
+    "bench:checkers": "bun scripts/bench-checkers.ts",
     "build": "bun build src/cli.ts --target node --format esm --outfile dist/cli.js --external typescript && bun build src/api-entry.ts --target node --format esm --outfile dist/api.mjs --external typescript && bun build scripts/demo.ts --target node --format esm --outfile dist/demo.js --external typescript && bun build scripts/npm-release.ts --target node --format esm --outfile dist/npm-release.mjs && bun build scripts/version.ts --target node --format esm --outfile dist/version.mjs && bun scripts/package-skills.ts",
     "package:skills": "bun scripts/package-skills.ts --build",
     "package:npm": "bun scripts/package-npm.ts",

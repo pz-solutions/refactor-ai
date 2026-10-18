@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { CompilerInputs } from "./typescript-diagnostics-cache";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import type { FileChange } from "../types";
@@ -123,6 +124,7 @@ function includeBasePath(absolute: string): string {
 }
 
 export class VirtualFs {
+  readonly inputs = new CompilerInputs();
   readonly caseSensitive: boolean;
   private readonly readPaths = new Map<string, string>();
   private readonly disk = new Map<string, string | undefined>();
@@ -187,6 +189,7 @@ export class VirtualFs {
   private rawDisk(path: string): string | undefined {
     const key = this.key(path);
     if (!this.disk.has(key)) {
+      if (this.inputs.enabled) { this.inputs.sys.fileExists(path); this.inputs.sys.readFile(path); }
       let text: string | undefined;
       try {
         if (statSync(path).isFile()) text = readFileSync(path, "utf8");
@@ -252,6 +255,10 @@ export class VirtualFs {
   }
 
   private diskEntries(directory: string): Entries {
+    if (this.inputs.enabled) {
+      this.inputs.sys.getDirectories(directory);
+      this.inputs.sys.readDirectory(directory, undefined, undefined, ["*"], 1);
+    }
     const files: string[] = [];
     const directories: string[] = [];
     let names: string[];
@@ -302,6 +309,7 @@ export class VirtualFs {
 
   directoryExists(path: string): boolean {
     path = this.readPath(path);
+    if (this.inputs.enabled) this.inputs.sys.directoryExists(path);
     if (this.virtualPaths().some((item) => this.contains(path, item) && !this.samePath(path, item))) return true;
     if (this.isHidden(path)) return false;
     try { return statSync(path).isDirectory(); } catch { return false; }
@@ -315,7 +323,7 @@ export class VirtualFs {
     path = this.readPath(path);
     const key = this.key(path);
     if (this.generated.has(key) || (!this.suspended && this.overlays.has(key))) return resolve(path);
-    try { return ts.sys.realpath?.(path) ?? path; } catch { return path; }
+    try { return this.inputs.sys.realpath?.(path) ?? path; } catch { return path; }
   }
 
   /** Overlay-aware implementation of TypeScript's readDirectory matching. */

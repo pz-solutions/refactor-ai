@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { baselineDiagnostics } from "./typescript-diagnostics-cache";
 import { readdirSync, statSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import type { Diagnostic } from "../types";
@@ -53,10 +54,10 @@ const configName = /^(tsconfig|jsconfig)(\..+)?\.json$/;
 const editorConfigName = /^(tsconfig|jsconfig)\.json$/;
 
 /** Syntax, emit and extension rules shared by the editing language service. See README for the list. */
-const sharedOptionKeys = [
+export const sharedOptionKeys = [
   "module", "moduleResolution", "moduleDetection", "allowJs", "jsx",
   "jsxImportSource", "esModuleInterop", "allowSyntheticDefaultImports", "resolveJsonModule",
-  "allowImportingTsExtensions", "rewriteRelativeImportExtensions", "allowArbitraryExtensions",
+  "rewriteRelativeImportExtensions", "allowArbitraryExtensions",
   "verbatimModuleSyntax", "preserveSymlinks", "experimentalDecorators", "typeRoots",
 ] as const;
 
@@ -170,6 +171,7 @@ export class Workspace {
   readonly targetConfig: string;
   readonly editOptions: ts.CompilerOptions;
   readonly service: ts.LanguageService;
+  private readonly registry: ts.DocumentRegistry;
   private readonly discovered: string[];
   /** Configs that joined the graph only because their programs import an affected file. */
   readonly importingConfigs: string[] = [];
@@ -183,6 +185,7 @@ export class Workspace {
   /** `affected` are the files whose module shape the operation changes (renamed, moved from or into). */
   constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = []) {
     this.vfs = new VirtualFs(root);
+    this.registry = ts.createDocumentRegistry(this.vfs.caseSensitive);
     this.sourceConfig = sourceConfig;
     this.targetConfig = targetConfig;
     for (const config of [sourceConfig, targetConfig]) {
@@ -193,17 +196,21 @@ export class Workspace {
     this.editOptions = { ...this.participant(sourceConfig).parsed.options, noEmit: true };
     for (const key of ["configFile", "configFilePath", "composite", "incremental", "tsBuildInfoFile", "declaration", "declarationMap",
       "emitDeclarationOnly", "declarationDir", "outDir", "rootDir"]) delete this.editOptions[key];
+    this.service = this.languageService(sourceConfig, () => this.editOptions, () => this.unionFiles());
+  }
+
+  private languageService(config: string, options: () => ts.CompilerOptions, files: () => string[]): ts.LanguageService {
     const vfs = this.vfs;
-    const host: ts.LanguageServiceHost = {
-      getCompilationSettings: () => this.editOptions,
-      getScriptFileNames: () => this.unionFiles(),
+    const host: ts.LanguageServiceHost & { hasInvalidatedResolutions(): boolean } = {
+      getCompilationSettings: options,
+      getScriptFileNames: files,
       getScriptVersion: (fileName) => vfs.scriptVersion(fileName),
       getScriptSnapshot: (fileName) => {
         const text = vfs.readFile(fileName);
         return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
       },
       getScriptKind: (fileName) => scriptKindFor(fileName),
-      getCurrentDirectory: () => dirname(sourceConfig),
+      getCurrentDirectory: () => dirname(config),
       getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
       fileExists: (path) => vfs.fileExists(path),
       readFile: (path) => vfs.readFile(path),
@@ -214,8 +221,10 @@ export class Workspace {
       useCaseSensitiveFileNames: () => vfs.caseSensitive,
       getNewLine: () => "\n",
       getProjectVersion: () => String(vfs.version),
+      // Package exports and negative lookup results may change without changing an importer.
+      hasInvalidatedResolutions: () => true,
     };
-    this.service = ts.createLanguageService(host, ts.createDocumentRegistry(vfs.caseSensitive));
+    return ts.createLanguageService(host, this.registry);
   }
 
   dispose(): void {
@@ -552,19 +561,17 @@ export class Workspace {
   }
 
   private validationPrograms(): Map<string, ts.Program> {
+    // LanguageService.getProgram eagerly creates a checker. Plain Programs keep
+    // graph discovery cheap and defer checker allocation until a selected check.
     return new Map(this.order.map((key) => {
-      const item = this.participants.get(key)!;
-      return [key, ts.createProgram({
-        rootNames: item.parsed.fileNames,
-        options: item.parsed.options,
-        projectReferences: item.parsed.projectReferences,
-        host: this.compilerHost(item.configPath, item.parsed.options),
-      })];
+      const item = this.participant(key);
+      return [key, ts.createProgram({ rootNames: item.parsed.fileNames, options: item.parsed.options,
+        projectReferences: item.parsed.projectReferences, host: this.compilerHost(item.configPath, item.parsed.options) })];
     }));
   }
 
   /** Capture the original graphs before editing, without type-checking unrelated modules. */
-  prepareValidation(): () => { before: Diagnostic[]; after: Diagnostic[]; affected?: number; affectedProjects?: number } {
+  prepareValidation(skipCleanBaseline = false): () => { before: Diagnostic[]; after: Diagnostic[]; affected?: number; affectedProjects?: number } {
     // Reference emission needs full checking and must precede edits: dependents and
     // the editing service consume those in-memory declarations.
     if ([...this.participants.values()].some((item) => item.references.length)) {
@@ -586,12 +593,39 @@ export class Workspace {
         const closure = this.validationClosure(before, after, beforeGraphs.get(key)!, this.validationGraph(after));
         if (closure) { only.set(key, closure); affected += closure.size; }
       }
-      return {
-        before: this.vfs.original(() => this.diagnostics(beforePrograms, only)),
-        after: this.diagnostics(afterPrograms, only),
-        affected: only.size ? affected : undefined,
-        affectedProjects: only.size,
+      const beforeRecords: Diagnostic[][] = [], afterRecords: Diagnostic[][] = [];
+      const afterLayouts = new Map<string, string>();
+      // Do not retain every project's two expensive checkers at once. Release
+      // each planned program immediately after validation, then check original
+      // baselines only when needed. Keep only immutable diagnostic records.
+      for (const key of this.order) {
+        afterRecords.push(this.diagnostics(new Map([[key, afterPrograms.get(key)!]]), only));
+        for (const [config, layout] of this.layouts) afterLayouts.set(config, layout);
+        afterPrograms.delete(key);
+      }
+      if (!skipCleanBaseline || afterRecords.some(records => records.length)) {
+        for (const key of this.order) {
+          beforeRecords.push(this.vfs.original(() => this.diagnostics(new Map([[key, beforePrograms.get(key)!]]), only, true)));
+          beforePrograms.delete(key);
+        }
+      }
+      beforePrograms.clear();
+      beforeGraphs.clear();
+      this.layouts = afterLayouts;
+      const merge = (groups: Diagnostic[][]): Diagnostic[] => {
+        const merged = new Map<string, { record: Diagnostic; count: number }>();
+        for (const group of groups) {
+          const counts = new Map<string, number>();
+          for (const record of group) {
+            const key = JSON.stringify(record), count = (counts.get(key) ?? 0) + 1;
+            counts.set(key, count);
+            if (count > (merged.get(key)?.count ?? 0)) merged.set(key, { record, count });
+          }
+        }
+        return [...merged.values()].flatMap(({ record, count }) => Array.from({ length: count }, () => record))
+          .sort((a, b) => a.file.localeCompare(b.file) || a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
       };
+      return { before: merge(beforeRecords), after: merge(afterRecords), affected: only.size ? affected : undefined, affectedProjects: only.size };
     };
   }
 
@@ -681,13 +715,13 @@ export class Workspace {
    * including files of other projects it imports directly; a diagnostic seen
    * by several programs is reported with its highest per-program multiplicity.
    */
-  diagnostics(programs?: Map<string, ts.Program>, only?: Map<string, Set<string>>): Diagnostic[] {
+  diagnostics(programs?: Map<string, ts.Program>, only?: Map<string, Set<string>>, baseline = false): Diagnostic[] {
     const vfs = this.vfs;
     vfs.clearGenerated();
     this.layouts = new Map();
     const referenced = new Set([...this.participants.values()].flatMap((item) => item.references.map((path) => vfs.key(path))));
     const merged = new Map<string, { record: Diagnostic; count: number }>();
-    for (const key of this.order) {
+    for (const key of this.order.filter(key => !programs || programs.has(key))) {
       const item = this.participants.get(key)!;
       const program = programs?.get(key) ?? ts.createProgram({
         rootNames: item.parsed.fileNames,
@@ -695,32 +729,40 @@ export class Workspace {
         projectReferences: item.parsed.projectReferences,
         host: this.compilerHost(item.configPath, item.parsed.options),
       });
-      const counts = new Map<string, { record: Diagnostic; count: number }>();
-      const add = (diagnostic: ts.Diagnostic) => {
-        if (diagnostic.category !== ts.DiagnosticCategory.Error) return;
-        const record = {
-          file: diagnostic.file ? resolve(diagnostic.file.fileName) : item.configPath,
-          code: `TS${diagnostic.code}`,
-          message: flatten(diagnostic),
+      const collect = (): Diagnostic[] => {
+        const records: Diagnostic[] = [];
+        const add = (diagnostic: ts.Diagnostic) => {
+          if (diagnostic.category !== ts.DiagnosticCategory.Error) return;
+          const record = {
+            file: diagnostic.file ? resolve(diagnostic.file.fileName) : item.configPath,
+            code: `TS${diagnostic.code}`,
+            message: flatten(diagnostic),
+          };
+          records.push(record);
         };
+        program.getOptionsDiagnostics().forEach(add);
+        program.getGlobalDiagnostics().forEach(add);
+        for (const sourceFile of program.getSourceFiles()) {
+          const path = resolve(sourceFile.fileName);
+          if (!isInside(this.root, path)) {
+            if (!sourceFile.isDeclarationFile) fail("PROJECT_SCOPE_INCOMPLETE", `${item.configPath} uses user source outside ${this.root}: ${path}${workspaceRootHint(this.root, [path])}`);
+            continue;
+          }
+          if (portablePath(path).split("/").includes("node_modules") || vfs.isHidden(path)) continue;
+          if (only?.has(key) && !only.get(key)!.has(vfs.key(path))) continue;
+          program.getSyntacticDiagnostics(sourceFile).forEach(add);
+          program.getSemanticDiagnostics(sourceFile).forEach(add);
+          if (program.getCompilerOptions().declaration || program.getCompilerOptions().composite) program.getDeclarationDiagnostics(sourceFile).forEach(add);
+        }
+        return records;
+      };
+      const records = baseline && !referenced.size
+        ? baselineDiagnostics(this.root, item.configPath, program, only?.get(key), vfs.inputs, collect) : collect();
+      const counts = new Map<string, { record: Diagnostic; count: number }>();
+      for (const record of records) {
         const recordKey = `${record.file}\0${record.code}\0${record.message}`;
         const entry = counts.get(recordKey) ?? { record, count: 0 };
-        entry.count += 1;
-        counts.set(recordKey, entry);
-      };
-      program.getOptionsDiagnostics().forEach(add);
-      program.getGlobalDiagnostics().forEach(add);
-      for (const sourceFile of program.getSourceFiles()) {
-        const path = resolve(sourceFile.fileName);
-        if (!isInside(this.root, path)) {
-          if (!sourceFile.isDeclarationFile) fail("PROJECT_SCOPE_INCOMPLETE", `${item.configPath} uses user source outside ${this.root}: ${path}${workspaceRootHint(this.root, [path])}`);
-          continue;
-        }
-        if (portablePath(path).split("/").includes("node_modules") || vfs.isHidden(path)) continue;
-        if (only?.has(key) && !only.get(key)!.has(vfs.key(path))) continue;
-        program.getSyntacticDiagnostics(sourceFile).forEach(add);
-        program.getSemanticDiagnostics(sourceFile).forEach(add);
-        if (program.getCompilerOptions().declaration || program.getCompilerOptions().composite) program.getDeclarationDiagnostics(sourceFile).forEach(add);
+        entry.count += 1; counts.set(recordKey, entry);
       }
       for (const [recordKey, entry] of counts) {
         if ((merged.get(recordKey)?.count ?? 0) < entry.count) merged.set(recordKey, entry);

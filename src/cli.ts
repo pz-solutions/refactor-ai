@@ -7,6 +7,10 @@ export { offset } from "./cli-core.ts";
 
 /** Complete author CLI; language packages inject their own backend loader. */
 export async function main(args: string[], context: Omit<CliContext, "loadBackend"> = {}): Promise<void> {
+  if (args[0] === "serve" && !args.includes("--help")) {
+    const { serve } = await import("./serve.ts");
+    return serve(args.slice(1), { ...context, loadBackend });
+  }
   return runCli(args, { ...context, loadBackend });
 }
 

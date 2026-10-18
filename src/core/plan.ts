@@ -2,7 +2,7 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { createTwoFilesPatch } from "diff";
 import type { BackendResult, Diagnostic, FileChange, RefactorRequest } from "../types.ts";
-import { assertRegularPath, canonicalMissing, inside, sha256, snapshot, type Snapshot } from "./snapshot.ts";
+import { assertRegularPath, canonicalMissing, inside, sha256, snapshot, snapshotChanges, type Snapshot } from "./snapshot.ts";
 
 /**
  * Schema 1: edits and file creations (`after` is always a string).
@@ -162,7 +162,8 @@ export async function createPlan(
   const root = request.root;
   const before = await snapshot(root);
   const result = await analyze(request);
-  if ((await snapshot(root)).hash !== before.hash) throw new Error("STALE_SNAPSHOT: project changed during analysis");
+  const after = await snapshot(root);
+  if (after.hash !== before.hash) throw new Error(`STALE_SNAPSHOT: project changed during analysis: ${snapshotChanges(before, after)}; retry after writers settle (including dev-server generators)`);
   const seen = new Set<string>();
   const changes: Plan["changes"] = [];
   for (const change of result.changes) {
@@ -237,7 +238,8 @@ export async function loadPlan(path: string): Promise<Plan> {
 export async function assertFresh(plan: Plan): Promise<void> {
   if (plan.id !== planId(plan)) throw new Error("INVALID_PLAN: plan integrity check failed");
   if ((await realpath(plan.request.root)) !== plan.request.root) throw new Error("INVALID_PLAN: noncanonical root");
-  if ((await snapshot(plan.request.root)).hash !== plan.snapshot.hash) throw new Error("STALE_SNAPSHOT: project changed; create a new plan");
+  const current = await snapshot(plan.request.root);
+  if (current.hash !== plan.snapshot.hash) throw new Error(`STALE_SNAPSHOT: project changed: ${snapshotChanges(plan.snapshot, current)}; create a new plan after writers settle`);
   for (const [path, modes] of Object.entries(plan.fileModes ?? {})) {
     if (modes.before !== null && ((await lstat(path)).mode & 0o777) !== modes.before) {
       throw new Error(`STALE_SNAPSHOT: file permissions changed; create a new plan: ${path}`);

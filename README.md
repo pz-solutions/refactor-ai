@@ -209,7 +209,7 @@ Always pass the workspace root as `--root`, run the project's formatter and lint
 - TS `rename-file`, `move-type`, `move-file` and `inline-reexports` validate the source and destination configurations and the loaded project-reference graph, with declarations built in memory. Other TS operations still reject project references. C# analyzes the loaded MSBuild configuration rather than every possible compilation condition; select a `.sln` to include dependent projects.
 - TS file operations check changed files and their transitive importers in each participant's original and planned module graphs. Resolution changes (including package `exports` edits) also seed the closure, even for unchanged importers. Scripts, declaration-file edits, global/ambient declarations, configuration edits, non-`exports` package edits and project-reference declaration builds retain full checks. Compiler option/global diagnostics and output-layout checks always run; unrelated existing file diagnostics may be omitted from plans using the closure. Imported declarations can still require checking dependencies, so cost does not scale only with the closure's size.
 - Additional TS/JS configurations beside a participating project, such as `tsconfig.build.json`, are updated and validated when they cover the affected file. Discovered callers importing that file also join the analysis. Other configurations covering it cause rejection rather than leaving unchecked changes.
-- TS/JS type moves support declarations in ES modules; CommonJS source code, merged declarations and types inside namespaces are rejected. Compiling ES modules to CommonJS is supported. Projects may use different `paths`, `baseUrl`, `rootDirs`, `customConditions`, `moduleSuffixes`, `resolvePackageJsonExports` and `resolvePackageJsonImports`; each participant validates its own resolution, and moved type imports must retain their original targets. Shared editing still requires identical `module`, `moduleResolution`, `moduleDetection`, `allowJs`, `jsx`, `jsxImportSource`, `esModuleInterop`, `allowSyntheticDefaultImports`, `resolveJsonModule`, `allowImportingTsExtensions`, `rewriteRelativeImportExtensions`, `allowArbitraryExtensions`, `verbatimModuleSyntax`, `preserveSymlinks`, `experimentalDecorators` and `typeRoots`.
+- TS/JS type moves support declarations in ES modules; CommonJS source code, merged declarations and types inside namespaces are rejected. Compiling ES modules to CommonJS is supported. Projects may use different `paths`, `baseUrl`, `rootDirs`, `customConditions`, `moduleSuffixes`, `resolvePackageJsonExports`, `resolvePackageJsonImports` and `allowImportingTsExtensions`; each participant validates its own resolution, and moved type imports must retain their original targets. Shared editing still requires identical `module`, `moduleResolution`, `moduleDetection`, `allowJs`, `jsx`, `jsxImportSource`, `esModuleInterop`, `allowSyntheticDefaultImports`, `resolveJsonModule`, `rewriteRelativeImportExtensions`, `allowArbitraryExtensions`, `verbatimModuleSyntax`, `preserveSymlinks`, `experimentalDecorators` and `typeRoots`.
 - C# type moves and namespace changes reject, among other cases, partial declarations spread across files, conditional compilation, and multiple or nested namespaces. `.csproj` edits support standard SDK globbing or explicit, unconditional `Compile` entries; unknown MSBuild rules, dependency cycles and new compiler errors cause plan rejection.
 - C# type moves retain source-project global using directives, including when the moved type was the file's only declaration. Required new project references are inserted unconditionally. Helper discovery uses the selected toolkit directory; it never executes a helper found in the analyzed project's working directory.
 - TS/JS type moves reject effectful static initializers, static blocks, decorators, computed members, evaluated base-class expressions, nonconstant enum initializers and new module cycles for runtime classes. Simple identifier base classes and primitive constant initializers are supported. Compiler checks do not prove whole-program behavior equivalence; run application tests after a move.
@@ -220,6 +220,46 @@ Always pass the workspace root as `--root`, run the project's formatter and lint
 - After an interrupted apply, inspect `.refactor-ai/apply.lock` and the `.journal.json` journal. The journal contains original text and hashes of the new versions; the MVP does not yet provide an automatic recovery command. Preserve files subsequently changed by another process when recovering.
 
 ## Verification and research
+
+Measure cold plan latency against the dogfood monorepo (fresh Node processes;
+filesystem caches are retained). All benchmark plans stay outside that repository:
+
+```sh
+bun run bench -- --root /path/to/uber-platform --runs 3 --json /tmp/cold.json
+bun run bench:warm -- --root /path/to/uber-platform --runs 5 --json /tmp/warm.json
+```
+
+The author CLI supports `node dist/cli.js serve --root <repo>`: send one NDJSON
+request per stdin line, for example
+`{"id":1,"args":["plan","rename","--project","tsconfig.json","--file","src.ts","--at","1:14","--name","next","--out","/tmp/plan.json"]}`.
+Responses carry `id`, `status`, and `output` or `error`. Requests run sequentially;
+EOF closes the server. Up to four single-project TypeScript LanguageServices stay
+warm. Content hashes, compiler filesystem queries and directory membership are
+rechecked before reuse. Workspace file operations still load fresh workspaces.
+
+Validation checks the planned affected set first. When it has no errors, the
+original error baseline is unnecessary and `diagnosticsBefore` is empty; notes
+record that shortcut. Otherwise the original multiset is checked before accepting
+existing errors. Project-reference declaration builds retain full before/after
+checks. Workspace editing uses one LanguageService and DocumentRegistry; validation
+shares parsed sources and releases project checkers sequentially to limit memory.
+
+For repeated plans in projects with existing errors, `REFACTOR_AI_CACHE=on` enables
+an optional persistent **original-baseline-only** diagnostics cache at
+`<root>/.refactor-ai/cache`. `REFACTOR_AI_CACHE_DIR=/tmp/rai-cache` selects an
+external location. The default is off: clean plans need no baseline, and hashing
+every compiler input has a cost. Planned diagnostics are always checked. Cache
+keys include compiler version/options, all source/dependency contents and the
+selected files; a hit also rechecks filesystem reads, negative resolution probes,
+directory listings and symlink targets. Malformed or unavailable caches fall back
+to checking. Remove the cache directory to reclaim space.
+
+`bun run bench:checkers -- --root <repo> --tsgo <binary> --rust <binary>` compares
+optional native diagnostic executables without installing dependencies or changing
+the target. `node scripts/probe-native-checkers.mjs <unpacked-package-directory>`
+probes in-memory overlays. See the [native checker investigation](docs/research/2026-10-18-native-checkers.md)
+for versions, API differences and correctness limits. Native validation is a spike;
+the shipped refactoring engine still uses pinned TypeScript 5.9.3.
 
 GitHub Actions are configured in [CI](.github/workflows/ci.yml) and [npm publication](.github/workflows/publish.yml). CI builds and tests the Node CLI, Roslyn helper, installed skills and packed npm tools, runs the demo, and uploads npm archives plus self-contained skills. A matching `vX.Y.Z` tag publishes the verified `@refactor-ai` archives using npm OIDC. [GitHub Actions setup and releases](docs/github-actions.md) describes the first publication, Trusted Publisher settings and retries.
 

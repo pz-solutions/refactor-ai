@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { main, offset } from "../src/cli.ts";
 import { operationHelp } from "../src/help.ts";
@@ -22,7 +22,7 @@ describe("CLI", () => {
   test("shows command and operation help before reading any project or plan", () => {
     const cli = join(import.meta.dir, "..", "dist", "cli.js");
     const cases = [[], ["--help"], ["-h"], ["help"],
-      ...["capabilities", "plan", "preview", "validate", "apply"].map(command => [command, "--help"]),
+      ...["capabilities", "plan", "preview", "validate", "apply", "serve"].map(command => [command, "--help"]),
       ...Object.keys(operationHelp).map(operation => ["plan", operation, "--help"]),
       ["help", "plan", "rename"], ["plan", "rename", "--project", "/missing/tsconfig.json", "-h"]];
     for (const args of cases) {
@@ -110,6 +110,26 @@ describe("CLI", () => {
     expect(offset(text, "2:1")).toBe(12);
     expect(() => offset(text, "1:12")).toThrow("INVALID_POSITION");
   });
+
+  test("stdio server accepts sequential plans, recovers after errors and exits on EOF", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "refactor-ai-serve-")));
+    roots.push(root);
+    await writeFile(join(root, "src.ts"), "export const value = 1;\n");
+    await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true }, files: ["src.ts"] }));
+    const plan = (name: string) => ["plan", "rename", "--project", "tsconfig.json", "--file", "src.ts", "--at", "1:14", "--name", name, "--out", join(root, ".refactor-ai", `${name}.json`)];
+    const requests = [{ id: 0, args: ["apply"] }, { id: 1, args: plan("one") },
+      { id: 2, args: [...plan("two"), "--root", dirname(root)] }, { id: 3, args: plan("one") }];
+    const result = spawnSync("node", [join(import.meta.dir, "..", "dist/cli.js"), "serve", "--root", root], {
+      input: requests.map(request => JSON.stringify(request)).join("\n") + "\n", encoding: "utf8", timeout: 20_000,
+      env: { ...process.env, REFACTOR_AI_CACHE: "off" },
+    });
+    expect(result.status).toBe(0); expect(result.stderr).toBe("");
+    const responses = result.stdout.trim().split("\n").map(line => JSON.parse(line));
+    expect(responses.map(response => response.status)).toEqual(["failed", "ok", "failed", "ok"]);
+    expect(responses[2].error).toContain("OUTSIDE_ROOT");
+    expect(responses[1].output.id).toBe(responses[3].output.id);
+    expect(await readFile(join(root, "src.ts"), "utf8")).toBe("export const value = 1;\n");
+  }, 30_000);
 
   test("rejects invalid arguments and supports a no-op plan", async () => {
     await expect(main(["plan", "rename", "--bad", "value"])).rejects.toThrow("INVALID_ARGUMENT: --bad");

@@ -1,0 +1,180 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "cli": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+  "runs": 2,
+  "mode": "cold process, OS filesystem cache retained",
+  "results": [
+    {
+      "scenario": "rename",
+      "medianMs": 19904,
+      "minMs": 19740,
+      "maxMs": 20068,
+      "samples": [
+        {
+          "ms": 20068,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "diagnostics.after": 12529
+          },
+          "notes": [
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Validated 23 affected file(s): the changed files and their transitive importers."
+          ]
+        },
+        {
+          "ms": 19740,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "diagnostics.after": 11550
+          },
+          "notes": [
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Validated 23 affected file(s): the changed files and their transitive importers."
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "move-alias",
+      "medianMs": 1745,
+      "minMs": 1437,
+      "maxMs": 2053,
+      "samples": [
+        {
+          "ms": 1437,
+          "status": 1,
+          "outcome": "{\"status\":\"failed\",\"error\":\"MOVE_IMPORT_UNRESOLVED: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/users/users-table.cells.tsx: '@/i18n/routing' cannot resolve from /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/packages/app-features/src/users/users-table.cells.tsx; unresolved source-project alias imports: @/i18n/routing; move its dependency too or retarget the alias before moving; MISSING_DEPENDENCY: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/packages/app-features/package.json must declare 'next-intl' (source version ^4.14.4); add it and install before moving /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/users/users-table.cells.tsx\"}",
+          "phases": {},
+          "notes": []
+        },
+        {
+          "ms": 2053,
+          "status": 1,
+          "outcome": "{\"status\":\"failed\",\"error\":\"MOVE_IMPORT_UNRESOLVED: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/users/users-table.cells.tsx: '@/i18n/routing' cannot resolve from /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/packages/app-features/src/users/users-table.cells.tsx; unresolved source-project alias imports: @/i18n/routing; move its dependency too or retarget the alias before moving; MISSING_DEPENDENCY: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/packages/app-features/package.json must declare 'next-intl' (source version ^4.14.4); add it and install before moving /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/users/users-table.cells.tsx\"}",
+          "phases": {},
+          "notes": []
+        }
+      ]
+    },
+    {
+      "scenario": "move-internal",
+      "medianMs": 117078,
+      "minMs": 106951,
+      "maxMs": 127205,
+      "samples": [
+        {
+          "ms": 106951,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "workspace.load": 17036,
+            "workspace.prepare": 2610,
+            "workspace.move": 14479,
+            "workspace.validate": 54075
+          },
+          "notes": [
+            "Moved 1 file(s) from packages/app-features/src/shared/formatters.ts to packages/app-features/src/shared/fmt/formatters.ts; validated source and target project membership.",
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Included apps/web/tsconfig.json because its program imports packages/app-features/src/shared/formatters.ts without a project reference.",
+            "Included apps/web-start/tsconfig.json because its program imports packages/app-features/src/shared/formatters.ts without a project reference.",
+            "Validated 409 affected file(s) across 3 project(s): the changed files and their transitive importers in the original and planned module graphs."
+          ]
+        },
+        {
+          "ms": 127205,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "workspace.load": 13935,
+            "workspace.prepare": 3002,
+            "workspace.move": 20391,
+            "workspace.validate": 64992
+          },
+          "notes": [
+            "Moved 1 file(s) from packages/app-features/src/shared/formatters.ts to packages/app-features/src/shared/fmt/formatters.ts; validated source and target project membership.",
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Included apps/web/tsconfig.json because its program imports packages/app-features/src/shared/formatters.ts without a project reference.",
+            "Included apps/web-start/tsconfig.json because its program imports packages/app-features/src/shared/formatters.ts without a project reference.",
+            "Validated 409 affected file(s) across 3 project(s): the changed files and their transitive importers in the original and planned module graphs."
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "retarget-import",
+      "medianMs": 73251,
+      "minMs": 69727,
+      "maxMs": 76774,
+      "samples": [
+        {
+          "ms": 76774,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "diagnostics.after": 18949
+          },
+          "notes": [
+            "Retargeted imports/re-exports; compiler validation does not prove runtime API compatibility.",
+            "Tests mocking @/lib/formatters import retargeted files: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/incomes/_components/income-record-dialog.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/invoices/[id]/invoice-detail-client.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/invoices/invoices-content.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/receivables/_components/receivable-form.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/receivables/receivables-content.component.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/properties/[code]/tenancy-history-dialog.helpers.test.ts, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenancies/[id]/history/tenancy-history-browser-client.helpers.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenancies/[id]/history/tenancy-rent-history-chart.test.tsx. Review mocks or use --mocks add.",
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Validated 258 affected file(s): the changed files and their transitive importers."
+          ]
+        },
+        {
+          "ms": 69727,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "diagnostics.after": 17403
+          },
+          "notes": [
+            "Retargeted imports/re-exports; compiler validation does not prove runtime API compatibility.",
+            "Tests mocking @/lib/formatters import retargeted files: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/incomes/_components/income-record-dialog.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/invoices/[id]/invoice-detail-client.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/invoices/invoices-content.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/receivables/_components/receivable-form.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/receivables/receivables-content.component.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/properties/[code]/tenancy-history-dialog.helpers.test.ts, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenancies/[id]/history/tenancy-history-browser-client.helpers.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenancies/[id]/history/tenancy-rent-history-chart.test.tsx. Review mocks or use --mocks add.",
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Validated 258 affected file(s): the changed files and their transitive importers."
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "inline-reexports",
+      "medianMs": 181821,
+      "minMs": 170373,
+      "maxMs": 193268,
+      "samples": [
+        {
+          "ms": 193268,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "workspace.load": 8430,
+            "workspace.prepare": 5404,
+            "workspace.validate": 60487
+          },
+          "notes": [
+            "Kept /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/lib/formatters.ts and its re-exports (remaining module references).",
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Validated 261 affected file(s) across 1 project(s): the changed files and their transitive importers in the original and planned module graphs."
+          ]
+        },
+        {
+          "ms": 170373,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "workspace.load": 9208,
+            "workspace.prepare": 5563,
+            "workspace.validate": 47982
+          },
+          "notes": [
+            "Kept /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/lib/formatters.ts and its re-exports (remaining module references).",
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Validated 261 affected file(s) across 1 project(s): the changed files and their transitive importers in the original and planned module graphs."
+          ]
+        }
+      ]
+    }
+  ]
+}

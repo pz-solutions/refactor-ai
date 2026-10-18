@@ -41,6 +41,18 @@ test("workspace closure checks two-hop importers and excludes unrelated existing
   } finally { ws.dispose(); }
 });
 
+test("comparison mode skips the original baseline only after every planned project is clean", async () => {
+  const ws = await workspace({ "src/leaf.ts": 'export const value = "old error";\n' });
+  try {
+    const validate = ws.prepareValidation(true);
+    ws.vfs.write(join(ws.root, "src/leaf.ts"), "export const value = 1;\n");
+    const result = validate();
+    expect(result.before).toEqual([]);
+    expect(result.after).toEqual([]);
+    expect(result.affected).toBe(3);
+  } finally { ws.dispose(); }
+});
+
 test("each participant and observer checks its own two-hop closure and merges duplicate diagnostics", async () => {
   const ws = await workspace({
     "Source/tsconfig.json": config(),
