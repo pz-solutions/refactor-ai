@@ -1,7 +1,7 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { createTwoFilesPatch } from "diff";
-import type { BackendResult, Diagnostic, FileChange, RefactorRequest } from "../types.ts";
+import type { BackendResult, CheckerIdentity, Diagnostic, FileChange, RefactorRequest } from "../types.ts";
 import { assertRegularPath, canonicalMissing, inside, sha256, snapshot, snapshotChanges, type Snapshot } from "./snapshot.ts";
 
 /**
@@ -13,6 +13,7 @@ import { assertRegularPath, canonicalMissing, inside, sha256, snapshot, snapshot
 export type PlanSchemaVersion = 1 | 2;
 
 export interface Plan {
+  checker?: CheckerIdentity;
   schemaVersion: PlanSchemaVersion;
   id: string;
   request: RefactorRequest;
@@ -216,6 +217,7 @@ export async function createPlan(
   const body: Omit<Plan, "id"> = {
     schemaVersion: changes.some(c => c.before === null || c.after === null) ? 2 : 1, request, backend: result.backend, backendVersion: result.version,
     snapshot: before, changes, fileModes,
+    ...(result.checker ? { checker: { ...result.checker } } : {}),
     validation: { status: added.length ? "failed" : "passed", newDiagnostics: added },
     diagnosticsBefore: result.diagnosticsBefore,
     diagnosticsAfter: result.diagnosticsAfter,

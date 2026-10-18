@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import ts from "typescript";
 import { Workspace } from "../src/backends/typescript-workspace";
 
 const roots: string[] = [];
@@ -190,5 +191,92 @@ test("project references retain full checks and in-memory declaration emission",
     expect(result.before.some((item) => item.file.endsWith("unrelated.ts"))).toBe(true);
     expect(result.after.some((item) => item.code === "TS2322" && item.file.endsWith("caller.ts"))).toBe(true);
     expect(ws.vfs.readFile(join(ws.root, "lib/dist/src/value.d.ts"))).toContain('"broken"');
+  } finally { ws.dispose(); }
+});
+
+test("shared module resolution invalidates negative lookups and original/planned package exports", async () => {
+  const ws = await workspace({
+    "package.json": '{"name":"self","type":"module","exports":{"./value":"./src/leaf.ts"}}',
+    "src/middle.ts": 'export { value } from "self/value"; export { created } from "./new/created";',
+    "src/alternate.ts": 'export const value = "alternate";',
+  });
+  try {
+    const source = ws.syntaxFile(join(ws.root, "src/middle.ts"))!;
+    const literals = source.statements.filter(ts.isExportDeclaration).map(statement => statement.moduleSpecifier as ts.StringLiteral);
+    const target = (index: number) => ws.resolveModule(literals[index]!, source)?.resolvedFileName;
+    expect(target(0)).toBe(join(ws.root, "src/leaf.ts"));
+    expect(target(1)).toBeUndefined();
+    ws.vfs.write(join(ws.root, "src/new/created.ts"), "export const created = 1;");
+    ws.vfs.write(join(ws.root, "package.json"), '{"name":"self","type":"module","exports":{"./value":"./src/alternate.ts"}}');
+    expect(target(0)).toBe(join(ws.root, "src/alternate.ts"));
+    expect(target(1)).toBe(join(ws.root, "src/new/created.ts"));
+    ws.vfs.original(() => {
+      expect(target(0)).toBe(join(ws.root, "src/leaf.ts"));
+      expect(target(1)).toBeUndefined();
+    });
+    expect(target(0)).toBe(join(ws.root, "src/alternate.ts"));
+    expect(target(1)).toBe(join(ws.root, "src/new/created.ts"));
+  } finally { ws.dispose(); }
+});
+
+test("syntax caches preserve original/planned text and cannot override forced compiler module detection", async () => {
+  const ws = await workspace({ "tsconfig.json": config({ compilerOptions: { ...options, moduleDetection: "force" } }),
+    "src/global.ts": "interface PrivateShape { value: number }" });
+  try {
+    const file = join(ws.root, "src/global.ts");
+    const original = ws.syntaxFile(file)!;
+    expect(ts.isExternalModule(original)).toBe(false);
+    ws.reparse();
+    const validate = ws.prepareValidation();
+    ws.vfs.write(file, "interface PrivateShape { value: string }");
+    const planned = ws.syntaxFile(file)!;
+    expect(planned).not.toBe(original);
+    const result = validate();
+    expect(result.affected).toBe(1);
+    expect(ws.syntaxFile(file)).toBe(planned);
+    expect(ws.vfs.original(() => ws.syntaxFile(file))).toBe(original);
+  } finally { ws.dispose(); }
+});
+
+test("cached directories reject an ignored generated root appearing during analysis", async () => {
+  const ws = await workspace({ ".gitignore": "src/generated/\n" });
+  try {
+    const validate = ws.prepareValidation(true);
+    // The planner does not write this input; it represents a concurrent generator.
+    await mkdir(join(ws.root, "src/generated"));
+    await writeFile(join(ws.root, "src/generated/routeTree.gen.ts"), "export {}; declare global { interface Generated { value: string } }");
+    ws.vfs.write(join(ws.root, "src/leaf.ts"), "export const value = 2;");
+    validate();
+    expect(() => ws.vfs.assertStableMetadata()).toThrow("STALE_PROJECT_INPUTS: directory membership changed");
+  } finally { ws.dispose(); }
+});
+
+test("cached negative directory probes reject concurrent creation without rejecting virtual directories", async () => {
+  const ws = await workspace();
+  try {
+    const path = join(ws.root, "missing");
+    expect(ws.vfs.directoryExists(path)).toBe(false);
+    ws.vfs.write(join(path, "virtual.ts"), "export const value = 1;");
+    expect(ws.vfs.directoryExists(path)).toBe(true);
+    expect(() => ws.vfs.assertStableMetadata()).not.toThrow();
+    await mkdir(path);
+    expect(() => ws.vfs.assertStableMetadata()).toThrow("STALE_PROJECT_INPUTS");
+  } finally { ws.dispose(); }
+});
+
+test("registry documents keep parents before binding when participants use different target buckets", async () => {
+  const ws = await workspace({
+    "Source/tsconfig.json": config(),
+    "Source/src/value.ts": "export const value = 1;",
+    "Target/tsconfig.json": config({ compilerOptions: { ...options, target: "es2017" } }),
+    "Target/src/use.ts": 'import { value } from "../../Source/src/value"; export const n: number = value;',
+  }, "Source/tsconfig.json", "Source/tsconfig.json", ["Source/src/value.ts"]);
+  try {
+    ws.program(); // The editing service binds only its own target's registry bucket.
+    const validate = ws.prepareValidation();
+    ws.vfs.write(join(ws.root, "Source/src/value.ts"), 'export const value = "bad";');
+    const result = validate();
+    expect(result.before).toEqual([]);
+    expect(result.after.map(item => [item.file, item.code])).toEqual([[join(ws.root, "Target/src/use.ts"), "TS2322"]]);
   } finally { ws.dispose(); }
 });

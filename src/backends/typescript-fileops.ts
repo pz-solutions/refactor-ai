@@ -2,11 +2,12 @@ import ts from "typescript";
 import { timed } from "./typescript-timing";
 import { precheckMove } from "./typescript-prechecks";
 import { inlineReexports } from "./typescript-inline-reexports";
+import { bothIdentity, loadTs7Checker, ts7Identity } from "./typescript-ts7";
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { BackendResult, Capability, Diagnostic, RefactorRequest } from "../types";
 import { eolOf, fail, isInside, withEol } from "./typescript-vfs";
-import { Workspace, applyTextChanges, baseFormatOptions, configPathFor, moduleSpecifiers, scriptKindFor } from "./typescript-workspace";
+import { Workspace, applyTextChanges, baseFormatOptions, configPathFor, moduleSpecifiers } from "./typescript-workspace";
 import { packageSelfImport, packageSpecifier, relativeStyle } from "./typescript-package-specifiers";
 import { moveSuppressions } from "./typescript-suppressions";
 import { portablePath } from "./typescript-paths";
@@ -151,10 +152,7 @@ function assertCaseSafe(root: string, path: string): void {
 }
 
 function parseFile(ws: Workspace, path: string): ts.SourceFile | undefined {
-  const text = ws.vfs.readFile(path);
-  if (text === undefined) return undefined;
-  const impliedNodeFormat = ts.getImpliedNodeFormatForFile(path, undefined, ws.vfs.moduleResolutionHost(), ws.editOptions);
-  return ts.createSourceFile(path, text, { languageVersion: ts.ScriptTarget.Latest, impliedNodeFormat }, true, scriptKindFor(path));
+  return ws.syntaxFile(path);
 }
 
 function userFiles(ws: Workspace): string[] {
@@ -909,7 +907,9 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
   const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
   if (request.operation === "move-type" && request.target && isAbsolute(request.target) && existsSync(request.target)) affected.push(resolve(request.target));
   if (movingFiles || sourceConfig !== targetConfig) precheckMove(root, sourceConfig, targetConfig, movingFiles ?? []);
-  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected));
+  const checkerMode = request.checker === "both" ? "both" : "ts7";
+  const nativeChecker = request.checker === "ts7" || request.checker === "both" ? await loadTs7Checker(checkerMode) : undefined;
+  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode));
   try {
     if (!movingFiles && !ws.vfs.fileExists(file)) fail("FILE_NOT_FOUND", file);
     const selected = movingFiles ? movingFiles.map(([from]) => from).filter(path => /\.[cm]?[jt]sx?$/.test(path)) : [file];
@@ -919,7 +919,7 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
       if (owners.length > 1) fail("OWNERSHIP_AMBIGUOUS", `${file} is included by several projects: ${owners.join(", ")}`);
     }
     ws.assertNoUnhandledProjects(selected, true, false);
-    const sourceFile = ws.program().getSourceFile(selected[0] ?? file) ?? (movingFiles ? ts.createSourceFile(file, "", ts.ScriptTarget.Latest) : undefined);
+    const sourceFile = timed("workspace.program", () => ws.program().getSourceFile(selected[0] ?? file)) ?? (movingFiles ? ts.createSourceFile(file, "", ts.ScriptTarget.Latest) : undefined);
     if (!sourceFile) fail("FILE_NOT_IN_PROJECT", file);
     const isJs = jsExtensions.includes(extension);
     const context: Context = { ws, root, file, sourceFile, isJs, notes: [] };
@@ -931,13 +931,13 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     else if (movingFiles) timed("workspace.move", () => moveFile(context, request, movingFiles));
     else if (request.operation === "inline-reexports") {
       const before = membership(ws);
-      const deleted = inlineReexports(ws, file, sourceFile, context.notes, request.keep);
+      const deleted = timed("workspace.inline", () => inlineReexports(ws, file, sourceFile, context.notes, request.keep));
       assertMembership(ws, before, [], deleted ? [file] : []);
     }
     else fail("UNSUPPORTED_OPERATION", String(request.operation));
 
     const written = ws.vfs.changes().filter((change) => change.after !== null && !/\.json$/i.test(change.path)).map((change) => change.path);
-    if (written.length) ws.assertNoUnhandledProjects(written, false);
+    if (written.length) timed("workspace.external-projects", () => ws.assertNoUnhandledProjects(written, false));
     if (request.operation !== "move-type" && ![...ws.participants.values()].some(item => item.references.length)) {
       context.verify?.();
       context.verify = undefined;
@@ -967,7 +967,8 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     for (const config of ws.observers()) {
       context.notes.push(`Updated and validated ${relative(root, config)}, a variant config that also compiles the affected files.`);
     }
-    if (validatedFiles !== undefined) {
+    if (request.checker === "ts7") context.notes.push(`Validated all user sources across ${ws.participants.size} project(s) with TS7 7.0.2; TS5 graph discovery is not used to restrict native diagnostics.`);
+    else if (validatedFiles !== undefined) {
       context.notes.push(`Validated ${validatedFiles} affected file(s) across ${validatedProjects} project(s): the changed files and their transitive importers in the original and planned module graphs.${validatedProjects < ws.participants.size ? ` Fully checked ${ws.participants.size - validatedProjects} other project(s).` : ""}`);
     } else if (ws.participants.size > 1) {
       context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
@@ -976,8 +977,10 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
       context.notes.push("JavaScript analysis is semantic only for references TypeScript can resolve; dynamic imports with computed paths and string-based references are not changed.");
     }
     if (renamed) context.notes.push(`Renamed ${relative(root, renamed[0])} to ${relative(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
+    timed("workspace.inputs", () => ws.vfs.assertStableMetadata());
     return {
       backend: "typescript",
+      checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5", version: ts.version },
       version: ts.version,
       changes: ws.vfs.changes(),
       diagnosticsBefore: comparable,

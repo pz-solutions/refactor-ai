@@ -5,6 +5,7 @@ import { basename, dirname, relative, resolve } from "node:path";
 import type { Diagnostic } from "../types";
 import { VirtualFs, fail, isInside } from "./typescript-vfs";
 import { portablePath, workspaceRootHint } from "./typescript-paths";
+import { compareWorkspaceDiagnostics, type NativeChecker } from "./typescript-ts7";
 
 /**
  * A set of TS/JS projects ("participants") loaded over a VirtualFs.
@@ -130,6 +131,8 @@ export function isModuleMockCall(node: ts.Node): node is ts.CallExpression {
 
 /** String literals naming modules: imports, exports, require, import(), import types, JSDoc import types, test-runner module mocks. */
 export function moduleSpecifiers(sourceFile: ts.SourceFile): ts.StringLiteralLike[] {
+  const cached = specifiersBySource.get(sourceFile);
+  if (cached) return cached;
   const found: ts.StringLiteralLike[] = [];
   const seen = new Set<ts.Node>();
   const isJs = /\.[cm]?jsx?$/i.test(sourceFile.fileName);
@@ -152,8 +155,12 @@ export function moduleSpecifiers(sourceFile: ts.SourceFile): ts.StringLiteralLik
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  return found.sort((a, b) => a.getStart(sourceFile) - b.getStart(sourceFile));
+  found.sort((a, b) => a.getStart(sourceFile) - b.getStart(sourceFile));
+  specifiersBySource.set(sourceFile, found);
+  return found;
 }
+
+const specifiersBySource = new WeakMap<ts.SourceFile, ts.StringLiteralLike[]>();
 
 /** Ambient declarations can affect files with no import edge to this module. */
 function hasAmbientEffect(source: ts.SourceFile): boolean {
@@ -161,6 +168,21 @@ function hasAmbientEffect(source: ts.SourceFile): boolean {
     && (ts.isStringLiteral(node.name) || (node.flags & ts.NodeFlags.GlobalAugmentation) !== 0))
     || !!ts.forEachChild(node, visit);
   return visit(source);
+}
+
+/** DocumentRegistry parses without parents; our pre-bind graph queries need them. */
+function attachSourceParents(source: ts.SourceFile): void {
+  const pending: ts.Node[] = [source];
+  let parent: ts.Node;
+  const add = (child: ts.Node): void => {
+    (child as { parent: ts.Node }).parent = parent;
+    pending.push(child);
+  };
+  while (pending.length) {
+    parent = pending.pop()!;
+    ts.forEachChild(parent, add);
+    for (const doc of (parent as ts.Node & { jsDoc?: readonly ts.JSDoc[] }).jsDoc ?? []) add(doc);
+  }
 }
 
 export class Workspace {
@@ -172,18 +194,23 @@ export class Workspace {
   readonly editOptions: ts.CompilerOptions;
   readonly service: ts.LanguageService;
   private readonly registry: ts.DocumentRegistry;
+  private readonly registeredDocuments: { path: string; options: ts.CompilerOptions; kind: ts.ScriptKind; format: ts.ResolutionMode }[] = [];
+  private readonly parentedSources = new WeakSet<ts.SourceFile>();
   private readonly discovered: string[];
   /** Configs that joined the graph only because their programs import an affected file. */
   readonly importingConfigs: string[] = [];
   /** Per-config computed output root from the last diagnostics() run (emitting projects without rootDir only). */
   layouts = new Map<string, string>();
   private owners = new Map<string, string[]>();
-  private readonly sourceFiles = new Map<string, { text: string; file: ts.SourceFile }>();
+  private readonly sourceFiles = new Map<string, Map<string, ts.SourceFile>>();
+  private readonly discoveryPrograms = new Map<string, ts.Program>();
+  private resolutionVersion = -1;
+  private resolutionCaches = new WeakMap<ts.CompilerOptions, ts.ModuleResolutionCache>();
   private readonly looseConfigs = new Map<string, { text: string | undefined; parsed: ts.ParsedCommandLine | undefined }>();
   private extendedConfigs: Set<string> | undefined;
 
   /** `affected` are the files whose module shape the operation changes (renamed, moved from or into). */
-  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = []) {
+  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = [], private readonly nativeChecker?: NativeChecker, private readonly checkerMode: "ts7" | "both" = "both") {
     this.vfs = new VirtualFs(root);
     this.registry = ts.createDocumentRegistry(this.vfs.caseSensitive);
     this.sourceConfig = sourceConfig;
@@ -193,6 +220,9 @@ export class Workspace {
     }
     this.discovered = discoverConfigs(root);
     this.loadGraph();
+    if (nativeChecker && [...this.participants.values()].some(item => item.references.length)) {
+      fail("CHECKER_UNSUPPORTED", "--checker ts7 does not yet support in-memory project-reference declaration builds; use the default checker");
+    }
     this.editOptions = { ...this.participant(sourceConfig).parsed.options, noEmit: true };
     for (const key of ["configFile", "configFilePath", "composite", "incremental", "tsBuildInfoFile", "declaration", "declarationMap",
       "emitDeclarationOnly", "declarationDir", "outDir", "rootDir"]) delete this.editOptions[key];
@@ -229,6 +259,10 @@ export class Workspace {
 
   dispose(): void {
     this.service.dispose();
+    for (const item of this.registeredDocuments) this.registry.releaseDocument(item.path, item.options, item.kind, item.format);
+    this.registeredDocuments.length = 0;
+    this.sourceFiles.clear();
+    this.discoveryPrograms.clear();
   }
 
   participant(config: string): Participant {
@@ -426,7 +460,27 @@ export class Workspace {
   resolveModule(specifier: ts.StringLiteralLike, sourceFile: ts.SourceFile, options?: ts.CompilerOptions): ts.ResolvedModuleFull | undefined {
     options ??= this.ownersOf(sourceFile.fileName)[0] ? this.participant(this.ownersOf(sourceFile.fileName)[0]!).parsed.options : this.editOptions;
     const mode = ts.getModeForUsageLocation(sourceFile, specifier, options);
-    return ts.resolveModuleName(specifier.text, sourceFile.fileName, options, this.vfs.moduleResolutionHost(), undefined, undefined, mode).resolvedModule;
+    return ts.resolveModuleName(specifier.text, sourceFile.fileName, options, this.vfs.moduleResolutionHost(), this.resolutionCache(options), undefined, mode).resolvedModule;
+  }
+
+  /** Resolution caches never cross an overlay/config/generated-output transition. */
+  private resolutionCache(options: ts.CompilerOptions): ts.ModuleResolutionCache {
+    if (this.resolutionVersion !== this.vfs.version) {
+      this.resolutionCaches = new WeakMap();
+      this.resolutionVersion = this.vfs.version;
+    }
+    let cache = this.resolutionCaches.get(options);
+    if (!cache) {
+      cache = ts.createModuleResolutionCache(this.root, path => this.vfs.key(path), options);
+      this.resolutionCaches.set(options, cache);
+    }
+    return cache;
+  }
+
+  /** Syntax-only consumers share immutable parses until that file's text changes. */
+  syntaxFile(path: string): ts.SourceFile | undefined {
+    const impliedNodeFormat = ts.getImpliedNodeFormatForFile(path, undefined, this.vfs.moduleResolutionHost(), this.editOptions);
+    return this.sourceFile(path, { languageVersion: ts.ScriptTarget.Latest, impliedNodeFormat }, this.editOptions, true);
   }
 
   /** Lenient parse of a config outside the graph through the overlays; undefined when unreadable. */
@@ -488,12 +542,14 @@ export class Workspace {
     if (!parsed.fileNames.length || paths.some((path) => listed.has(this.vfs.key(path)))) return false;
     const program = ts.createProgram({
       rootNames: parsed.fileNames,
-      options: { ...parsed.options, noEmit: true },
+      options: parsed.options,
       projectReferences: parsed.projectReferences,
       host: this.compilerHost(config, parsed.options),
     });
     const wanted = new Set(paths.map((path) => this.vfs.key(path)));
-    return program.getSourceFiles().some((sourceFile) => wanted.has(this.vfs.key(sourceFile.fileName)));
+    const imports = program.getSourceFiles().some((sourceFile) => wanted.has(this.vfs.key(sourceFile.fileName)));
+    if (imports && this.vfs.version === 0) this.discoveryPrograms.set(this.vfs.key(config), program);
+    return imports;
   }
 
   /**
@@ -526,17 +582,28 @@ export class Workspace {
     if (useOriginal) this.vfs.original(check); else check();
   }
 
-  private sourceFile(fileName: string, settings: ts.ScriptTarget | ts.CreateSourceFileOptions, options: ts.CompilerOptions): ts.SourceFile | undefined {
+  private sourceFile(fileName: string, settings: ts.ScriptTarget | ts.CreateSourceFileOptions, options: ts.CompilerOptions, syntaxOnly = false): ts.SourceFile | undefined {
     const text = this.vfs.readFile(fileName);
     if (text === undefined) return undefined;
     const detail = typeof settings === "object"
       ? `${settings.languageVersion}|${settings.impliedNodeFormat}|${settings.jsDocParsingMode}`
       : String(settings);
-    const key = `${this.vfs.key(fileName)}|${detail}|${options.moduleDetection}|${options.jsx}`;
-    const cached = this.sourceFiles.get(key);
-    if (cached?.text === text) return cached.file;
-    const file = ts.createSourceFile(fileName, text, settings, true, scriptKindFor(fileName));
-    this.sourceFiles.set(key, { text, file });
+    // Compiler hosts supply a module-indicator callback. A syntax-only parse must
+    // not substitute its default indicator (notably with moduleDetection: force).
+    const key = `${this.vfs.key(fileName)}|${detail}|${options.moduleDetection}|${options.jsx}|${syntaxOnly}`;
+    const versions = this.sourceFiles.get(key) ?? new Map<string, ts.SourceFile>();
+    const cached = versions.get(text);
+    if (cached) return cached;
+    const kind = scriptKindFor(fileName);
+    const file = syntaxOnly ? ts.createSourceFile(fileName, text, settings, true, kind)
+      : this.registry.acquireDocument(fileName, options, ts.ScriptSnapshot.fromString(text), this.vfs.scriptVersion(fileName), kind, settings);
+    if (!syntaxOnly && !this.parentedSources.has(file) && isInside(this.root, fileName) && !portablePath(fileName).split("/").includes("node_modules")) {
+      attachSourceParents(file);
+      this.parentedSources.add(file);
+    }
+    if (!syntaxOnly) this.registeredDocuments.push({ path: fileName, options, kind, format: file.impliedNodeFormat });
+    versions.set(text, file);
+    this.sourceFiles.set(key, versions);
     return file;
   }
 
@@ -565,6 +632,14 @@ export class Workspace {
     // graph discovery cheap and defer checker allocation until a selected check.
     return new Map(this.order.map((key) => {
       const item = this.participant(key);
+      const discovered = this.discoveryPrograms.get(key);
+      this.discoveryPrograms.delete(key);
+      const comparable = (options: ts.CompilerOptions) => ({ ...options, configFile: undefined });
+      // Reuse only the unchanged initial graph. Emitted-reference overlays and
+      // config/root changes always require a fresh Program.
+      if (!this.vfs.changes().length && ![...this.participants.values()].some(item => item.references.length) && discovered
+        && sameValue(discovered.getRootFileNames(), item.parsed.fileNames)
+        && sameValue(comparable(discovered.getCompilerOptions()), comparable(item.parsed.options))) return [key, discovered];
       return [key, ts.createProgram({ rootNames: item.parsed.fileNames, options: item.parsed.options,
         projectReferences: item.parsed.projectReferences, host: this.compilerHost(item.configPath, item.parsed.options) })];
     }));
@@ -756,8 +831,10 @@ export class Workspace {
         }
         return records;
       };
-      const records = baseline && !referenced.size
+      let records = this.nativeChecker && this.checkerMode === "ts7" ? [] : baseline && !referenced.size
         ? baselineDiagnostics(this.root, item.configPath, program, only?.get(key), vfs.inputs, collect) : collect();
+      if (this.nativeChecker) records = compareWorkspaceDiagnostics(this.nativeChecker, vfs, item.configPath, item.parsed.options,
+        program.getSourceFiles().filter(source => this.validationSource(source)).map(source => resolve(source.fileName)), records, only?.get(key));
       const counts = new Map<string, { record: Diagnostic; count: number }>();
       for (const record of records) {
         const recordKey = `${record.file}\0${record.code}\0${record.message}`;

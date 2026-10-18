@@ -1,0 +1,1146 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "before": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli-before-r2.js",
+  "after": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+  "node": "v22.23.2",
+  "targetCommit": "85845e1df644060556535cbda692a5a7bd2be182",
+  "beforeHash": "365c1c14f4ab0a580d6f33921cb2482270e5c183f80acf4d119b411fb247e090",
+  "afterHash": "b25bc958c2be7eb540f2810297d1bd12c5966f43175a710c1bede0e1b67c73ee",
+  "mode": "paired cold processes; OS cache retained; cache off; no apply",
+  "samples": [
+    {
+      "scenario": "rename",
+      "run": 1,
+      "variant": "before",
+      "ms": 19123,
+      "status": 0,
+      "machineLoad": [
+        21.39,
+        21.44,
+        19.84
+      ],
+      "phases": {
+        "diagnostics.after": 12111
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 1,
+      "variant": "after",
+      "ms": 16758,
+      "status": 0,
+      "machineLoad": [
+        24.51,
+        22.1,
+        20.09
+      ],
+      "phases": {
+        "diagnostics.after": 10449
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 1,
+      "variant": "ts7",
+      "ms": 16573,
+      "status": 0,
+      "machineLoad": [
+        24.14,
+        22.18,
+        20.16
+      ],
+      "phases": {
+        "diagnostics.ts7": 7826,
+        "inputs.check": 1
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 1,
+      "variant": "both",
+      "ms": 28046,
+      "status": 0,
+      "machineLoad": [
+        25.07,
+        22.49,
+        20.3
+      ],
+      "phases": {
+        "diagnostics.after": 14495,
+        "diagnostics.ts7": 6078,
+        "inputs.check": 0
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 2,
+      "variant": "before",
+      "ms": 12544,
+      "status": 0,
+      "machineLoad": [
+        25.88,
+        23.05,
+        20.56
+      ],
+      "phases": {
+        "diagnostics.after": 8645
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 2,
+      "variant": "after",
+      "ms": 10049,
+      "status": 0,
+      "machineLoad": [
+        24.02,
+        22.75,
+        20.49
+      ],
+      "phases": {
+        "diagnostics.after": 6564
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 2,
+      "variant": "ts7",
+      "ms": 11999,
+      "status": 0,
+      "machineLoad": [
+        21.79,
+        22.32,
+        20.37
+      ],
+      "phases": {
+        "diagnostics.ts7": 6666,
+        "inputs.check": 2
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 2,
+      "variant": "both",
+      "ms": 30745,
+      "status": 0,
+      "machineLoad": [
+        22.05,
+        22.36,
+        20.41
+      ],
+      "phases": {
+        "diagnostics.after": 15488,
+        "diagnostics.ts7": 5647,
+        "inputs.check": 0
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 3,
+      "variant": "before",
+      "ms": 18454,
+      "status": 0,
+      "machineLoad": [
+        25.64,
+        23.25,
+        20.78
+      ],
+      "phases": {
+        "diagnostics.after": 12039
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 3,
+      "variant": "after",
+      "ms": 15808,
+      "status": 0,
+      "machineLoad": [
+        27.13,
+        23.68,
+        20.96
+      ],
+      "phases": {
+        "diagnostics.after": 10628
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 3,
+      "variant": "ts7",
+      "ms": 10007,
+      "status": 0,
+      "machineLoad": [
+        24.41,
+        23.25,
+        20.86
+      ],
+      "phases": {
+        "diagnostics.ts7": 5397,
+        "inputs.check": 0
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "rename",
+      "run": 3,
+      "variant": "both",
+      "ms": 18336,
+      "status": 0,
+      "machineLoad": [
+        24.75,
+        23.35,
+        20.92
+      ],
+      "phases": {
+        "diagnostics.after": 8906,
+        "diagnostics.ts7": 5132,
+        "inputs.check": 0
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 2
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 1,
+      "variant": "before",
+      "ms": 32080,
+      "status": 0,
+      "machineLoad": [
+        22.94,
+        23.02,
+        20.86
+      ],
+      "phases": {
+        "diagnostics.after": 21059
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 1,
+      "variant": "after",
+      "ms": 32232,
+      "status": 0,
+      "machineLoad": [
+        19.93,
+        22.18,
+        20.66
+      ],
+      "phases": {
+        "diagnostics.after": 21536
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 1,
+      "variant": "ts7",
+      "ms": 21332,
+      "status": 0,
+      "machineLoad": [
+        18.77,
+        21.7,
+        20.55
+      ],
+      "phases": {
+        "diagnostics.ts7": 9712,
+        "inputs.check": 2
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 1,
+      "variant": "both",
+      "ms": 32789,
+      "status": 0,
+      "machineLoad": [
+        21.27,
+        22.12,
+        20.71
+      ],
+      "phases": {
+        "diagnostics.after": 16175,
+        "diagnostics.ts7": 7715,
+        "inputs.check": 4
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 2,
+      "variant": "before",
+      "ms": 24094,
+      "status": 0,
+      "machineLoad": [
+        18.01,
+        21.18,
+        20.44
+      ],
+      "phases": {
+        "diagnostics.after": 15861
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 2,
+      "variant": "after",
+      "ms": 22805,
+      "status": 0,
+      "machineLoad": [
+        15.76,
+        20.39,
+        20.2
+      ],
+      "phases": {
+        "diagnostics.after": 14730
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 2,
+      "variant": "ts7",
+      "ms": 18843,
+      "status": 0,
+      "machineLoad": [
+        15.22,
+        19.97,
+        20.07
+      ],
+      "phases": {
+        "diagnostics.ts7": 9694,
+        "inputs.check": 2
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 2,
+      "variant": "both",
+      "ms": 40268,
+      "status": 0,
+      "machineLoad": [
+        16.66,
+        20.01,
+        20.08
+      ],
+      "phases": {
+        "diagnostics.after": 20089,
+        "diagnostics.ts7": 11264,
+        "inputs.check": 3
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 3,
+      "variant": "before",
+      "ms": 30295,
+      "status": 0,
+      "machineLoad": [
+        21.33,
+        20.64,
+        20.28
+      ],
+      "phases": {
+        "diagnostics.after": 19858
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 3,
+      "variant": "after",
+      "ms": 27295,
+      "status": 0,
+      "machineLoad": [
+        20.14,
+        20.46,
+        20.23
+      ],
+      "phases": {
+        "diagnostics.after": 16799
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 3,
+      "variant": "ts7",
+      "ms": 16577,
+      "status": 0,
+      "machineLoad": [
+        18.11,
+        20,
+        20.09
+      ],
+      "phases": {
+        "diagnostics.ts7": 9129,
+        "inputs.check": 4
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "retarget",
+      "run": 3,
+      "variant": "both",
+      "ms": 40727,
+      "status": 0,
+      "machineLoad": [
+        15.92,
+        19.41,
+        19.9
+      ],
+      "phases": {
+        "diagnostics.after": 19424,
+        "diagnostics.ts7": 11001,
+        "inputs.check": 2
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 98
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "before",
+      "ms": 194483,
+      "status": 0,
+      "machineLoad": [
+        16.39,
+        19.21,
+        19.81
+      ],
+      "phases": {
+        "workspace.load": 12955,
+        "workspace.prepare": 4917,
+        "workspace.validate": 67252
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "after",
+      "ms": 68830,
+      "status": 0,
+      "machineLoad": [
+        22.19,
+        19.78,
+        19.85
+      ],
+      "phases": {
+        "workspace.load": 14743,
+        "workspace.program": 10490,
+        "workspace.prepare": 2884,
+        "workspace.inline": 2320,
+        "workspace.external-projects": 2802,
+        "workspace.validate": 32321,
+        "workspace.inputs": 98
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "ts7",
+      "ms": 31188,
+      "status": 0,
+      "machineLoad": [
+        25.83,
+        21.74,
+        20.54
+      ],
+      "phases": {
+        "workspace.load": 8712,
+        "workspace.program": 4621,
+        "workspace.prepare": 1055,
+        "workspace.inline": 1239,
+        "workspace.external-projects": 1240,
+        "diagnostics.ts7": 10214,
+        "workspace.validate": 11017,
+        "workspace.inputs": 62
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "both",
+      "ms": 69742,
+      "status": 1,
+      "machineLoad": [
+        22.66,
+        21.36,
+        20.45
+      ],
+      "phases": {
+        "workspace.load": 12862,
+        "workspace.program": 9217,
+        "workspace.prepare": 1810,
+        "workspace.inline": 2105,
+        "workspace.external-projects": 2395,
+        "diagnostics.ts7": 12293,
+        "workspace.validate": 39121,
+        "workspace.inputs": 0
+      },
+      "outcome": "{\"status\":\"failed\",\"error\":\"STALE_PROJECT_INPUTS: directory membership changed during analysis: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web-start; retry after writers/generators settle\"}"
+    },
+    {
+      "scenario": "inline",
+      "run": 2,
+      "variant": "before",
+      "ms": 191760,
+      "status": 0,
+      "machineLoad": [
+        27.18,
+        22.94,
+        21.07
+      ],
+      "phases": {
+        "workspace.load": 15524,
+        "workspace.prepare": 6655,
+        "workspace.validate": 63864
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 2,
+      "variant": "after",
+      "ms": 35486,
+      "status": 0,
+      "machineLoad": [
+        19.97,
+        20.82,
+        20.54
+      ],
+      "phases": {
+        "workspace.load": 8167,
+        "workspace.program": 4058,
+        "workspace.prepare": 1131,
+        "workspace.inline": 1144,
+        "workspace.external-projects": 1254,
+        "workspace.validate": 17919,
+        "workspace.inputs": 43
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 2,
+      "variant": "ts7",
+      "ms": 40290,
+      "status": 0,
+      "machineLoad": [
+        17,
+        19.92,
+        20.24
+      ],
+      "phases": {
+        "workspace.load": 9067,
+        "workspace.program": 8464,
+        "workspace.prepare": 1975,
+        "workspace.inline": 2267,
+        "workspace.external-projects": 2297,
+        "diagnostics.ts7": 12323,
+        "workspace.validate": 13946,
+        "workspace.inputs": 111
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 2,
+      "variant": "both",
+      "ms": 49884,
+      "status": 0,
+      "machineLoad": [
+        21.02,
+        20.52,
+        20.42
+      ],
+      "phases": {
+        "workspace.load": 7787,
+        "workspace.program": 4833,
+        "workspace.prepare": 1156,
+        "workspace.inline": 1160,
+        "workspace.external-projects": 1525,
+        "diagnostics.ts7": 7830,
+        "workspace.validate": 31433,
+        "workspace.inputs": 50
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 3,
+      "variant": "before",
+      "ms": 182629,
+      "status": 0,
+      "machineLoad": [
+        17.68,
+        19.66,
+        20.13
+      ],
+      "phases": {
+        "workspace.load": 10815,
+        "workspace.prepare": 5384,
+        "workspace.validate": 58695
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 3,
+      "variant": "after",
+      "ms": 43123,
+      "status": 0,
+      "machineLoad": [
+        20.1,
+        19.53,
+        19.94
+      ],
+      "phases": {
+        "workspace.load": 8052,
+        "workspace.program": 4722,
+        "workspace.prepare": 969,
+        "workspace.inline": 1322,
+        "workspace.external-projects": 1902,
+        "workspace.validate": 24231,
+        "workspace.inputs": 60
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 3,
+      "variant": "ts7",
+      "ms": 25158,
+      "status": 0,
+      "machineLoad": [
+        17.26,
+        18.82,
+        19.67
+      ],
+      "phases": {
+        "workspace.load": 8104,
+        "workspace.program": 4385,
+        "workspace.prepare": 1074,
+        "workspace.inline": 1136,
+        "workspace.external-projects": 1414,
+        "diagnostics.ts7": 6504,
+        "workspace.validate": 7372,
+        "workspace.inputs": 43
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 3,
+      "variant": "both",
+      "ms": 54144,
+      "status": 0,
+      "machineLoad": [
+        14.06,
+        17.93,
+        19.35
+      ],
+      "phases": {
+        "workspace.load": 7926,
+        "workspace.program": 8494,
+        "workspace.prepare": 1307,
+        "workspace.inline": 1100,
+        "workspace.external-projects": 1368,
+        "diagnostics.ts7": 10785,
+        "workspace.validate": 31754,
+        "workspace.inputs": 72
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d309e25bcc18e99eb3f3485c43c9af99ac5fd61bf3c177212f6f9db0c588b3bd",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 101
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 1,
+      "variant": "before",
+      "ms": 141700,
+      "status": 0,
+      "machineLoad": [
+        16.63,
+        18.11,
+        19.34
+      ],
+      "phases": {
+        "workspace.load": 18881,
+        "workspace.prepare": 3563,
+        "workspace.move": 19905,
+        "workspace.validate": 73477
+      },
+      "outcome": {
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "d3b687cb5cc57dc442450a3496f676f0cd893de2c5332de95297ee385f1589ea",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 17
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 1,
+      "variant": "after",
+      "ms": 22164,
+      "status": 1,
+      "machineLoad": [
+        22.91,
+        19.69,
+        19.73
+      ],
+      "phases": {
+        "workspace.load": 13002,
+        "workspace.program": 7230,
+        "workspace.prepare": 494
+      },
+      "outcome": "{\"status\":\"failed\",\"error\":\"Cannot read properties of undefined (reading 'kind')\"}"
+    },
+    {
+      "scenario": "move",
+      "run": 1,
+      "variant": "ts7",
+      "ms": 27266,
+      "status": 1,
+      "machineLoad": [
+        21.62,
+        19.57,
+        19.69
+      ],
+      "phases": {
+        "workspace.load": 16221,
+        "workspace.program": 7728,
+        "workspace.prepare": 420
+      },
+      "outcome": "{\"status\":\"failed\",\"error\":\"Cannot read properties of undefined (reading 'kind')\"}"
+    },
+    {
+      "scenario": "move",
+      "run": 1,
+      "variant": "both",
+      "ms": 20672,
+      "status": 1,
+      "machineLoad": [
+        21.37,
+        19.78,
+        19.76
+      ],
+      "phases": {
+        "workspace.load": 11793,
+        "workspace.program": 6601,
+        "workspace.prepare": 497
+      },
+      "outcome": "{\"status\":\"failed\",\"error\":\"Cannot read properties of undefined (reading 'kind')\"}"
+    }
+  ],
+  "stage": "Before final workspace parent-link fix and defensive checker-identity copy. Rename/retarget do not use Workspace; their recorded timings remain relevant. Inline/move included for regression provenance only; final paired reports supersede them."
+}

@@ -1,8 +1,21 @@
 # Native diagnostic checkers for refactor-ai
 
-Research/probe date: 2026-10-18. Scope: replacing the expensive diagnostic pass, retaining the pinned TypeScript 5.9.3 engine for deterministic refactoring edits. No production dependency or checker option added. The benchmark repository was read only. All downloaded packages and executable probes live under `/tmp/refactor-ai-native-checkers/`.
+Research/probe date: 2026-10-18. Scope: replacing the expensive diagnostic pass, retaining the pinned TypeScript 5.9.3 engine for deterministic refactoring edits. Round 1 added no production checker; round 2 adds explicit `--checker ts7` and `--checker both` with an optional pinned peer (details below). The benchmark repository was read only. All downloaded packages and executable probes live under `/tmp/refactor-ai-native-checkers/`.
 
-## Recommendation
+## Round 2 implementation
+
+The optional alias `typescript7: npm:typescript@7.0.2` now powers native diagnostic
+passes over the planned filesystem. `--checker ts7` uses native diagnostics only;
+`--checker both` compares TS5/TS7 error code+file multisets and rejects disagreement.
+The default and all edit production remain TS5.9.3. Exact user-source membership
+is checked in both native modes. The differential corpus and actual operation
+plans run under Node, because the sync native API uses Node pipe file descriptors
+that Bun does not expose. In-memory project-reference declaration builds remain
+unsupported in native modes and fail explicitly. No checker downloads occur at
+runtime. See the [round 2 dogfood log](../dogfood/2026-10-17-tanstack-start-migration.md#performance-round-2-2026-10-18)
+for paired end-to-end measurements and the default recommendation.
+
+## Round 1 recommendation
 
 **Prototype an explicit native diagnostics adapter, first Microsoft TypeScript 7, then Theo's Rust port. Keep 5.9.3 as the correctness gate until differential tests establish the supported compiler/configuration contract.** Both native implementations can validate in-memory plans without applying them to disk. This recommendation follows from the local probes below; neither the probe nor an upstream compatibility claim establishes diagnostic equivalence to 5.9.3 across the heavy generic types in the target monorepo.
 

@@ -12,7 +12,7 @@ function parse(args: string[]): { command: string; operation?: string; flags: Re
   const command = args.shift() ?? "help";
   const operation = args[0] && !args[0].startsWith("--") ? args.shift() : undefined;
   const flags: Record<string, string> = {};
-  const allowed = new Set(["project", "file", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks"]);
+  const allowed = new Set(["project", "file", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker"]);
   const mappings: string[] = [];
   while (args.length) {
     const key = args.shift()!;
@@ -81,6 +81,7 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
     project: required(flags, "project"), file: operation === "retarget-import" ? flags.file : required(flags, "file"), operation: operation as Operation,
     keep: flags.keep === "true" ? true : undefined,
     root: flags.root, at: flags.at, end: flags.end, name: flags.name,
+    checker: flags.checker as "ts5" | "ts7" | "both" | undefined,
     mode: flags.mode as "sort" | "remove-unused" | undefined, target: operation === "retarget-import" ? undefined : flags.to,
     from: flags.from, to: operation === "retarget-import" ? flags.to : undefined,
     map: flags.map === undefined ? undefined : parseMap(flags.map), only: flags.only?.split(","),

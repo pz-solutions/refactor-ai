@@ -241,3 +241,285 @@ workspace graph/inline profiling; bounded cache eviction; npm12 pack-test output
 compatibility. F9/F11/F20 UX changes and new project-selection flags were not added.
 Concurrent generated-input handling and a successful users/owners retry remain
 open (F34/F35); no abandonment-rate improvement is claimed without that evidence.
+
+## Performance round 2 (2026-10-18)
+
+### F36. Overlay directory existence scanned every edit for every module lookup — fixed
+
+`node --cpu-prof` on a valid in-package formatter move at `19f86ab` attributed
+13.8 s inclusive sampled time to `VirtualFs.directoryExists`, 9.9 s to its repeated
+containment checks, and 16.0 s self sampled time to GC (69.0 s profiled process). Each
+lookup allocated all virtual paths, then normalized and compared them against
+the directory. A move edits many importers, making this proportional to edits ×
+resolution probes. Index virtual ancestor directories once per overlay version;
+cache normalized paths and immutable per-plan disk directory metadata. Ordinary
+directory enumeration uses Dirents, statting symlinks only. Original/planned
+views, generated declaration changes, creations and deletions invalidate the
+virtual index. Before accepting a plan, replay cached directory membership and
+existence against disk, including ignored generator inputs. A mismatch fails with
+`STALE_PROJECT_INPUTS`; regression tests cover ignored generated roots and cached
+negative probes. Snapshot/membership checks remain strict; this does not relax F35.
+
+### F37. File operations repeatedly parsed sources and resolved identical modules — fixed
+
+The same move profile attributed 8.3 s inclusive sampled time to workspace module
+resolution and 4.3 s to compiler source construction. Workspace resolution now
+shares a `ModuleResolutionCache` per compiler-options object and overlay version,
+preserving usage-location resolution mode. Any overlay/config/generated-output
+transition (including entering/leaving the original view) replaces the caches.
+Syntax consumers retain original and planned parses by text/context; immutable
+module-specifier walks are memoized by SourceFile. Compiler parses remain separate
+from syntax-only parses, preserving forced module detection. The workspace still
+has one editing LanguageService/DocumentRegistry shared by all participants;
+compiler hosts acquire parsed documents from that same registry. Discovery
+Programs are reused only when roots/options are identical, there are no edits
+and no project-reference outputs. Validation uses sequential plain Programs,
+avoiding F28's eager-checker memory regression.
+
+### F38. Native checker selection is explicit and auditable — implemented, opt-in
+
+`--checker ts7` / API `checker: "ts7"` uses only Microsoft Go 7.0.2 for diagnostic
+passes of the planned in-memory filesystem. Edits, graph discovery and closure
+analysis remain on pinned TS5.9.3. The exact npm alias
+`typescript7: npm:typescript@7.0.2` is a development dependency and optional peer
+in TS-capable distributions. No runtime installer or download fallback exists.
+Node 22+ is required for the native sync IPC API; Bun cannot expose its pipe file
+descriptors. Project-reference declaration builds fail explicitly in native mode.
+
+`--checker both` audits TS5+TS7 on every selected pass, comparing file+error code
+with multiplicity. Any disagreement rejects the plan with `CHECKER_MISMATCH`.
+Both native modes verify exact user-source membership against the TS5 graph and
+preserve options/config/global/syntax/semantic/declaration checks. Every TS plan
+records checker identity/version; audit plans also record their TS5 reference.
+TS7-only diagnostics are not a claim of semantic equivalence to 5.9.3 outside the
+corpus. The coordinator explicitly authorized this distinction: uber-platform's
+own app-features typecheck already uses TS7; project checks still run after apply.
+TS7-only mode checks all user sources in each participant with batched API
+calls, rather than trusting a closure derived from another compiler version.
+Default remains TS5.9.3.
+
+The differential corpus covers two-hop re-export breakage, create/delete/missing
+roots, package exports switching, path aliases, JSX props, declaration merging,
+`satisfies`, generic inference and ambient augmentation. It executes both audit
+and native-only passes. Actual rename/move/inline/retarget plans run in both modes.
+A real TS7/TS5 ES5-option incompatibility and injected missing/duplicate diagnostics
+prove audit mismatches reject plan creation. Native API processes always close in
+`finally`; they never write the target tree.
+
+F35 safe relaxation remains deferred: these profiles did not establish a complete
+read-set proof for accepting concurrent generated-input churn.
+
+Round 2 reproduction (run from the perf worktree):
+
+```sh
+# Build a separate baseline without switching or modifying the main checkout.
+mkdir -p dist/r2-baseline-src
+git archive 19f86ab src | tar -x -C dist/r2-baseline-src
+bun build dist/r2-baseline-src/src/cli.ts --target node --format esm \
+  --external typescript --outfile dist/cli-before-r2.js
+bun run typecheck
+bun run build
+PATH=/tmp/refactor-ai-test-tools/node_modules/.bin:/tmp/refactor-ai-dotnet:$PATH \
+  npm_execpath=/tmp/refactor-ai-test-tools/node_modules/npm/bin/npm-cli.js \
+  DOTNET_ROOT=/tmp/refactor-ai-dotnet DOTNET_CLI_HOME=/tmp/refactor-ai-dotnet-home \
+  NUGET_PACKAGES=/tmp/refactor-ai-nuget bun test --timeout 60000
+bun scripts/bench-r2.ts /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92 \
+  dist/cli-before-r2.js dist/cli.js /tmp/refactor-r2-verified-paired
+```
+
+The benchmark alternates baseline/default/ts7/both within each repetition, runs
+three repetitions per scenario, disables persistent caches, retains OS caches and
+never applies a plan. Reports include binary hashes, target commit, per-plan
+snapshot/edit hashes, phase timings and load averages. Raw plans/stdout/stderr stay
+under `/tmp`; the compact report and CPU profile summaries are committed alongside
+this log. Large `.cpuprofile` files remain under `/tmp/refactor-r2-profile`.
+
+Verification setup notes: a focused run hit an existing 5 s test timeout under
+concurrent E2E load. The first full run passed 289 tests but its packed-npm test
+selected system npm12 despite PATH; `npmCli()` prefers `npm_execpath` and standard
+installation locations. Explicitly setting `npm_execpath` to npm11 is required.
+No packaging assertions were weakened. The first inline CPU capture rejected with
+`REEXPORT_UNRESOLVED` after 14.3 s; exclude that rejection from successful-plan
+speed comparisons. A later intermediate inline capture successfully planned in
+46.5 s; its operation itself took 1.37 s. These individual profiled runs establish
+hotspots, not the paired latency results below.
+
+### F39 — shared registry requires parent links before graph queries
+
+A real in-package formatter move exposed a regression missed by the initial small
+fixtures: DocumentRegistry parses without node parents. The editing language
+service binds its own option bucket, but another participant with a different
+`target` can still have an unbound source. Calling `getModeForUsageLocation` on
+that source crashed with an undefined `node.kind` during validation preparation.
+Compiler-host user sources now acquire parent links once per source object,
+including JSDoc children, before graph queries. A regression fixture uses two
+participants with different language targets and checks the downstream TS2322;
+this retains shared registry reuse without depending on lazy checker binding.
+
+### F40 — queued: move and import adaptation in one plan
+
+Owner-detail evidence: nine plans in
+`/home/wooboo/.t3/worktrees/uber-platform/t3-f29f750b/test-results/owner-detail-refactor-log.md`.
+The 0.630 s / 0.820 s alias prechecks and 0.547 s dependency precheck confirm the
+round-one fail-fast improvement. They still leave migration agents without a
+workable next action. After this performance round, add repeatable move-file
+module mappings (`--map from=to`) applied inside the same moved-file overlay,
+with the same module matching rules as retarget-import. Examples: app alias to
+package import, form-dialog alias to relative package import, next-intl to
+use-intl, routing import to an injected port. Distinguish module mappings from
+retarget-import's existing exported-name mappings in the public API.
+
+For MISSING_DEPENDENCY, consider explicit repository-maintained equivalents in
+`.refactor-ai/equivalents.json`, e.g. `{"next-intl":"use-intl"}`. Suggest a declared
+equivalent only from that configuration; do not infer API compatibility or advise
+adding a framework dependency to a deliberately framework-free package. Mapping,
+resolution and normal planned diagnostics must still succeed. This is queued,
+not implemented in round two.
+
+### F41 — queued: empty apply and proven read-set staleness
+
+The owner-integration retarget took 8.080 s, produced no changes and passed
+validation, but apply rejected changes to `e2e/app/people/owner-detail.spec.ts`,
+`e2e/app/people/owners.spec.ts` and `e2e/route-coverage.ts` with STALE_SNAPSHOT.
+An empty plan should apply successfully. For nonempty plans, replace the blanket
+project snapshot only after recording a complete read set: edited files,
+validation contents, config/package resolution inputs, failed probes and directory
+membership that affects roots/module resolution. Unrelated test edits should not
+invalidate a plan. This also supplies the proof needed for F35; do not simply
+exclude generated directories or tests. Queued after the current goal.
+
+### F42 — queued: owner-return-url cold move remains slow
+
+The same owner-detail log records 54.810 s for the in-package move
+`owners/owner-return-url.ts` → `shared/dashboard-return-url.ts`, touching six files
+and validating 31 affected files across app-features/web/web-start. Its apply was
+then invalidated by an independently changed owner-detail source. Keep this real
+migration as a follow-up benchmark in addition to the formatter scenario used in
+round two. Do not count fast rejected plans as completed migrations.
+
+### F43 — first slice completed with zero manual moves
+
+The coordinator reports user-detail as the first slice whose complete move used
+refactor-ai: seven successful plan/preview/apply cycles, all applied, with zero
+manual moves. Evidence:
+`/home/wooboo/.t3/worktrees/uber-platform/t3-150b40ca/test-results/user-detail/refactor-ai.log`.
+The successful sequence prepared imports in the SOURCE directory before moving:
+next-intl → use-intl (11.976 s), form-dialog alias → shared package export
+(11.523 s), breadcrumb alias → shared package export (18.142 s), and
+`../users-content` → package import (19.541 s after one failed attempt). Then the
+hook, controls and detail moves all applied. The log also records a useful
+0.561 s unresolved-alias precheck rejection; it is not one of the seven completed
+cycles.
+
+Completion is a positive result even though planning remains slow: the three
+successful move plans took 155.186 / 60.850 / 66.108 s on the coordinator's
+round-one distribution. Their previews took 0.423 / 0.357 / 0.356 s and applies
+0.773 / 0.709 / 0.699 s. Across all seven cycles preview/apply medians were
+0.359 / 0.709 s (ranges 0.311–0.496 / 0.554–1.157 s). These observational slice
+runs are not controlled round-two before/after measurements. They strengthen F40:
+a combined mapping+move plan can eliminate repeated preparation cycles. The
+move-file skill now teaches the proven source-retarget-then-move recipe,
+destination dependency checks and post-apply project verification.
+
+### F44 — benchmark rejection is not a latency win
+
+The final move series' third repetition encountered concurrent work in the target.
+TS7 rejected directory membership churn under `packages/app-features/src` with
+STALE_PROJECT_INPUTS after 64.577 s; the following audit failed INVALID_PACKAGE in
+2.053 s because `packages/app-features/package.json` had Git conflict markers.
+The preceding baseline/default plans had completed in 190.066 / 112.255 s. Retain
+all four records, but exclude this incomplete pair from successful paired medians.
+The next inline baseline was interrupted after 19.832 s when the merge conflict
+was detected; it is not a completed latency sample. Benchmarks were stopped, the
+read-only target left untouched, and isolated fixture tests run while its writers
+settled. This is direct evidence that the metadata freshness guard catches real
+changes; it is not a TS7 parity failure or grounds for weakening F35.
+
+Round-two verification of the final engine: `bun run typecheck` and
+`bun run build` passed; the full `.NET8`/npm11 run passed **295/295 tests** across
+19 files (1,390 assertions, 334.85 s on the shared machine). This includes 24
+native tests: ten differential corpus entries in both modes, eight actual
+operation/mode combinations, two cross-package/symlink moves, two defensive plan
+metadata mutation cases, and two explicit mismatch rejection cases. The native
+corpus is green for the supported fixtures; the intentional ES5 configuration
+incompatibility remains a verified rejection in audit mode, not a compatibility
+claim. The final fixture baseline for JSX is valid before its planned prop error.
+The move skill's focused documentation edit also passes `quick_validate.py`.
+
+### F45 — remaining latency is cold graph/edit setup and diagnostics
+
+The final successful move series has three complete baseline/default/ts7/both
+repetitions, identical snapshots and identical edit hashes throughout. Its default
+TS5 median is 62.994 s versus baseline 99.416 s; TS7-only is 40.454 s, audit 72.319 s.
+Median move-edit work is 14.202 → 3.012 s; workspace discovery is 10.976 → 9.109 s;
+validation is 49.021 → 40.394 s. New timing boundaries also expose 4.984 s for the
+editing service program. TS7-only validation takes 17.783 s, including 16.183 s in
+three native diagnostic sessions. Per-phase medians do not add up exactly to the
+median complete process.
+
+The virtual-directory/resolution/parse work has materially improved; the target
+of reliably sub-30 s moves has not been reached on this machine. Native checking
+still leaves TS5 editing and exact graph discovery, and native-only mode checks
+all user sources in each participant. Potential follow-ups are cheaper exact
+participant discovery and sharing a native session across projects within one
+immutable filesystem view; either needs its own lifetime/invalidation proof and
+paired measurements. Follow-ups must preserve exact graph membership, snapshot
+invalidation between filesystem views and input freshness.
+
+During the final inline series, repetition two's baseline rejected after 140.379 s
+with three TS2307s in tenant-detail for the concurrently removed invitation
+components. Subsequent new-engine plans were clean on the next target snapshot:
+100 planned changes in repetition one became 97 after the source migration.
+The target advanced from 95ff838d to 8e1f5cf4. Retain the rejection, exclude that
+incomplete repetition from paired medians, and run a replacement complete pair.
+The valid comparison requires snapshot/edit equality within each repetition;
+source changes between repetitions are recorded rather than treated as
+nondeterministic planner output.
+
+### Final paired results and recommendation
+
+Seconds: median (min–max), three **complete successful** pairs per scenario,
+cache off, cold Node 22.23.2 processes, OS cache retained, no apply.
+
+| Scenario | R1 TS5 | R2 TS5 default | R2 TS7 only | R2 both audit |
+| --- | --- | --- | --- | --- |
+| rename | 18.5 (12.5–19.1) | 15.8 (10.0–16.8) | 12.0 (10.0–16.6) | 28.0 (18.3–30.7) |
+| retarget-import | 30.3 (24.1–32.1) | 27.3 (22.8–32.2) | 18.8 (16.6–21.3) | 40.3 (32.8–40.7) |
+| inline-reexports | 126.0 (123.0–151.4) | 27.5 (24.8–35.3) | 19.8 (17.5–24.8) | 34.8 (33.3–38.2) |
+| move-file | 99.4 (88.5–106.6) | 63.0 (55.5–63.4) | 40.5 (35.0–45.1) | 72.3 (64.0–84.4) |
+
+All four variants in each selected repetition have identical snapshot and edit
+hashes. Rename/retarget use the earlier R2 binary before the workspace parent-link
+repair; those operations do not use Workspace, and the later defensive metadata
+copy does not change CLI serialization. Move uses the final binary and one fixed
+snapshot for all 12 plans. Inline uses successful main repetitions 1 and 3 plus
+the replacement repetition: the migration changed its scope from 100 to 97 files
+between repetitions. The rejected main repetition 2 is excluded in full. The
+paired comparisons within each repetition remain identical-input comparisons;
+these shared-machine measurements do not isolate all effects of system load.
+
+[Compact reports, selected pair identities and phase medians](perf-r2-2026-10-18/README.md)
+include every rejection separately; [summary.json](perf-r2-2026-10-18/summary.json)
+and [standalone results table](perf-r2-2026-10-18/results.html) are derived from the
+selected successful pairs. Large profiles and full plan/stdout/stderr files stay
+under the documented `/tmp/refactor-r2-*` paths.
+
+The largest end-to-end improvement is inline: 126.0 → 27.5 s with default TS5
+(4.6×), or 19.8 s native-only (6.3×). Move improves 99.4 → 63.0 s default (1.6×),
+or 40.5 s native (2.5×); its edit phase is 4.7× faster. The ~10 s typical / ~30 s
+move targets are **not reliably met**. Native inline reaches the ~30 s target in
+all three selected runs, but move and typical rename still need work.
+
+Recommendation: use explicit `--checker ts7` on uber-platform, whose own package
+check already uses TS7, and use `--checker both` for audits. Keep the shipped
+default TS5.9.3. The modern differential corpus and actual supported-operation
+audits are green, but rename latency ranges overlap, one native rename pair was
+slower, ES5 options have a verified compiler-version disagreement, and native
+project-reference declaration builds remain unsupported. This evidence does not
+justify automatic TS7 selection whenever installed; reassess after those limits
+and the remaining cold graph/session costs are addressed. tsc-rs remains research.
+
+Queued follow-up work is F40 mapping/equivalents, F41 empty-apply/read-set
+staleness and F42 the owner-return-url scenario; F43 records the first zero-manual-
+move slice and the source-retarget-then-move skill recipe. F35 remains deferred
+until a complete read-set proof is available.

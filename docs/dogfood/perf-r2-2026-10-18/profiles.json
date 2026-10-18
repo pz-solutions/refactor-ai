@@ -1,0 +1,1049 @@
+{
+  "mode": "Node --cpu-prof, REFACTOR_AI_TIMINGS=on, cache off; profile overhead included; paths/plans under /tmp/refactor-r2-profile; target read-only",
+  "profiles": [
+    {
+      "profile": "inline-before",
+      "stage": "baseline 19f86ab",
+      "wallSeconds": 14.252,
+      "phasesMs": {
+        "workspace.load": 6678,
+        "workspace.prepare": 3218
+      },
+      "error": "REEXPORT_UNRESOLVED: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/lib/formatters.ts has no resolved export 'formatCurrencyFromCents'",
+      "selfTop": [
+        {
+          "function": "(garbage collector)",
+          "file": "",
+          "line": 0,
+          "seconds": 2.742
+        },
+        {
+          "function": "scan",
+          "file": "typescript.js",
+          "line": 12794,
+          "seconds": 0.805
+        },
+        {
+          "function": "statSync",
+          "file": "node:fs",
+          "line": 1745,
+          "seconds": 0.467
+        },
+        {
+          "function": "stat",
+          "file": "",
+          "line": 0,
+          "seconds": 0.342
+        },
+        {
+          "function": "resolve",
+          "file": "node:path",
+          "line": 1260,
+          "seconds": 0.341
+        },
+        {
+          "function": "readPath",
+          "file": "cli.js",
+          "line": 1978,
+          "seconds": 0.323
+        },
+        {
+          "function": "lstat",
+          "file": "",
+          "line": 0,
+          "seconds": 0.301
+        },
+        {
+          "function": "doJSDocScan",
+          "file": "typescript.js",
+          "line": 39066,
+          "seconds": 0.29
+        },
+        {
+          "function": "addWorkItem",
+          "file": "typescript.js",
+          "line": 33012,
+          "seconds": 0.273
+        },
+        {
+          "function": "internIdentifier",
+          "file": "typescript.js",
+          "line": 33998,
+          "seconds": 0.192
+        },
+        {
+          "function": "forEachChildRecursively",
+          "file": "typescript.js",
+          "line": 32972,
+          "seconds": 0.179
+        },
+        {
+          "function": "getIdentifierToken",
+          "file": "typescript.js",
+          "line": 12735,
+          "seconds": 0.154
+        },
+        {
+          "function": "(idle)",
+          "file": "",
+          "line": 0,
+          "seconds": 0.15
+        },
+        {
+          "function": "findSourceFileWorker",
+          "file": "typescript.js",
+          "line": 128602,
+          "seconds": 0.135
+        },
+        {
+          "function": "iterateCommentRanges",
+          "file": "typescript.js",
+          "line": 11917,
+          "seconds": 0.135
+        },
+        {
+          "function": "speculationHelper",
+          "file": "typescript.js",
+          "line": 33719,
+          "seconds": 0.133
+        },
+        {
+          "function": "rawDisk",
+          "file": "cli.js",
+          "line": 1997,
+          "seconds": 0.129
+        },
+        {
+          "function": "parseJSDocCommentWorker",
+          "file": "typescript.js",
+          "line": 39044,
+          "seconds": 0.122
+        },
+        {
+          "function": "scanJsDocToken",
+          "file": "typescript.js",
+          "line": 14438,
+          "seconds": 0.119
+        },
+        {
+          "function": "fixupParentReferences",
+          "file": "typescript.js",
+          "line": 33511,
+          "seconds": 0.113
+        }
+      ],
+      "appInclusiveTop": [
+        {
+          "function": "analyzeFileOperation",
+          "line": 4675,
+          "seconds": 10.939
+        },
+        {
+          "function": "analyze",
+          "line": 5533,
+          "seconds": 10.939
+        },
+        {
+          "function": "createPlan",
+          "line": 728,
+          "seconds": 10.939
+        },
+        {
+          "function": "timed",
+          "line": 1683,
+          "seconds": 8.031
+        },
+        {
+          "function": "Workspace",
+          "line": 2387,
+          "seconds": 5.705
+        },
+        {
+          "function": "",
+          "line": 4689,
+          "seconds": 5.705
+        },
+        {
+          "function": "loadGraph",
+          "line": 2474,
+          "seconds": 5.672
+        },
+        {
+          "function": "importsAffected",
+          "line": 2689,
+          "seconds": 5.624
+        },
+        {
+          "function": "getSourceFile",
+          "line": 2751,
+          "seconds": 4.545
+        },
+        {
+          "function": "sourceFile",
+          "line": 2735,
+          "seconds": 4.539
+        },
+        {
+          "function": "program",
+          "line": 2633,
+          "seconds": 2.774
+        },
+        {
+          "function": "prepareValidation",
+          "line": 2779,
+          "seconds": 2.326
+        },
+        {
+          "function": "",
+          "line": 4707,
+          "seconds": 2.326
+        },
+        {
+          "function": "validationPrograms",
+          "line": 2768,
+          "seconds": 1.967
+        },
+        {
+          "function": "",
+          "line": 2769,
+          "seconds": 1.967
+        },
+        {
+          "function": "readFile",
+          "line": 2027,
+          "seconds": 1.348
+        },
+        {
+          "function": "fileExists",
+          "line": 2041,
+          "seconds": 1.187
+        },
+        {
+          "function": "readPath",
+          "line": 1978,
+          "seconds": 1.14
+        },
+        {
+          "function": "directoryExists",
+          "line": 2131,
+          "seconds": 1.074
+        },
+        {
+          "function": "directoryExists",
+          "line": 2762,
+          "seconds": 0.896
+        },
+        {
+          "function": "fileExists",
+          "line": 2759,
+          "seconds": 0.854
+        },
+        {
+          "function": "rawDisk",
+          "line": 1997,
+          "seconds": 0.471
+        },
+        {
+          "function": "",
+          "line": 2785,
+          "seconds": 0.359
+        },
+        {
+          "function": "validationGraph",
+          "line": 2836,
+          "seconds": 0.357
+        },
+        {
+          "function": "fileExists",
+          "line": 2430,
+          "seconds": 0.268
+        }
+      ]
+    },
+    {
+      "profile": "move-before",
+      "stage": "baseline 19f86ab",
+      "wallSeconds": 68.969,
+      "phasesMs": {
+        "workspace.load": 8808,
+        "workspace.prepare": 2207,
+        "workspace.move": 11859,
+        "workspace.validate": 31511
+      },
+      "error": null,
+      "selfTop": [
+        {
+          "function": "(garbage collector)",
+          "file": "",
+          "line": 0,
+          "seconds": 15.988
+        },
+        {
+          "function": "resolve",
+          "file": "node:path",
+          "line": 1260,
+          "seconds": 6.745
+        },
+        {
+          "function": "statSync",
+          "file": "node:fs",
+          "line": 1745,
+          "seconds": 1.722
+        },
+        {
+          "function": "relative",
+          "file": "node:path",
+          "line": 1371,
+          "seconds": 1.637
+        },
+        {
+          "function": "isInside",
+          "file": "cli-before-r2.js",
+          "line": 1815,
+          "seconds": 1.488
+        },
+        {
+          "function": "stat",
+          "file": "",
+          "line": 0,
+          "seconds": 1.186
+        },
+        {
+          "function": "key",
+          "file": "cli-before-r2.js",
+          "line": 1951,
+          "seconds": 1.143
+        },
+        {
+          "function": "readPath",
+          "file": "cli-before-r2.js",
+          "line": 1978,
+          "seconds": 1.103
+        },
+        {
+          "function": "scan",
+          "file": "typescript.js",
+          "line": 12794,
+          "seconds": 0.995
+        },
+        {
+          "function": "tryParseJson",
+          "file": "typescript.js",
+          "line": 21101,
+          "seconds": 0.871
+        },
+        {
+          "function": "visit",
+          "file": "cli-before-r2.js",
+          "line": 2341,
+          "seconds": 0.708
+        },
+        {
+          "function": "invokeOnce",
+          "file": "typescript.js",
+          "line": 73339,
+          "seconds": 0.58
+        },
+        {
+          "function": "",
+          "file": "typescript.js",
+          "line": 54851,
+          "seconds": 0.522
+        },
+        {
+          "function": "getUnmatchedProperties",
+          "file": "typescript.js",
+          "line": 72967,
+          "seconds": 0.508
+        },
+        {
+          "function": "inferFromTypes",
+          "file": "typescript.js",
+          "line": 73152,
+          "seconds": 0.505
+        },
+        {
+          "function": "realpath",
+          "file": "",
+          "line": 0,
+          "seconds": 0.497
+        },
+        {
+          "function": "normalizeString",
+          "file": "node:path",
+          "line": 93,
+          "seconds": 0.483
+        },
+        {
+          "function": "rawDisk",
+          "file": "cli-before-r2.js",
+          "line": 1997,
+          "seconds": 0.467
+        },
+        {
+          "function": "lstat",
+          "file": "",
+          "line": 0,
+          "seconds": 0.466
+        },
+        {
+          "function": "getPropertyOfType",
+          "file": "typescript.js",
+          "line": 63862,
+          "seconds": 0.433
+        }
+      ],
+      "appInclusiveTop": [
+        {
+          "function": "analyzeFileOperation",
+          "line": 4675,
+          "seconds": 49.633
+        },
+        {
+          "function": "analyze",
+          "line": 5533,
+          "seconds": 49.599
+        },
+        {
+          "function": "createPlan",
+          "line": 728,
+          "seconds": 49.561
+        },
+        {
+          "function": "timed",
+          "line": 1683,
+          "seconds": 40.062
+        },
+        {
+          "function": "",
+          "line": 2791,
+          "seconds": 21.708
+        },
+        {
+          "function": "collect",
+          "line": 2941,
+          "seconds": 15.881
+        },
+        {
+          "function": "diagnostics",
+          "line": 2927,
+          "seconds": 15.844
+        },
+        {
+          "function": "directoryExists",
+          "line": 2131,
+          "seconds": 13.798
+        },
+        {
+          "function": "importsAffected",
+          "line": 2689,
+          "seconds": 10.293
+        },
+        {
+          "function": "contains",
+          "line": 1958,
+          "seconds": 9.884
+        },
+        {
+          "function": "",
+          "line": 2135,
+          "seconds": 9.881
+        },
+        {
+          "function": "",
+          "line": 4714,
+          "seconds": 9.355
+        },
+        {
+          "function": "moveFile",
+          "line": 4542,
+          "seconds": 9.354
+        },
+        {
+          "function": "resolveModule",
+          "line": 2639,
+          "seconds": 8.267
+        },
+        {
+          "function": "directoryExists",
+          "line": 2762,
+          "seconds": 7.432
+        },
+        {
+          "function": "Workspace",
+          "line": 2387,
+          "seconds": 7.22
+        },
+        {
+          "function": "",
+          "line": 4689,
+          "seconds": 7.22
+        },
+        {
+          "function": "loadGraph",
+          "line": 2474,
+          "seconds": 7.198
+        },
+        {
+          "function": "directoryExists",
+          "line": 2210,
+          "seconds": 6.342
+        },
+        {
+          "function": "isInside",
+          "line": 1815,
+          "seconds": 6.308
+        },
+        {
+          "function": "",
+          "line": 2769,
+          "seconds": 5.776
+        },
+        {
+          "function": "validationPrograms",
+          "line": 2768,
+          "seconds": 5.776
+        },
+        {
+          "function": "importerMap",
+          "line": 3981,
+          "seconds": 4.897
+        },
+        {
+          "function": "moduleEdges",
+          "line": 4129,
+          "seconds": 4.726
+        },
+        {
+          "function": "projectGraph",
+          "line": 4168,
+          "seconds": 4.686
+        }
+      ]
+    },
+    {
+      "profile": "move-after",
+      "stage": "intermediate optimization before final shared registry changes",
+      "wallSeconds": 38.318,
+      "phasesMs": {
+        "workspace.load": 7516,
+        "workspace.prepare": 1302,
+        "workspace.move": 1914,
+        "workspace.validate": 22817
+      },
+      "error": null,
+      "selfTop": [
+        {
+          "function": "(garbage collector)",
+          "file": "",
+          "line": 0,
+          "seconds": 8.208
+        },
+        {
+          "function": "scan",
+          "file": "typescript.js",
+          "line": 12794,
+          "seconds": 0.716
+        },
+        {
+          "function": "readPath",
+          "file": "cli.js",
+          "line": 1989,
+          "seconds": 0.602
+        },
+        {
+          "function": "inferFromTypes",
+          "file": "typescript.js",
+          "line": 73152,
+          "seconds": 0.539
+        },
+        {
+          "function": "",
+          "file": "typescript.js",
+          "line": 54851,
+          "seconds": 0.46
+        },
+        {
+          "function": "getUnmatchedProperties",
+          "file": "typescript.js",
+          "line": 72967,
+          "seconds": 0.449
+        },
+        {
+          "function": "invokeOnce",
+          "file": "typescript.js",
+          "line": 73339,
+          "seconds": 0.436
+        },
+        {
+          "function": "resolve",
+          "file": "node:path",
+          "line": 1260,
+          "seconds": 0.425
+        },
+        {
+          "function": "lstat",
+          "file": "",
+          "line": 0,
+          "seconds": 0.416
+        },
+        {
+          "function": "getPropertyOfType",
+          "file": "typescript.js",
+          "line": 63862,
+          "seconds": 0.403
+        },
+        {
+          "function": "recursiveTypeRelatedTo",
+          "file": "typescript.js",
+          "line": 70231,
+          "seconds": 0.359
+        },
+        {
+          "function": "some",
+          "file": "typescript.js",
+          "line": 2684,
+          "seconds": 0.282
+        },
+        {
+          "function": "isDeeplyNestedType",
+          "file": "typescript.js",
+          "line": 71971,
+          "seconds": 0.275
+        },
+        {
+          "function": "(idle)",
+          "file": "",
+          "line": 0,
+          "seconds": 0.269
+        },
+        {
+          "function": "doJSDocScan",
+          "file": "typescript.js",
+          "line": 39066,
+          "seconds": 0.259
+        },
+        {
+          "function": "inferFromObjectTypes",
+          "file": "typescript.js",
+          "line": 73576,
+          "seconds": 0.251
+        },
+        {
+          "function": "RegExp: \\/\\/|(?:^|\\/)\\.\\.?(?:$|\\/)",
+          "file": "",
+          "line": 0,
+          "seconds": 0.248
+        },
+        {
+          "function": "bind",
+          "file": "typescript.js",
+          "line": 48633,
+          "seconds": 0.244
+        },
+        {
+          "function": "addWorkItem",
+          "file": "typescript.js",
+          "line": 33012,
+          "seconds": 0.239
+        },
+        {
+          "function": "findSourceFileWorker",
+          "file": "typescript.js",
+          "line": 128602,
+          "seconds": 0.238
+        }
+      ],
+      "appInclusiveTop": [
+        {
+          "function": "analyzeFileOperation",
+          "line": 4734,
+          "seconds": 26.963
+        },
+        {
+          "function": "analyze",
+          "line": 5592,
+          "seconds": 26.948
+        },
+        {
+          "function": "createPlan",
+          "line": 728,
+          "seconds": 26.89
+        },
+        {
+          "function": "timed",
+          "line": 1683,
+          "seconds": 24.266
+        },
+        {
+          "function": "",
+          "line": 2853,
+          "seconds": 15.684
+        },
+        {
+          "function": "collect",
+          "line": 3003,
+          "seconds": 14.974
+        },
+        {
+          "function": "diagnostics",
+          "line": 2989,
+          "seconds": 14.94
+        },
+        {
+          "function": "importsAffected",
+          "line": 2751,
+          "seconds": 6.301
+        },
+        {
+          "function": "Workspace",
+          "line": 2433,
+          "seconds": 6.014
+        },
+        {
+          "function": "",
+          "line": 4748,
+          "seconds": 6.014
+        },
+        {
+          "function": "loadGraph",
+          "line": 2520,
+          "seconds": 5.988
+        },
+        {
+          "function": "sourceFile",
+          "line": 2797,
+          "seconds": 4.089
+        },
+        {
+          "function": "getSourceFile",
+          "line": 2813,
+          "seconds": 3.881
+        },
+        {
+          "function": "program",
+          "line": 2679,
+          "seconds": 2.359
+        },
+        {
+          "function": "readPath",
+          "line": 1989,
+          "seconds": 1.582
+        },
+        {
+          "function": "moveFile",
+          "line": 4601,
+          "seconds": 1.514
+        },
+        {
+          "function": "",
+          "line": 4773,
+          "seconds": 1.514
+        },
+        {
+          "function": "readFile",
+          "line": 2038,
+          "seconds": 1.413
+        },
+        {
+          "function": "fileExists",
+          "line": 2052,
+          "seconds": 1.291
+        },
+        {
+          "function": "",
+          "line": 2831,
+          "seconds": 1.281
+        },
+        {
+          "function": "validationPrograms",
+          "line": 2830,
+          "seconds": 1.281
+        },
+        {
+          "function": "prepareValidation",
+          "line": 2841,
+          "seconds": 1.078
+        },
+        {
+          "function": "",
+          "line": 4766,
+          "seconds": 1.078
+        },
+        {
+          "function": "fileExists",
+          "line": 2821,
+          "seconds": 0.979
+        },
+        {
+          "function": "directoryExists",
+          "line": 2166,
+          "seconds": 0.638
+        }
+      ]
+    },
+    {
+      "profile": "inline-final",
+      "stage": "intermediate optimization before final shared registry changes",
+      "wallSeconds": 46.53,
+      "phasesMs": {
+        "workspace.load": 12098,
+        "workspace.program": 6974,
+        "workspace.prepare": 5054,
+        "workspace.inline": 1366,
+        "workspace.external-projects": 1548,
+        "workspace.validate": 17917
+      },
+      "error": null,
+      "selfTop": [
+        {
+          "function": "(garbage collector)",
+          "file": "",
+          "line": 0,
+          "seconds": 8.703
+        },
+        {
+          "function": "scan",
+          "file": "typescript.js",
+          "line": 12794,
+          "seconds": 1.538
+        },
+        {
+          "function": "readPath",
+          "file": "cli.js",
+          "line": 1999,
+          "seconds": 0.795
+        },
+        {
+          "function": "",
+          "file": "typescript.js",
+          "line": 54851,
+          "seconds": 0.608
+        },
+        {
+          "function": "lstat",
+          "file": "",
+          "line": 0,
+          "seconds": 0.598
+        },
+        {
+          "function": "resolve",
+          "file": "node:path",
+          "line": 1260,
+          "seconds": 0.56
+        },
+        {
+          "function": "doJSDocScan",
+          "file": "typescript.js",
+          "line": 39066,
+          "seconds": 0.526
+        },
+        {
+          "function": "(idle)",
+          "file": "",
+          "line": 0,
+          "seconds": 0.524
+        },
+        {
+          "function": "internIdentifier",
+          "file": "typescript.js",
+          "line": 33998,
+          "seconds": 0.451
+        },
+        {
+          "function": "addWorkItem",
+          "file": "typescript.js",
+          "line": 33012,
+          "seconds": 0.395
+        },
+        {
+          "function": "forEachChildRecursively",
+          "file": "typescript.js",
+          "line": 32972,
+          "seconds": 0.369
+        },
+        {
+          "function": "bind",
+          "file": "typescript.js",
+          "line": 48633,
+          "seconds": 0.359
+        },
+        {
+          "function": "findSourceFileWorker",
+          "file": "typescript.js",
+          "line": 128602,
+          "seconds": 0.354
+        },
+        {
+          "function": "getPropertyOfType",
+          "file": "typescript.js",
+          "line": 63862,
+          "seconds": 0.339
+        },
+        {
+          "function": "statSync",
+          "file": "node:fs",
+          "line": 1745,
+          "seconds": 0.322
+        },
+        {
+          "function": "declareSymbol",
+          "file": "typescript.js",
+          "line": 47009,
+          "seconds": 0.322
+        },
+        {
+          "function": "fixupParentReferences",
+          "file": "typescript.js",
+          "line": 33511,
+          "seconds": 0.286
+        },
+        {
+          "function": "visit",
+          "file": "cli.js",
+          "line": 2511,
+          "seconds": 0.264
+        },
+        {
+          "function": "parseJSDocCommentWorker",
+          "file": "typescript.js",
+          "line": 39044,
+          "seconds": 0.255
+        },
+        {
+          "function": "tryParseJson",
+          "file": "typescript.js",
+          "line": 21101,
+          "seconds": 0.253
+        }
+      ],
+      "appInclusiveTop": [
+        {
+          "function": "analyzeFileOperation",
+          "line": 4874,
+          "seconds": 35.201
+        },
+        {
+          "function": "timed",
+          "line": 1692,
+          "seconds": 35.193
+        },
+        {
+          "function": "analyze",
+          "line": 5736,
+          "seconds": 35.169
+        },
+        {
+          "function": "createPlan",
+          "line": 730,
+          "seconds": 35.158
+        },
+        {
+          "function": "",
+          "line": 2990,
+          "seconds": 13.574
+        },
+        {
+          "function": "collect",
+          "line": 3140,
+          "seconds": 12.689
+        },
+        {
+          "function": "diagnostics",
+          "line": 3126,
+          "seconds": 12.669
+        },
+        {
+          "function": "importsAffected",
+          "line": 2886,
+          "seconds": 11.295
+        },
+        {
+          "function": "Workspace",
+          "line": 2563,
+          "seconds": 10.296
+        },
+        {
+          "function": "",
+          "line": 4890,
+          "seconds": 10.296
+        },
+        {
+          "function": "loadGraph",
+          "line": 2655,
+          "seconds": 10.142
+        },
+        {
+          "function": "getSourceFile",
+          "line": 2950,
+          "seconds": 9.126
+        },
+        {
+          "function": "sourceFile",
+          "line": 2932,
+          "seconds": 9.12
+        },
+        {
+          "function": "program",
+          "line": 2814,
+          "seconds": 5.981
+        },
+        {
+          "function": "",
+          "line": 4903,
+          "seconds": 5.324
+        },
+        {
+          "function": "",
+          "line": 2968,
+          "seconds": 3.931
+        },
+        {
+          "function": "validationPrograms",
+          "line": 2967,
+          "seconds": 3.931
+        },
+        {
+          "function": "prepareValidation",
+          "line": 2978,
+          "seconds": 3.621
+        },
+        {
+          "function": "",
+          "line": 4908,
+          "seconds": 3.621
+        },
+        {
+          "function": "readPath",
+          "line": 1999,
+          "seconds": 2.35
+        },
+        {
+          "function": "readFile",
+          "line": 2048,
+          "seconds": 2.315
+        },
+        {
+          "function": "fileExists",
+          "line": 2062,
+          "seconds": 2.082
+        },
+        {
+          "function": "fileExists",
+          "line": 2958,
+          "seconds": 1.534
+        },
+        {
+          "function": "check",
+          "line": 2905,
+          "seconds": 1.227
+        },
+        {
+          "function": "assertNoUnhandledProjects",
+          "line": 2904,
+          "seconds": 1.227
+        }
+      ]
+    }
+  ]
+}

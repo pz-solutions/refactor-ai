@@ -1,4 +1,5 @@
 import ts from "typescript";
+import type { FileSystem } from "typescript7/unstable/fs";
 import { CompilerInputs } from "./typescript-diagnostics-cache";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, relative, resolve, sep } from "node:path";
@@ -128,9 +129,15 @@ export class VirtualFs {
   readonly caseSensitive: boolean;
   private readonly readPaths = new Map<string, string>();
   private readonly disk = new Map<string, string | undefined>();
+  private readonly diskDirectories = new Map<string, Entries>();
+  private readonly diskDirectoryExists = new Map<string, boolean>();
   private readonly overlays = new Map<string, Overlay>();
   private readonly generated = new Map<string, { path: string; text: string }>();
   private readonly versions = new Map<string, number>();
+  private readonly keys = new Map<string, string>();
+  private virtualDirectoryVersion = -1;
+  private virtualDirectories = new Set<string>();
+  private changedDirectories = new Set<string>();
   private hiddenDirectories: string[] = [];
   private suspended = false;
   version = 0;
@@ -140,8 +147,12 @@ export class VirtualFs {
   }
 
   key(path: string): string {
+    const cached = this.keys.get(path);
+    if (cached !== undefined) return cached;
     const normalized = resolve(path);
-    return this.caseSensitive ? normalized : normalized.toLowerCase();
+    const key = this.caseSensitive ? normalized : normalized.toLowerCase();
+    this.keys.set(path, key);
+    return key;
   }
 
   samePath(a: string, b: string): boolean {
@@ -149,7 +160,8 @@ export class VirtualFs {
   }
 
   contains(directory: string, path: string): boolean {
-    return isInside(this.key(directory), this.key(path));
+    const parent = this.key(directory), child = this.key(path);
+    return child === parent || child.startsWith(parent.endsWith(sep) ? parent : `${parent}${sep}`);
   }
 
   setHiddenDirectories(directories: string[]): void {
@@ -255,22 +267,46 @@ export class VirtualFs {
   }
 
   private diskEntries(directory: string): Entries {
+    const key = this.key(directory);
+    const cached = this.diskDirectories.get(key);
+    if (cached) return cached;
     if (this.inputs.enabled) {
       this.inputs.sys.getDirectories(directory);
       this.inputs.sys.readDirectory(directory, undefined, undefined, ["*"], 1);
     }
-    const files: string[] = [];
-    const directories: string[] = [];
-    let names: string[];
-    try { names = readdirSync(directory); } catch { return { files, directories }; }
-    for (const name of names) {
+    const result = this.readDiskEntries(directory);
+    this.diskDirectories.set(key, result);
+    return result;
+  }
+
+  private readDiskEntries(directory: string): Entries {
+    const files: string[] = [], directories: string[] = [];
+    let entries;
+    try { entries = readdirSync(directory, { withFileTypes: true }); } catch { return { files, directories }; }
+    for (const entry of entries) {
+      const name = entry.name;
       try {
-        const stat = statSync(resolve(directory, name));
+        const stat = entry.isSymbolicLink() ? statSync(resolve(directory, name)) : entry;
         if (stat.isFile()) files.push(name);
         else if (stat.isDirectory()) directories.push(name);
       } catch { /* dangling symlink */ }
     }
     return { files, directories };
+  }
+
+  /** Cached metadata must not hide ignored generator inputs outside the Git snapshot. */
+  assertStableMetadata(): void {
+    const fingerprint = (entries: Entries) => JSON.stringify([[...entries.files].sort(), [...entries.directories].sort()]);
+    for (const [directory, before] of this.diskDirectories) {
+      if (fingerprint(before) !== fingerprint(this.readDiskEntries(directory))) {
+        fail("STALE_PROJECT_INPUTS", `directory membership changed during analysis: ${directory}; retry after writers/generators settle`);
+      }
+    }
+    for (const [directory, before] of this.diskDirectoryExists) {
+      let after = false;
+      try { after = statSync(directory).isDirectory(); } catch { /* missing directory */ }
+      if (before !== after) fail("STALE_PROJECT_INPUTS", `directory existence changed during analysis: ${directory}; retry after writers/generators settle`);
+    }
   }
 
   private virtualPaths(): string[] {
@@ -279,6 +315,25 @@ export class VirtualFs {
       for (const overlay of this.overlays.values()) if (overlay.text !== null) paths.push(overlay.path);
     }
     return paths;
+  }
+
+  private hasVirtualDirectory(path: string): boolean {
+    if (this.virtualDirectoryVersion !== this.version) {
+      this.virtualDirectories = new Set();
+      this.changedDirectories = new Set();
+      const index = (file: string, directories: Set<string>) => {
+        for (let directory = dirname(file); ; directory = dirname(directory)) {
+          const key = this.key(directory);
+          if (directories.has(key)) break;
+          directories.add(key);
+          if (dirname(directory) === directory) break;
+        }
+      };
+      for (const file of this.virtualPaths()) index(file, this.virtualDirectories);
+      if (!this.suspended) for (const overlay of this.overlays.values()) index(overlay.path, this.changedDirectories);
+      this.virtualDirectoryVersion = this.version;
+    }
+    return this.virtualDirectories.has(this.key(path));
   }
 
   entries(directory: string): Entries {
@@ -310,9 +365,15 @@ export class VirtualFs {
   directoryExists(path: string): boolean {
     path = this.readPath(path);
     if (this.inputs.enabled) this.inputs.sys.directoryExists(path);
-    if (this.virtualPaths().some((item) => this.contains(path, item) && !this.samePath(path, item))) return true;
+    if (this.hasVirtualDirectory(path)) return true;
     if (this.isHidden(path)) return false;
-    try { return statSync(path).isDirectory(); } catch { return false; }
+    const key = this.key(path);
+    if (!this.diskDirectoryExists.has(key)) {
+      let exists = false;
+      try { exists = statSync(path).isDirectory(); } catch { /* missing directory */ }
+      this.diskDirectoryExists.set(key, exists);
+    }
+    return this.diskDirectoryExists.get(key)!;
   }
 
   getDirectories(path: string): string[] {
@@ -376,6 +437,26 @@ export class VirtualFs {
       getDirectories: (path) => this.getDirectories(path),
       realpath: (path) => this.realpath(path),
       useCaseSensitiveFileNames: this.caseSensitive,
+    };
+  }
+
+  /** Delegate ordinary disk IO to native code; intercept every virtual/tombstoned path and parent. */
+  nativeFileSystem(): FileSystem {
+    const virtual = (path: string) => {
+      const canonical = this.readPath(path), key = this.key(canonical);
+      return this.isHidden(canonical) || this.generated.has(key) || (!this.suspended && this.overlays.has(key));
+    };
+    return {
+      readFile: path => virtual(path) ? this.readFile(path) ?? null : undefined,
+      fileExists: path => virtual(path) ? this.fileExists(path) : undefined,
+      directoryExists: path => this.hasVirtualDirectory(this.readPath(path)) ? true : this.isHidden(this.readPath(path)) ? false : undefined,
+      getAccessibleEntries: path => {
+        const canonical = this.readPath(path);
+        // Deleted files must disappear from directory enumeration as well as readFile.
+        const virtual = this.hasVirtualDirectory(canonical);
+        return this.isHidden(canonical) || virtual || this.changedDirectories.has(this.key(canonical)) ? this.entries(canonical) : undefined;
+      },
+      realpath: path => virtual(path) ? this.readPath(path) : undefined,
     };
   }
 

@@ -66,6 +66,7 @@ test("language and operation restrictions reject requests before a backend is lo
   await expect(api.plan({ project: "/missing/App.csproj", file: "/missing.cs" })).rejects.toThrow("UNSUPPORTED_LANGUAGE");
   await expect(api.plan({ project: "/missing/tsconfig.json", file: "/missing.ts", operation: "format" })).rejects.toThrow("only supports rename");
   await expect(api.plan({ project: "/missing/tsconfig.json", file: "/missing.ts", targetProject: "/missing/App.csproj" })).rejects.toThrow("UNSUPPORTED_LANGUAGE");
+  await expect(api.plan({ project: "/missing/tsconfig.json", file: "/missing.ts", checker: "unknown" as "ts7" })).rejects.toThrow("INVALID_ARGUMENT: checker");
   expect(loaded).toBe(false);
 });
 

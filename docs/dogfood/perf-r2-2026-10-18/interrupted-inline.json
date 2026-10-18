@@ -1,0 +1,29 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "before": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli-before-r2.js",
+  "after": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+  "node": "v22.23.3",
+  "targetCommit": "80baa6ea5d170dd5b6bcebd9694751b1cb666e54",
+  "beforeHash": "365c1c14f4ab0a580d6f33921cb2482270e5c183f80acf4d119b411fb247e090",
+  "afterHash": "0b8286d2a9ed92989dd85b61ef90948975ab30a5bccb320de496dfb9914ded28",
+  "mode": "paired cold processes; OS cache retained; cache off; no apply",
+  "samples": [
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "before",
+      "ms": 19832,
+      "status": null,
+      "machineLoad": [
+        27.79,
+        24.9,
+        22.6
+      ],
+      "phases": {
+        "workspace.load": 13373
+      },
+      "outcome": "{\"phase\":\"workspace.load\",\"event\":\"end\",\"ms\":13373}"
+    }
+  ],
+  "stage": "Final engine; interrupted by concurrent target merge. Diagnostic provenance only; fresh stable series supersedes these timings."
+}

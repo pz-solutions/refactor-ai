@@ -258,8 +258,31 @@ to checking. Remove the cache directory to reclaim space.
 optional native diagnostic executables without installing dependencies or changing
 the target. `node scripts/probe-native-checkers.mjs <unpacked-package-directory>`
 probes in-memory overlays. See the [native checker investigation](docs/research/2026-10-18-native-checkers.md)
-for versions, API differences and correctness limits. Native validation is a spike;
-the shipped refactoring engine still uses pinned TypeScript 5.9.3.
+for versions, API differences and correctness limits.
+
+`plan ... --checker ts7` (API: `checker: "ts7"`) opts into Microsoft Go 7.0.2
+diagnostics over the in-memory planned filesystem. Install its optional peer
+explicitly alongside the CLI/API package: `npm install --save-dev typescript7@npm:typescript@7.0.2`.
+For an installed skill, install the alias in `<skill-root>/assets/runtime`.
+The author checkout includes it as a development dependency. Planning never
+downloads TS7. Run the built CLI/API with Node.js 22+; TS7's sync
+IPC API does not support Bun.
+
+`--checker ts7` uses only TS7 for diagnostics; edits and dependency graphs remain
+on 5.9.3. `--checker both` (API: `checker: "both"`) audits every selected pass
+against 5.9.3 by file and error code, including duplicate counts. Disagreement in
+audit mode rejects the plan with `CHECKER_MISMATCH`. Both modes verify user-file
+membership, failing with `CHECKER_SOURCE_MISMATCH` on disagreement; missing/wrong
+versions fail explicitly. Options,
+configuration, global, syntax, semantic and declaration diagnostics are included.
+Project-reference declaration builds are unsupported in TS7 mode and fail
+explicitly; use the default checker for them. Audit mode keeps TS5 diagnostic
+wording; TS7 mode stores native diagnostics. `plan.checker` records the selected
+checker, exact version and audit reference. The differential test corpus covers
+re-exports, moves, package exports, aliases, JSX, merging, satisfies, generics and
+ambient changes; it cannot guarantee agreement for arbitrary code. Native-only mode checks every user source in each participant with batched API
+calls; a TS5 dependency closure does not establish TS7 dependency semantics.
+The default remains TS5.9.3. Run the project's own typecheck after applying any plan.
 
 GitHub Actions are configured in [CI](.github/workflows/ci.yml) and [npm publication](.github/workflows/publish.yml). CI builds and tests the Node CLI, Roslyn helper, installed skills and packed npm tools, runs the demo, and uploads npm archives plus self-contained skills. A matching `vX.Y.Z` tag publishes the verified `@refactor-ai` archives using npm OIDC. [GitHub Actions setup and releases](docs/github-actions.md) describes the first publication, Trusted Publisher settings and retries.
 

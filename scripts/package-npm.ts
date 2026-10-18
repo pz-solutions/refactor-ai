@@ -115,12 +115,12 @@ for (const { name: baseName, bin: binName, operation, language } of entries) {
   await writeFile(source, `import { dirname, resolve } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nimport { runNpmCli } from ${JSON.stringify(join(repo, "src", "npm-cli.ts"))};\n${loader}\nawait runNpmCli(process.argv.slice(2), { packageName: ${JSON.stringify(packageName)}, packageRoot: resolve(dirname(fileURLToPath(import.meta.url)), '..'), loadBackend, language: ${JSON.stringify(language)}, ${operation ? `operation: ${JSON.stringify(operation)}` : ""} });\n`);
 
   const runner = join(packageRoot, "lib", "runner.mjs");
-  const result = spawnSync("bun", ["build", source, "--target", "node", "--format", "esm", "--external", "typescript", "--outfile", runner], { cwd: repo, encoding: "utf8" });
+  const result = spawnSync("bun", ["build", source, "--target", "node", "--format", "esm", "--external", "typescript", "--external", "typescript7", "--outfile", runner], { cwd: repo, encoding: "utf8" });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(result.stderr || result.stdout);
   await rm(source);
   await writeFile(source, `import { dirname, resolve } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nimport { createRefactorApi } from ${JSON.stringify(join(repo, "src", "api.ts"))};\n${loader}\nexport async function createRefactor() { return createRefactorApi({ toolkitRoot: resolve(dirname(fileURLToPath(import.meta.url)), '..'), loadBackend, language: ${JSON.stringify(language)}, ${operation ? `operation: ${JSON.stringify(operation)}` : ""} }); }\n`);
-  const apiResult = spawnSync("bun", ["build", source, "--target", "node", "--format", "esm", "--external", "typescript", "--outfile", join(packageRoot, "lib", "api.mjs")], { cwd: repo, encoding: "utf8" });
+  const apiResult = spawnSync("bun", ["build", source, "--target", "node", "--format", "esm", "--external", "typescript", "--external", "typescript7", "--outfile", join(packageRoot, "lib", "api.mjs")], { cwd: repo, encoding: "utf8" });
   if (apiResult.error) throw apiResult.error;
   if (apiResult.status !== 0) throw new Error(apiResult.stderr || apiResult.stdout);
   await rm(source);
@@ -141,7 +141,8 @@ for (const { name: baseName, bin: binName, operation, language } of entries) {
     name: packageName, version: rootManifest.version, description: operation ? help!.description : "Deterministic TypeScript, JavaScript and C# refactoring CLI.",
     type: "module", exports: { ".": { types: "./lib/api.d.mts", import: "./lib/api.mjs" } }, types: "./lib/api.d.mts", repository: rootManifest.repository, bin: { [binName]: "bin/cli.mjs" }, engines: { node: ">=22" },
     files: ["bin/", "lib/", "licenses/", "API.md", ...(csharp ? ["dotnet/**/*.cs", "dotnet/**/*.csproj", "dotnet/**/packages.lock.json"] : [])],
-    dependencies: language === "csharp" ? {} : { typescript: rootManifest.dependencies.typescript }, publishConfig: { access: "public", tag: rootManifest.version.includes("-") ? "next" : "latest" },
+    dependencies: language === "csharp" ? {} : { typescript: rootManifest.dependencies.typescript },
+    ...(language === "csharp" ? {} : { peerDependencies: rootManifest.peerDependencies, peerDependenciesMeta: rootManifest.peerDependenciesMeta }), publishConfig: { access: "public", tag: rootManifest.version.includes("-") ? "next" : "latest" },
   };
   await writeFile(join(packageRoot, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
   const plan = operation ? "plan" : "plan rename";

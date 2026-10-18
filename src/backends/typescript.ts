@@ -8,6 +8,8 @@ import { analyzeFileOperation, fileCapabilities } from "./typescript-fileops";
 import { moduleSpecifiers } from "./typescript-workspace";
 import { retargetImports } from "./typescript-retarget-import";
 import { isInside, workspaceRootHint } from "./typescript-paths";
+import { bothIdentity, compareWorkspaceDiagnostics, loadTs7Checker, ts7Identity } from "./typescript-ts7";
+import { VirtualFs } from "./typescript-vfs";
 
 export const capabilities: Capability[] = [
   { operation: "rename", description: "Rename a TypeScript or JavaScript symbol across its configured project." },
@@ -453,10 +455,13 @@ function changedFiles(state: ProjectState, originals: Map<string, string | undef
 }
 
 export async function analyze(request: RefactorRequest): Promise<BackendResult> {
+  if (request.checker !== undefined && !["ts5", "ts7", "both"].includes(request.checker)) fail("INVALID_REQUEST", "checker must be ts5, ts7 or both");
   if (request.operation === "rename-file" || request.operation === "move-type" || request.operation === "move-file" || request.operation === "inline-reexports") return analyzeFileOperation(request);
   if (request.operation === "sync-namespace") {
     fail("UNSUPPORTED_OPERATION", "sync-namespace is C# only; ES modules have no namespace-to-directory convention");
   }
+  const checkerMode = request.checker === "both" ? "both" : "ts7";
+  const nativeChecker = request.checker === "ts7" || request.checker === "both" ? await loadTs7Checker(checkerMode) : undefined;
   const state = loadProject(request);
   try {
     const file = assertAbsolute("file", request.file);
@@ -509,12 +514,20 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
       const path = canonical(source.fileName);
       if (beforePaths.has(path) !== afterPaths.has(path) && !/\.json$/i.test(path) && hasGlobalEffect(source.text, path)) affected = undefined;
     }
-    const diagnosticsAfter = timed("diagnostics.after", () => diagnostics(state, afterProgram!, affected));
+    let diagnosticsAfter = request.checker === "ts7" ? [] : timed("diagnostics.after", () => diagnostics(state, afterProgram!, affected));
+    const nativeVfs = nativeChecker ? new VirtualFs(state.root) : undefined;
+    if (nativeChecker && nativeVfs) {
+      for (const [path, text] of state.overlays) nativeVfs.write(path, text);
+      diagnosticsAfter = compareWorkspaceDiagnostics(nativeChecker, nativeVfs, state.configPath, state.options,
+        afterProgram.getSourceFiles().map(source => canonical(source.fileName)).filter(path => isInside(state.root, path) && !path.includes("/node_modules/")), diagnosticsAfter, affected);
+    }
     if (diagnosticsAfter.length) { state.service.cleanupSemanticCache(); afterProgram = undefined; }
     // A clean planned set cannot introduce an error. Only errors require the
     // original multiset; avoid its expensive generic inference on clean plans.
-    const diagnosticsBefore = diagnosticsAfter.length
+    let diagnosticsBefore = request.checker !== "ts7" && diagnosticsAfter.length
       ? timed("diagnostics.before", () => baselineDiagnostics(state.root, state.configPath, program!, affected, state.inputs, () => diagnostics(state, program!, affected))) : [];
+    if (nativeChecker && nativeVfs && diagnosticsAfter.length) diagnosticsBefore = nativeVfs.original(() => compareWorkspaceDiagnostics(nativeChecker, nativeVfs, state.configPath, state.options,
+      program!.getSourceFiles().map(source => canonical(source.fileName)).filter(path => isInside(state.root, path) && !path.includes("/node_modules/")), diagnosticsBefore, affected));
     program = undefined;
     const beforeCounts = new Map<string, number>();
     for (const item of diagnosticsBefore) {
@@ -532,7 +545,8 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
 
     const notes: string[] = operationNotes;
     if (!diagnosticsAfter.length) notes.push("Skipped baseline diagnostics: the planned affected set has no errors.");
-    if (affected) notes.push(`Validated ${affected.size} affected file(s): the changed files and their transitive importers.`);
+    if (request.checker === "ts7") notes.push("Validated all user sources in the configured project with TS7 7.0.2; TS5 graph discovery is not used to restrict native diagnostics.");
+    else if (affected) notes.push(`Validated ${affected.size} affected file(s): the changed files and their transitive importers.`);
     if (request.operation === "imports") {
       notes.push(request.mode === "sort"
         ? "Sorting imports can reorder module initialization; verify application behavior."
@@ -541,8 +555,10 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
     if ([".js", ".jsx", ".mjs", ".cjs"].includes(extension) && ["rename", "extract-function", "extract-variable"].includes(request.operation)) {
       notes.push("JavaScript analysis is semantic only for symbols TypeScript can resolve; dynamic properties, reflection, and string-based references are not changed.");
     }
+    if (nativeVfs) timed("inputs.check", () => nativeVfs.assertStableMetadata());
     return {
       backend: "typescript",
+      checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5", version: ts.version },
       version: ts.version,
       changes: changedFiles(state, originals),
       diagnosticsBefore,

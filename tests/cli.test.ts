@@ -209,6 +209,10 @@ describe("CLI", () => {
     expect(planned.stderr).toBe("");
     expect(planned.status).toBe(0);
     expect(await readFile(file, "utf8")).toContain("oldName");
+    const native = run(["plan", "rename", "--project", project, "--file", file, "--at", "1:14", "--name", "newName", "--checker", "ts7", "--out", plan]);
+    expect(native.status).toBe(1);
+    expect(native.stderr).toContain("CHECKER_UNAVAILABLE");
+    expect(await readFile(file, "utf8")).toContain("oldName");
     expect(run(["apply", "--plan", plan]).status).toBe(0);
     expect(await readFile(file, "utf8")).toBe("export const newName = 1;\nconsole.log(newName);\n");
   }, 30_000);

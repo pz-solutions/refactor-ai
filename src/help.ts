@@ -157,7 +157,7 @@ function optionsText(language?: Language): string {
   return `  --project <config>       Required for capabilities and plan; ${project}.
 ${language !== "csharp" ? "                           Named TS configurations are supported by file/type operations.\n" : ""}  --file <source>          Required for plan except retarget-import; a file, or a directory for move-file/retarget-import.
   --keep                   Retain the shim for inline-reexports.
-  --root <directory>       Boundary for source, configs and callers; defaults to
+${language !== "csharp" ? "  --checker <ts5|ts7|both> TS5 default; ts7 uses installed Go 7.0.2 diagnostics.\n                           both audits TS5+TS7, rejecting any disagreement.\n" : ""}  --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
   --at <line:column>       Symbol/type position or extraction start, 1-based UTF-16.
   --end <line:column>      Extraction end, exclusive, 1-based UTF-16.

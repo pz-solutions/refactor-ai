@@ -10,6 +10,7 @@ export type { Plan } from "./core/plan.ts";
 export type { Capability, Diagnostic, FileChange, Operation } from "./types.ts";
 
 export interface PlanOptions {
+  checker?: "ts5" | "ts7" | "both";
   project: string;
   file?: string;
   /** Defaults to the project configuration's directory. Must cover all changed files. */
@@ -96,6 +97,7 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         if (!operation || !Object.values(languageOperations).some(items => items.includes(operation))) throw new Error(`UNSUPPORTED: ${operation}`);
         if (context.operation && operation !== context.operation) throw new Error(`UNSUPPORTED: this tool only supports ${context.operation}`);
         assertLanguage(options.project);
+        if (options.checker !== undefined && (!["ts5", "ts7", "both"].includes(options.checker) || languageForProject(options.project) !== "typescript")) throw new Error("INVALID_ARGUMENT: checker ts5|ts7|both requires TypeScript/JavaScript");
         if (options.targetProject) assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode)) throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
         if (["move-type", "move-file"].includes(operation) && !options.target) throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
@@ -120,6 +122,7 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         };
         const request: RefactorRequest = {
           project, root, file, operation,
+          ...(options.checker !== undefined ? { checker: options.checker } : {}),
           ...(options.keep !== undefined ? { keep: options.keep } : {}),
           ...(operation === "retarget-import" ? { from: options.from, to: options.to,
             ...(options.map ? { map: options.map } : {}), ...(options.only ? { only: options.only } : {}),
