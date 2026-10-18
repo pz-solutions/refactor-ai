@@ -14,7 +14,7 @@ var operationHelp = {
     description: "Move a whole module or directory within or between workspace packages.",
     support: "TypeScript and JavaScript",
     required: "--to <destination> [--target-project <config>] [--root <directory>]",
-    details: "--file accepts a file or directory. A directory moves every file below it in one plan, preserving relative layout. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Aliases between moved files become relative imports; unresolved source-project aliases cause NEW_DIAGNOSTICS with a hint. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
+    details: "--file accepts a file or directory. A directory moves every file below it in one plan, preserving relative layout. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Aliases between moved files become relative imports; unresolved source-project aliases fail MOVE_IMPORT_UNRESOLVED before program loading; missing destination packages fail MISSING_DEPENDENCY with source versions and install hints. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
     examples: [
       "plan move-file --project ./tsconfig.json --file ./src/components/button.tsx --to ./src/ui/button.tsx",
       "plan move-file --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/components --to ./packages/feature/src/components --target-project ./packages/feature/tsconfig.json"
@@ -235,7 +235,7 @@ function renderHelp(args, invocation = "node dist/cli.js", runtimeRequirements =
   const topics = args[0] === "help" ? args.slice(1) : args;
   const command = topics[0]?.startsWith("-") ? undefined : topics[0];
   const operation = topics[1]?.startsWith("-") ? undefined : topics[1];
-  const known = ["capabilities", "plan", "preview", "validate", "apply"];
+  const known = ["capabilities", "plan", "preview", "validate", "apply", "serve"];
   if (command && !known.includes(command))
     throw new Error(`INVALID_ARGUMENT: unknown help command ${command}`);
   if (operation && (command !== "plan" || !Object.hasOwn(operationHelp, operation))) {
@@ -267,6 +267,26 @@ Examples:
 ${examples(invocation, [`${command} --plan ./.refactor-ai/saved-plan.json`, `${command} --plan "/path with spaces/plan.json"`])}
 
 ${workflow(invocation)}`;
+  }
+  if (command === "serve") {
+    return `${title}
+serve (author CLI): Keep TypeScript single-project programs warm between sequential plan requests.
+
+Usage:
+  ${invocation} serve --root <repo>
+
+Send one JSON object per stdin line: {"id":1,"args":["plan",<normal plan arguments>]}.
+One response per stdout line: {id,status,output} or {id,status,error}. Requests may
+only plan within the server root. EOF releases programs and exits. External content,
+configuration, resolution probes and directory membership are rechecked before reuse.
+Workspace file operations still use fresh workspaces.
+
+Examples:
+  ${invocation} serve --root .
+
+REFACTOR_AI_CACHE=on enables the optional persistent baseline cache. Its location defaults to
+<root>/.refactor-ai/cache; REFACTOR_AI_CACHE_DIR selects an external directory.
+`;
   }
   if (command === "capabilities") {
     return `${title}

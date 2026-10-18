@@ -448,6 +448,13 @@ var excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
+function describeInputPath(path) {
+  const portable = path.split(sep).join("/");
+  return /(^|\/)(next-env\.d\.ts|[^/]+\.gen\.[^/]+|_generated|\.next)(\/|$)/.test(portable) ? `${path} [generated candidate]` : path;
+}
+function snapshotChanges(before, after) {
+  return [...new Set([...Object.keys(before.files), ...Object.keys(after.files)])].sort().filter((path) => before.files[path] !== after.files[path]).map((path) => `${before.files[path] === undefined ? "added" : after.files[path] === undefined ? "removed" : "changed"} ${describeInputPath(path)}`).join(", ");
+}
 function inside(root, file) {
   const result = resolve(file);
   const rel = relative(root, result);
@@ -707,8 +714,9 @@ async function createPlan(request, analyze) {
   const root = request.root;
   const before = await snapshot(root);
   const result = await analyze(request);
-  if ((await snapshot(root)).hash !== before.hash)
-    throw new Error("STALE_SNAPSHOT: project changed during analysis");
+  const after = await snapshot(root);
+  if (after.hash !== before.hash)
+    throw new Error(`STALE_SNAPSHOT: project changed during analysis: ${snapshotChanges(before, after)}; retry after writers settle (including dev-server generators)`);
   const seen = new Set;
   const changes = [];
   for (const change of result.changes) {
@@ -798,8 +806,9 @@ async function assertFresh(plan) {
     throw new Error("INVALID_PLAN: plan integrity check failed");
   if (await realpath2(plan.request.root) !== plan.request.root)
     throw new Error("INVALID_PLAN: noncanonical root");
-  if ((await snapshot(plan.request.root)).hash !== plan.snapshot.hash)
-    throw new Error("STALE_SNAPSHOT: project changed; create a new plan");
+  const current = await snapshot(plan.request.root);
+  if (current.hash !== plan.snapshot.hash)
+    throw new Error(`STALE_SNAPSHOT: project changed: ${snapshotChanges(plan.snapshot, current)}; create a new plan after writers settle`);
   for (const [path, modes] of Object.entries(plan.fileModes ?? {})) {
     if (modes.before !== null && ((await lstat2(path)).mode & 511) !== modes.before) {
       throw new Error(`STALE_SNAPSHOT: file permissions changed; create a new plan: ${path}`);

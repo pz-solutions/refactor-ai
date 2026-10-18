@@ -3,6 +3,9 @@ export interface Snapshot {
     files: Record<string, string>;
     hash: string;
 }
+/** Labels are hints, never grounds for excluding compiler inputs or edits. */
+export declare function describeInputPath(path: string): string;
+export declare function snapshotChanges(before: Snapshot, after: Snapshot): string;
 export declare function inside(root: string, file: string): string;
 export declare function assertRegularPath(root: string, file: string, allowMissing?: boolean, allowDirectory?: boolean): Promise<void>;
 /** Canonicalize a possibly missing path via its nearest existing ancestor. */
