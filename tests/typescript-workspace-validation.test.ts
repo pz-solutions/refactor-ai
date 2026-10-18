@@ -247,7 +247,7 @@ test("cached directories reject an ignored generated root appearing during analy
     await writeFile(join(ws.root, "src/generated/routeTree.gen.ts"), "export {}; declare global { interface Generated { value: string } }");
     ws.vfs.write(join(ws.root, "src/leaf.ts"), "export const value = 2;");
     validate();
-    expect(() => ws.vfs.assertStableMetadata()).toThrow("STALE_PROJECT_INPUTS: directory membership changed");
+    expect(() => ws.vfs.assertStableMetadata()).toThrow("STALE_PROJECT_INPUTS: readDirectory changed");
   } finally { ws.dispose(); }
 });
 

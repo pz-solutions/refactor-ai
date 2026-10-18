@@ -86,7 +86,7 @@ async function order(plan: Plan): Promise<Step[]> {
   return steps.toSorted((a, b) => rank(a) - rank(b));
 }
 
-export async function applyPlan(plan: Plan): Promise<{ status: "applied"; files: string[]; journal: string | null }> {
+export async function applyPlan(plan: Plan, compilerBase?: string): Promise<{ status: "applied"; files: string[]; journal: string | null }> {
   assertPlanShape(plan);
   if (plan.validation.status !== "passed" || newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter).length) {
     throw new Error("VALIDATION_FAILED: plan adds compiler errors");
@@ -116,7 +116,7 @@ export async function applyPlan(plan: Plan): Promise<{ status: "applied"; files:
   };
   const saveJournal = () => atomicWrite(journalPath, JSON.stringify(journal, null, 2) + "\n");
   try {
-    await assertFresh(plan);
+    await assertFresh(plan, compilerBase);
     if (!plan.changes.length) return { status: "applied", files: [], journal: null };
     const steps = await order(plan);
     // Populate recovery metadata for older plans too, before any source writes.

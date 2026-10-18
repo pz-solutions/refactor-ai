@@ -117,7 +117,7 @@ if ((await rename.validate(plan)).status !== "validated") throw new Error("Renam
 await rename.apply(plan);
 ```
 
-Read the [programmatic interface](docs/api.md) for installed-skill imports, all methods and options, requirements, errors and sequential automation. Apply each step before planning the next because plans are tied to project snapshots. Package builds include this interface; publishing a new version is required to distribute it through npm.
+Read the [programmatic interface](docs/api.md) for installed-skill imports, all methods and options, requirements, errors and sequential automation. Apply each step before planning the next because plans are tied to observed inputs. Package builds include this interface; publishing a new version is required to distribute it through npm.
 
 ## npm CLI packages
 
@@ -194,6 +194,8 @@ For authors: `bun run package:skills` rebuilds the CLI and refreshes the resourc
 
 Field-tested on a Next.js → TanStack Start migration of a ~900-file Bun monorepo ([dogfood log](docs/dogfood/2026-10-17-tanstack-start-migration.md)). Each step is one plan; run them in this order so every plan validates cleanly:
 
+Stop dev servers and let generators settle before planning. Use `--checker ts7` when the repository typechecks with TS7. For compatible workspace migrations, combine preparation and relocation in one `move-file --map @/lib/hooks=@scope/shared/hooks --map next-intl=use-intl` plan (`--only` selects original named exports). `.refactor-ai/equivalents.json` supplies defaults when the destination declares the equivalent; explicit maps win. For export renames or runtime adapters, prepare first:
+
 1. **Retarget framework imports** in the files you will move: `retarget-import --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider --file <dir> --mocks add`, and app aliases that re-export shared code (`--from @/lib/formatters --to @scope/shared/formatters`).
 2. **Inline shims** that only re-export the target package: `inline-reexports --file <shim>`. Dynamic `import()` of a shim keeps it alive; retarget those by hand.
 3. **Move** the module or directory: `move-file --file <dir> --to packages/<pkg>/src/<dir> --target-project packages/<pkg>/tsconfig.json`. Importers get the package's `exports` subpath (entries are added, index modules publish the directory), `vi.mock` paths follow, same-package imports become relative, ESLint bulk-suppression entries move with their files.
@@ -203,8 +205,8 @@ Always pass the workspace root as `--root`, run the project's formatter and lint
 
 ## MVP guarantees and limitations
 
-- Planning transforms code in memory and compares compiler errors before and after the change. `validate` checks snapshot freshness and the stored analysis result; it does not automatically run an arbitrary project's tests. The demo and regression tests separately verify example behavior.
-- Apply executes the exact stored plan and rejects changed snapshots and new errors. The snapshot covers regular files under the root, excluding `.git`, `node_modules`, `bin`, `obj`, `dist` and `.refactor-ai`. Dependencies are represented by manifests and lockfiles; changes to libraries outside the root are not fully fingerprinted.
+- Planning transforms code in memory and compares compiler errors before and after the change. `validate` checks recorded input freshness and the stored analysis result; it does not automatically run an arbitrary project's tests. The demo and regression tests separately verify example behavior.
+- Apply executes the exact stored plan and rejects changed inputs and new errors. New TS plans use schema 3: edited paths and compiler reads (including dependencies, negative probes, symlink resolution and directory queries) are checked. Unrelated files outside the read set may change; every source read for discovery/validation remains protected. Empty plans skip freshness checks. Legacy plans and backends without read tracking retain whole-root snapshots, excluding `.git`, `node_modules`, `bin`, `obj`, `dist` and `.refactor-ai`; their outside-root dependencies remain incompletely fingerprinted.
 - Rename uses symbols and references. Comments and strings remain unchanged; API consumers outside the loaded project, reflection and dynamic JS references are not automatically updated.
 - TS `rename-file`, `move-type`, `move-file` and `inline-reexports` validate the source and destination configurations and the loaded project-reference graph, with declarations built in memory. Other TS operations still reject project references. C# analyzes the loaded MSBuild configuration rather than every possible compilation condition; select a `.sln` to include dependent projects.
 - TS file operations check changed files and their transitive importers in each participant's original and planned module graphs. Resolution changes (including package `exports` edits) also seed the closure, even for unchanged importers. Scripts, declaration-file edits, global/ambient declarations, configuration edits, non-`exports` package edits and project-reference declaration builds retain full checks. Compiler option/global diagnostics and output-layout checks always run; unrelated existing file diagnostics may be omitted from plans using the closure. Imported declarations can still require checking dependencies, so cost does not scale only with the closure's size.
@@ -309,3 +311,4 @@ Namespace imports require a pure single-origin `export *` shim whose origin has
 no default export. Import/export attributes are unsupported. Compiler validation
 does not verify module initialization effects, directives such as `"use client"`,
 or consumers outside the loaded workspace; verify application behavior.
+

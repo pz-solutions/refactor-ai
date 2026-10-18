@@ -19,7 +19,11 @@ export interface DiagnosticInput {
   expected: Diagnostic[];
   isUserFile(path: string): boolean;
 }
-export type NativeChecker = (input: DiagnosticInput) => Diagnostic[];
+export interface NativeChecker {
+  (input: DiagnosticInput): Diagnostic[];
+  /** One immutable VFS view; closes before any further edits or baseline checking. */
+  withSession?<T>(configs: string[], run: () => T): T;
+}
 
 function nativeMessage(diagnostic: NativeDiagnostic): string {
   return [diagnostic.text, ...(diagnostic.messageChain ?? []).map(child => nativeMessage(child).split("\n").map(line => `  ${line}`).join("\n"))].join("\n");
@@ -46,12 +50,15 @@ export async function loadTs7Checker(mode: "ts7" | "both" = "both"): Promise<Nat
     if (error instanceof Error && error.message.startsWith("CHECKER_VERSION:")) throw error;
     fail("CHECKER_UNAVAILABLE", "--checker ts7 requires the separately installed optional peer typescript7@npm:typescript@7.0.2 and its platform binary; no runtime download is performed");
   }
-  return input => timed("diagnostics.ts7", () => {
+  type Session = { configs: string[]; api?: API; snapshot?: ReturnType<API["updateSnapshot"]> };
+  let session: Session | undefined;
+  const checker: NativeChecker = input => timed("diagnostics.ts7", () => {
     let api: API;
-    try { api = new Constructor({ cwd: input.root, fs: input.fs }); }
+    try { api = session?.api ?? new Constructor({ cwd: input.root, fs: input.fs }); if (session) session.api = api; }
     catch (error) { fail("CHECKER_UNAVAILABLE", `cannot start the installed TS7 7.0.2 platform binary: ${error instanceof Error ? error.message : error}`); }
     try {
-      const snapshot = api.updateSnapshot({ openProjects: [input.config] });
+      const snapshot = session?.snapshot ?? api.updateSnapshot({ openProjects: session?.configs ?? [input.config] });
+      if (session) session.snapshot = snapshot;
       const project = snapshot.getProject(input.config);
       if (!project) fail("CHECKER_PROJECT", `TS7 did not load ${input.config}`);
       const program = project.program;
@@ -89,8 +96,16 @@ export async function loadTs7Checker(mode: "ts7" | "both" = "both"): Promise<Nat
         return input.expected;
       }
       return actual.sort((a, b) => a.file.localeCompare(b.file) || a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
-    } finally { api.close(); }
+    } finally { if (!session) api.close(); }
   });
+  checker.withSession = (configs, run) => {
+    if (session) fail("CHECKER_SESSION", "native checker sessions must not overlap");
+    const view: Session = { configs };
+    session = view;
+    try { return run(); }
+    finally { session = undefined; view.api?.close(); }
+  };
+  return checker;
 }
 
 export function compareWorkspaceDiagnostics(checker: NativeChecker, vfs: VirtualFs, config: string, options: ts.CompilerOptions,

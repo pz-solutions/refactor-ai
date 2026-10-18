@@ -1,6 +1,6 @@
 import ts from "typescript";
-import { baselineDiagnostics } from "./typescript-diagnostics-cache";
-import { readdirSync, statSync } from "node:fs";
+import { baselineDiagnostics, CompilerInputs } from "./typescript-diagnostics-cache";
+import { statSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import type { Diagnostic } from "../types";
 import { VirtualFs, fail, isInside } from "./typescript-vfs";
@@ -78,24 +78,9 @@ export function configPathFor(project: string): string {
   return candidates[0]!;
 }
 
-function discoverConfigs(root: string): string[] {
-  const found: string[] = [];
-  const visit = (directory: string) => {
-    let names: string[];
-    try { names = readdirSync(directory).sort(); } catch { return; }
-    for (const name of names) {
-      const path = resolve(directory, name);
-      let stat;
-      try { stat = statSync(path); } catch { continue; }
-      if (stat.isDirectory()) {
-        if (name !== "node_modules" && !name.startsWith(".")) visit(path);
-      } else if (stat.isFile() && configName.test(name)) {
-        found.push(path);
-      }
-    }
-  };
-  visit(root);
-  return found;
+function discoverConfigs(root: string, sys: ts.System): string[] {
+  return sys.readDirectory(root, [".json"], ["**/node_modules", "**/.*"], ["**/tsconfig*.json", "**/jsconfig*.json"])
+    .filter(path => configName.test(basename(path))).sort();
 }
 
 function flatten(diagnostic: ts.Diagnostic): string {
@@ -210,15 +195,15 @@ export class Workspace {
   private extendedConfigs: Set<string> | undefined;
 
   /** `affected` are the files whose module shape the operation changes (renamed, moved from or into). */
-  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = [], private readonly nativeChecker?: NativeChecker, private readonly checkerMode: "ts7" | "both" = "both") {
-    this.vfs = new VirtualFs(root);
+  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = [], private readonly nativeChecker?: NativeChecker, private readonly checkerMode: "ts7" | "both" = "both", inputs?: CompilerInputs) {
+    this.vfs = new VirtualFs(root, inputs);
     this.registry = ts.createDocumentRegistry(this.vfs.caseSensitive);
     this.sourceConfig = sourceConfig;
     this.targetConfig = targetConfig;
     for (const config of [sourceConfig, targetConfig]) {
       if (!isInside(root, config)) fail("OUTSIDE_ROOT", `project config is outside ${root}: ${config}`);
     }
-    this.discovered = discoverConfigs(root);
+    this.discovered = discoverConfigs(root, this.vfs.inputs.sys);
     this.loadGraph();
     if (nativeChecker && [...this.participants.values()].some(item => item.references.length)) {
       fail("CHECKER_UNSUPPORTED", "--checker ts7 does not yet support in-memory project-reference declaration builds; use the default checker");
@@ -273,7 +258,7 @@ export class Workspace {
 
   private parse(configPath: string, useDisk = false, planned = false): ts.ParsedCommandLine {
     const onError = (diagnostic: ts.Diagnostic) => fail("INVALID_CONFIG", `${configPath}: ${flatten(diagnostic)}`);
-    const host: ts.ParseConfigFileHost = useDisk ? { ...ts.sys, onUnRecoverableConfigFileDiagnostic: onError } : this.vfs.parseConfigHost(onError);
+    const host: ts.ParseConfigFileHost = useDisk ? { ...this.vfs.inputs.sys, onUnRecoverableConfigFileDiagnostic: onError } : this.vfs.parseConfigHost(onError);
     const parsed = ts.getParsedCommandLineOfConfigFile(configPath, undefined, host);
     if (!parsed) fail("INVALID_CONFIG", `could not parse ${configPath}`);
     const errors = parsed.errors.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
@@ -647,6 +632,9 @@ export class Workspace {
 
   /** Capture the original graphs before editing, without type-checking unrelated modules. */
   prepareValidation(skipCleanBaseline = false): () => { before: Diagnostic[]; after: Diagnostic[]; affected?: number; affectedProjects?: number } {
+    // Native-only mode checks every source. TS5's before/after dependency graphs
+    // cannot restrict it, so build the original programs only for a needed baseline.
+    if (this.nativeChecker && this.checkerMode === "ts7") return this.prepareNativeValidation(skipCleanBaseline);
     // Reference emission needs full checking and must precede edits: dependents and
     // the editing service consume those in-memory declarations.
     if ([...this.participants.values()].some((item) => item.references.length)) {
@@ -701,6 +689,32 @@ export class Workspace {
           .sort((a, b) => a.file.localeCompare(b.file) || a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
       };
       return { before: merge(beforeRecords), after: merge(afterRecords), affected: only.size ? affected : undefined, affectedProjects: only.size };
+    };
+  }
+
+  private prepareNativeValidation(skipCleanBaseline: boolean): () => { before: Diagnostic[]; after: Diagnostic[] } {
+    const original = new Map([...this.participants].map(([key, item]) => [key, item.parsed]));
+    for (const [key, item] of this.participants) {
+      const options = item.parsed.options;
+      if (options.noEmit || options.rootDir || options.composite || (!options.outDir && !options.declarationDir)) continue;
+      const program = ts.createProgram({ rootNames: item.parsed.fileNames, options, host: this.compilerHost(item.configPath, options) });
+      const layout = this.computedOutputRoot(item, program);
+      if (layout !== undefined) this.layouts.set(key, layout);
+    }
+    return () => {
+      const after = this.diagnostics();
+      if (skipCleanBaseline && !after.length) return { before: [], after };
+      const planned = new Map([...this.participants].map(([key, item]) => [key, item.parsed]));
+      const layouts = new Map(this.layouts);
+      const before = this.vfs.original(() => {
+        for (const [key, item] of this.participants) item.parsed = original.get(key)!;
+        try { return this.diagnostics(); }
+        finally {
+          for (const [key, item] of this.participants) item.parsed = planned.get(key)!;
+          this.layouts = layouts;
+        }
+      });
+      return { before, after };
     };
   }
 
@@ -790,7 +804,11 @@ export class Workspace {
    * including files of other projects it imports directly; a diagnostic seen
    * by several programs is reported with its highest per-program multiplicity.
    */
-  diagnostics(programs?: Map<string, ts.Program>, only?: Map<string, Set<string>>, baseline = false): Diagnostic[] {
+  diagnostics(programs?: Map<string, ts.Program>, only?: Map<string, Set<string>>, baseline = false, inSession = false): Diagnostic[] {
+    if (this.nativeChecker?.withSession && !inSession) {
+      const configs = this.order.filter(key => !programs || programs.has(key)).map(key => this.participant(key).configPath);
+      return this.nativeChecker.withSession(configs, () => this.diagnostics(programs, only, baseline, true));
+    }
     const vfs = this.vfs;
     vfs.clearGenerated();
     this.layouts = new Map();

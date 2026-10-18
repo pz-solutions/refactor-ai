@@ -20,7 +20,9 @@ export interface PlanOptions {
   /** Exact source/destination module specifiers for retarget-import. */
   from?: string;
   to?: string;
+  /** retarget-import: export names; move-file: exact module specifiers in moved files. */
   map?: Record<string, string>;
+  /** Select original named exports for either mapping operation; other bindings stay. */
   only?: string[];
   /** retarget-import: report affected test mocks (default), or add parallel mocks. */
   mocks?: "report" | "add";
@@ -86,11 +88,12 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
     assertPlanShape(plan);
     assertLanguage(plan.request.project, plan.backend);
   }
+  const compilerBase = context.toolkitRoot ? resolve(context.toolkitRoot, "runtime/package.json") : undefined;
   return {
     async plan(options) {
       const { project, request }: { project: string; request: RefactorRequest; } = await resolveRequest();
       const engine = await context.loadBackend(project, context.toolkitRoot);
-      return createPlan(request, engine.analyze);
+      return createPlan(request, engine.analyze, compilerBase);
 
       async function resolveRequest() {
         const operation = options.operation ?? context.operation;
@@ -106,9 +109,11 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         }
         if (options.keep !== undefined && (operation !== "inline-reexports" || typeof options.keep !== "boolean")) throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
         if (operation === "retarget-import" && (!options.from || !options.to)) throw new Error("INVALID_ARGUMENT: from and to required for retarget-import");
-        if (operation !== "retarget-import" && [options.from, options.to, options.map, options.only, options.mocks].some(value => value !== undefined)) {
-          throw new Error("INVALID_ARGUMENT: from, to, map, only and mocks require retarget-import");
+        if (operation !== "retarget-import" && [options.from, options.to, options.mocks].some(value => value !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: from, to and mocks require retarget-import");
         }
+        if (!["retarget-import", "move-file"].includes(operation) && [options.map, options.only].some(value => value !== undefined)) throw new Error("INVALID_ARGUMENT: map and only require retarget-import or move-file");
+        if (operation === "move-file" && languageForProject(options.project) !== "typescript" && (options.map || options.only)) throw new Error("INVALID_ARGUMENT: move-file mappings require TypeScript/JavaScript");
         if (options.mocks !== undefined && !["report", "add"].includes(options.mocks)) throw new Error("INVALID_ARGUMENT: mocks report|add");
         if (!options.file && operation !== "retarget-import") throw new Error("INVALID_ARGUMENT: file required");
         const project = await realpath(resolve(options.project));
@@ -124,6 +129,7 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
           project, root, file, operation,
           ...(options.checker !== undefined ? { checker: options.checker } : {}),
           ...(options.keep !== undefined ? { keep: options.keep } : {}),
+          ...(operation === "move-file" ? { ...(options.map ? { map: options.map } : {}), ...(options.only ? { only: options.only } : {}) } : {}),
           ...(operation === "retarget-import" ? { from: options.from, to: options.to,
             ...(options.map ? { map: options.map } : {}), ...(options.only ? { only: options.only } : {}),
             ...(options.mocks !== undefined ? { mocks: options.mocks } : {}),
@@ -143,10 +149,10 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
     preview(plan) { checkPlan(plan); return preview(plan); },
     async validate(plan) {
       checkPlan(plan);
-      await assertFresh(plan);
+      await assertFresh(plan, compilerBase);
       return { status: plan.validation.status === "passed" ? "validated" : "failed", validation: plan.validation, id: plan.id };
     },
-    async apply(plan) { checkPlan(plan); return applyPlan(plan); },
+    async apply(plan) { checkPlan(plan); return applyPlan(plan, compilerBase); },
     async loadPlan(path) { const plan = await loadPlan(resolve(path)); checkPlan(plan); return plan; },
     async capabilities(project) {
       assertLanguage(project);
