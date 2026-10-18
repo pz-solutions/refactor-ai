@@ -1,5 +1,7 @@
 export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "move-file" | "inline-reexports" | "retarget-import";
 export interface RefactorRequest {
+    /** Opt-in native diagnostics; edits always use pinned TypeScript 5.9.3. */
+    checker?: "ts5" | "ts7" | "both";
     project: string;
     root: string;
     file: string;
@@ -41,12 +43,18 @@ export interface FileChange {
     after: string | null;
 }
 export interface BackendResult {
+    checker?: CheckerIdentity;
     backend: string;
     version: string;
     changes: FileChange[];
     diagnosticsBefore: Diagnostic[];
     diagnosticsAfter: Diagnostic[];
     notes: string[];
+}
+export interface CheckerIdentity {
+    name: "ts5" | "ts7" | "both";
+    version: string;
+    comparedWith?: string;
 }
 export interface Capability {
     operation: Operation;

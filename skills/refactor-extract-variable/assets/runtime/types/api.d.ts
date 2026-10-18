@@ -4,6 +4,7 @@ import { RefactorContext } from "./refactor-context.js";
 export type { Plan } from "./core/plan.js";
 export type { Capability, Diagnostic, FileChange, Operation } from "./types.js";
 export interface PlanOptions {
+    checker?: "ts5" | "ts7" | "both";
     project: string;
     file?: string;
     /** Defaults to the project configuration's directory. Must cover all changed files. */
