@@ -193,9 +193,9 @@ class Diff {
       if (!component.removed) {
         if (!component.added && this.useLongestToken) {
           let value = newTokens.slice(newPos, newPos + component.count);
-          value = value.map(function(value2, i) {
+          value = value.map(function(value, i) {
             const oldValue = oldTokens[oldPos + i];
-            return oldValue.length > value2.length ? oldValue : value2;
+            return oldValue.length > value.length ? oldValue : value;
           });
           component.value = this.join(value);
         } else {
@@ -782,6 +782,7 @@ async function createPlan(request, analyze) {
     snapshot: before,
     changes,
     fileModes,
+    ...result.checker ? { checker: { ...result.checker } } : {},
     validation: { status: added.length ? "failed" : "passed", newDiagnostics: added },
     diagnosticsBefore: result.diagnosticsBefore,
     diagnosticsAfter: result.diagnosticsAfter,
@@ -1055,6 +1056,8 @@ function createRefactorApi(context) {
         if (context.operation && operation !== context.operation)
           throw new Error(`UNSUPPORTED: this tool only supports ${context.operation}`);
         assertLanguage(options.project);
+        if (options.checker !== undefined && (!["ts5", "ts7", "both"].includes(options.checker) || languageForProject(options.project) !== "typescript"))
+          throw new Error("INVALID_ARGUMENT: checker ts5|ts7|both requires TypeScript/JavaScript");
         if (options.targetProject)
           assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
@@ -1075,9 +1078,9 @@ function createRefactorApi(context) {
           throw new Error("INVALID_ARGUMENT: mocks report|add");
         if (!options.file && operation !== "retarget-import")
           throw new Error("INVALID_ARGUMENT: file required");
-        const project2 = await realpath3(resolve4(options.project));
-        const file = await realpath3(resolve4(options.file ?? dirname3(project2)));
-        const root = await realpath3(resolve4(options.root ?? dirname3(project2)));
+        const project = await realpath3(resolve4(options.project));
+        const file = await realpath3(resolve4(options.file ?? dirname3(project)));
+        const root = await realpath3(resolve4(options.root ?? dirname3(project)));
         const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile4(file, "utf8") : "";
         const position = (point) => {
           if (typeof point === "string")
@@ -1086,11 +1089,12 @@ function createRefactorApi(context) {
             throw new Error(`INVALID_POSITION: ${point}`);
           return point;
         };
-        const request2 = {
-          project: project2,
+        const request = {
+          project,
           root,
           file,
           operation,
+          ...options.checker !== undefined ? { checker: options.checker } : {},
           ...options.keep !== undefined ? { keep: options.keep } : {},
           ...operation === "retarget-import" ? {
             from: options.from,
@@ -1109,7 +1113,7 @@ function createRefactorApi(context) {
           ...options.typeName !== undefined ? { typeName: options.typeName } : {},
           ...options.rootNamespace !== undefined ? { rootNamespace: options.rootNamespace } : {}
         };
-        return { project: project2, request: request2 };
+        return { project, request };
       }
     },
     preview(plan) {

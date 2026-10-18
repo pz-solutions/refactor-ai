@@ -63,6 +63,7 @@ Paths resolve against the custom script process's current working directory. Ret
 | --- | --- |
 | `project`, `file` | Required project configuration and source file (a directory for move-file; optional for retarget-import, which accepts a file or directory). TS/JS uses tsconfig/jsconfig JSON; C# uses `.csproj` or `.sln`. |
 | `root` | Directory covering the project and all changed files; defaults to the project configuration's directory. Set a shared root for cross-project changes. |
+| `checker` | TS/JS only: `"ts5"` (default), `"ts7"` (native diagnostics only) or `"both"` (TS5+TS7 audit, rejects any file+code/multiplicity disagreement). TS7/both require Node.js 22+ and the separately installed optional alias `typescript7@npm:typescript@7.0.2`; project-reference declaration builds are unsupported. Edits always use TS5. Returned `plan.checker` records the checker/version and audit reference when used. No runtime downloads. |
 | `operation` | Required for aggregate APIs; optional for operation APIs. |
 | `at` | A 1-based `"line:column"` string or zero-based character offset, both measured in UTF-16 code units. Required for rename and extraction. |
 | `end` | Exclusive extraction end, with the same coordinate formats as `at`. |

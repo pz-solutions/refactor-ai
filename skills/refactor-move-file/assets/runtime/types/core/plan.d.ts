@@ -1,4 +1,4 @@
-import type { BackendResult, Diagnostic, FileChange, RefactorRequest } from "../types.js";
+import type { BackendResult, CheckerIdentity, Diagnostic, FileChange, RefactorRequest } from "../types.js";
 import { type Snapshot } from "./snapshot.js";
 /**
  * Schema 1: edits and file creations (`after` is always a string).
@@ -8,6 +8,7 @@ import { type Snapshot } from "./snapshot.js";
  */
 export type PlanSchemaVersion = 1 | 2;
 export interface Plan {
+    checker?: CheckerIdentity;
     schemaVersion: PlanSchemaVersion;
     id: string;
     request: RefactorRequest;
