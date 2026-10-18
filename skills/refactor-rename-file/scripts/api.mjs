@@ -11,6 +11,30 @@ import { lstat as lstat3, mkdir, open, readFile as readFile3, rename, rm, rmdir,
 import { dirname as dirname2, resolve as resolve3 } from "node:path";
 import { randomUUID } from "node:crypto";
 
+// src/core/read-set.ts
+import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+var inputMethods = ["readFile", "fileExists", "directoryExists", "getDirectories", "readDirectory", "realpath"];
+var inputHash = (value) => createHash("sha256").update(typeof value === "string" ? `string:${value}` : JSON.stringify(value) ?? "undefined").digest("hex");
+function assertReadSetShape(inputs) {
+  if (!Array.isArray(inputs) || inputs.some((input) => !input || !inputMethods.includes(input.method) || !Array.isArray(input.args) || typeof input.args[0] !== "string" || !/^[a-f0-9]{64}$/.test(input.digest))) {
+    throw new Error("INVALID_PLAN: malformed read set");
+  }
+}
+async function assertReadSetFresh(inputs, compilerBase) {
+  assertReadSetShape(inputs);
+  if (!inputs.length)
+    return;
+  const load = createRequire(compilerBase ?? import.meta.url);
+  const ts = load("typescript");
+  for (const input of inputs) {
+    const method = ts.sys[input.method];
+    if (!method || inputHash(method(...input.args.map((value) => value === null ? undefined : value))) !== input.digest) {
+      throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}; create a new plan after writers/generators settle`);
+    }
+  }
+}
+
 // src/core/plan.ts
 import { lstat as lstat2, readFile as readFile2, realpath as realpath2 } from "node:fs/promises";
 import { relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
@@ -440,13 +464,13 @@ function splitLines(text) {
 }
 // src/core/snapshot.ts
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { lstat, readdir, readFile, readlink, realpath, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 var excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
 function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
+  return createHash2("sha256").update(value).digest("hex");
 }
 function describeInputPath(path) {
   const portable = path.split(sep).join("/");
@@ -648,13 +672,17 @@ function caseConflict(root, files, changes) {
   return;
 }
 function assertPlanShape(plan) {
-  if (plan?.schemaVersion !== 1 && plan?.schemaVersion !== 2 || !plan.request || typeof plan.request.root !== "string" || !Array.isArray(plan.changes) || !plan.snapshot || !plan.validation || !Array.isArray(plan.diagnosticsBefore) || !Array.isArray(plan.diagnosticsAfter)) {
+  if (plan?.schemaVersion !== 1 && plan?.schemaVersion !== 2 && plan?.schemaVersion !== 3 || !plan.request || typeof plan.request.root !== "string" || !Array.isArray(plan.changes) || !plan.snapshot || !plan.validation || !Array.isArray(plan.diagnosticsBefore) || !Array.isArray(plan.diagnosticsAfter)) {
     throw new Error("INVALID_PLAN: unsupported or malformed plan");
   }
   if (plan.id !== planId(plan))
     throw new Error("INVALID_PLAN: plan integrity check failed");
   if (plan.snapshot.hash !== sha256(JSON.stringify(plan.snapshot.files)))
     throw new Error("INVALID_PLAN: invalid snapshot");
+  if (plan.schemaVersion === 3)
+    assertReadSetShape(plan.readSet);
+  else if (plan.readSet !== undefined)
+    throw new Error("INVALID_PLAN: read set requires schema 3");
   const added = newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter);
   if (JSON.stringify(added) !== JSON.stringify(plan.validation.newDiagnostics) || plan.validation.status !== (added.length ? "failed" : "passed")) {
     throw new Error("INVALID_PLAN: inconsistent validation");
@@ -709,13 +737,15 @@ async function canonicalRequest(request) {
   return result;
 }
 var fileId = (stat) => `${stat.dev}:${stat.ino}`;
-async function createPlan(request, analyze) {
+async function createPlan(request, analyze, compilerBase) {
   request = await canonicalRequest(request);
   const root = request.root;
   const before = await snapshot(root);
   const result = await analyze(request);
-  const after = await snapshot(root);
-  if (after.hash !== before.hash)
+  const after = result.readSet || !result.changes.length ? before : await snapshot(root);
+  if (result.changes.length && result.readSet)
+    await assertReadSetFresh(result.readSet, compilerBase);
+  if (result.changes.length && !result.readSet && after.hash !== before.hash)
     throw new Error(`STALE_SNAPSHOT: project changed during analysis: ${snapshotChanges(before, after)}; retry after writers settle (including dev-server generators)`);
   const seen = new Set;
   const changes = [];
@@ -774,12 +804,15 @@ async function createPlan(request, analyze) {
   if (conflict)
     throw new Error(`CASE_CONFLICT: ${conflict} differs only by case from another path`);
   const added = newDiagnostics(result.diagnosticsBefore, result.diagnosticsAfter);
+  const files = Object.fromEntries(changes.filter((change) => change.before !== null).map((change) => [relative2(root, change.path), before.files[relative2(root, change.path)]]));
+  const plannedSnapshot = result.readSet ? { files, hash: sha256(JSON.stringify(files)) } : before;
   const body = {
-    schemaVersion: changes.some((c) => c.before === null || c.after === null) ? 2 : 1,
+    ...result.readSet ? { readSet: JSON.parse(JSON.stringify(result.readSet)) } : {},
+    schemaVersion: result.readSet ? 3 : changes.some((c) => c.before === null || c.after === null) ? 2 : 1,
     request,
     backend: result.backend,
     backendVersion: result.version,
-    snapshot: before,
+    snapshot: plannedSnapshot,
     changes,
     fileModes,
     ...result.checker ? { checker: { ...result.checker } } : {},
@@ -802,12 +835,37 @@ async function loadPlan(path) {
   assertPlanShape(plan);
   return plan;
 }
-async function assertFresh(plan) {
+async function assertFresh(plan, compilerBase) {
   if (plan.id !== planId(plan))
     throw new Error("INVALID_PLAN: plan integrity check failed");
   if (await realpath2(plan.request.root) !== plan.request.root)
     throw new Error("INVALID_PLAN: noncanonical root");
-  const current = await snapshot(plan.request.root);
+  if (!plan.changes.length)
+    return;
+  if (plan.readSet) {
+    for (const change of plan.changes) {
+      await assertRegularPath(plan.request.root, change.path, change.before === null).catch((error) => {
+        if (error.code === "ENOENT")
+          throw new Error(`STALE_SNAPSHOT: removed ${change.path}`);
+        throw error;
+      });
+      const text = await readFile2(change.path).catch((error) => {
+        if (error.code === "ENOENT")
+          return null;
+        throw error;
+      });
+      if (text === null ? change.before !== null : change.before === null || sha256(text) !== sha256(change.before))
+        throw new Error(`STALE_SNAPSHOT: changed ${change.path}`);
+    }
+  }
+  if (plan.readSet)
+    await assertReadSetFresh(plan.readSet, compilerBase);
+  if (plan.readSet && plan.changes.some((change) => change.before === null)) {
+    const conflict = caseConflict(plan.request.root, (await snapshot(plan.request.root)).files, plan.changes);
+    if (conflict)
+      throw new Error(`STALE_SNAPSHOT: case-insensitive path collision: ${conflict}`);
+  }
+  const current = plan.readSet ? plan.snapshot : await snapshot(plan.request.root);
   if (current.hash !== plan.snapshot.hash)
     throw new Error(`STALE_SNAPSHOT: project changed: ${snapshotChanges(plan.snapshot, current)}; create a new plan after writers settle`);
   for (const [path, modes] of Object.entries(plan.fileModes ?? {})) {
@@ -892,7 +950,7 @@ async function order(plan) {
   const rank = (step) => step.kind === "create" ? aliases.has(step.change) ? 3 : 0 : step.kind === "edit" ? 1 : 2;
   return steps.toSorted((a, b) => rank(a) - rank(b));
 }
-async function applyPlan(plan) {
+async function applyPlan(plan, compilerBase) {
   assertPlanShape(plan);
   if (plan.validation.status !== "passed" || newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter).length) {
     throw new Error("VALIDATION_FAILED: plan adds compiler errors");
@@ -930,7 +988,7 @@ async function applyPlan(plan) {
   const saveJournal = () => atomicWrite(journalPath, JSON.stringify(journal, null, 2) + `
 `);
   try {
-    await assertFresh(plan);
+    await assertFresh(plan, compilerBase);
     if (!plan.changes.length)
       return { status: "applied", files: [], journal: null };
     const steps = await order(plan);
@@ -1044,11 +1102,12 @@ function createRefactorApi(context) {
     assertPlanShape(plan);
     assertLanguage(plan.request.project, plan.backend);
   }
+  const compilerBase = context.toolkitRoot ? resolve4(context.toolkitRoot, "runtime/package.json") : undefined;
   return {
     async plan(options) {
       const { project, request } = await resolveRequest();
       const engine = await context.loadBackend(project, context.toolkitRoot);
-      return createPlan(request, engine.analyze);
+      return createPlan(request, engine.analyze, compilerBase);
       async function resolveRequest() {
         const operation = options.operation ?? context.operation;
         if (!operation || !Object.values(languageOperations).some((items) => items.includes(operation)))
@@ -1071,9 +1130,13 @@ function createRefactorApi(context) {
           throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
         if (operation === "retarget-import" && (!options.from || !options.to))
           throw new Error("INVALID_ARGUMENT: from and to required for retarget-import");
-        if (operation !== "retarget-import" && [options.from, options.to, options.map, options.only, options.mocks].some((value) => value !== undefined)) {
-          throw new Error("INVALID_ARGUMENT: from, to, map, only and mocks require retarget-import");
+        if (operation !== "retarget-import" && [options.from, options.to, options.mocks].some((value) => value !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: from, to and mocks require retarget-import");
         }
+        if (!["retarget-import", "move-file"].includes(operation) && [options.map, options.only].some((value) => value !== undefined))
+          throw new Error("INVALID_ARGUMENT: map and only require retarget-import or move-file");
+        if (operation === "move-file" && languageForProject(options.project) !== "typescript" && (options.map || options.only))
+          throw new Error("INVALID_ARGUMENT: move-file mappings require TypeScript/JavaScript");
         if (options.mocks !== undefined && !["report", "add"].includes(options.mocks))
           throw new Error("INVALID_ARGUMENT: mocks report|add");
         if (!options.file && operation !== "retarget-import")
@@ -1096,6 +1159,7 @@ function createRefactorApi(context) {
           operation,
           ...options.checker !== undefined ? { checker: options.checker } : {},
           ...options.keep !== undefined ? { keep: options.keep } : {},
+          ...operation === "move-file" ? { ...options.map ? { map: options.map } : {}, ...options.only ? { only: options.only } : {} } : {},
           ...operation === "retarget-import" ? {
             from: options.from,
             to: options.to,
@@ -1122,12 +1186,12 @@ function createRefactorApi(context) {
     },
     async validate(plan) {
       checkPlan(plan);
-      await assertFresh(plan);
+      await assertFresh(plan, compilerBase);
       return { status: plan.validation.status === "passed" ? "validated" : "failed", validation: plan.validation, id: plan.id };
     },
     async apply(plan) {
       checkPlan(plan);
-      return applyPlan(plan);
+      return applyPlan(plan, compilerBase);
     },
     async loadPlan(path) {
       const plan = await loadPlan(resolve4(path));

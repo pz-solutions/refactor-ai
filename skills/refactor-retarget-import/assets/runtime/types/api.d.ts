@@ -14,7 +14,9 @@ export interface PlanOptions {
     /** Exact source/destination module specifiers for retarget-import. */
     from?: string;
     to?: string;
+    /** retarget-import: export names; move-file: exact module specifiers in moved files. */
     map?: Record<string, string>;
+    /** Select original named exports for either mapping operation; other bindings stay. */
     only?: string[];
     /** retarget-import: report affected test mocks (default), or add parallel mocks. */
     mocks?: "report" | "add";
