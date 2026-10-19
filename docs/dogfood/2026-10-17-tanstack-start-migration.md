@@ -695,3 +695,252 @@ They do not measure native Go CPU. Cold parsing, retained graph/checker memory a
 resolution IO remain the useful next targets; source-parent correctness and
 filesystem-view boundaries still constrain sharing. A final rebuild preserves the
 exact CLI binary hash used in the measurements.
+
+## Round four — events and utility-readings migration friction
+
+### F51 — atomic batch moves and directory exclusions
+
+R3 repeated project discovery, union-program construction and native validation
+for every events file. R4 accepts repeatable `--file source=destination` pairs
+(API `moves: [{ file, target }]`) and canonicalizes them before one workspace
+analysis. Interdependent files move as a set: project-cycle checks inspect the
+final graph rather than intermediate states. Directory `--exclude` uses the
+existing tsconfig glob matcher, relative to each source directory. Excluded Next
+pages, preload hooks and adapters stay in place and their imports still update.
+Explicit source/destination collisions and overlaps are rejected. Batch movement
+preserves relative imports, JSON resources, triple-slash references and source
+file permissions. The normal membership, package-export, reference and diagnostic
+guards still apply.
+
+```sh
+export PATH=/usr/local/bin:$PATH
+node dist/cli.js plan move-file --project apps/web/tsconfig.json --root . \
+  --file 'apps/web/src/app/[locale]/dashboard/events/event-search-params.ts=packages/app-features/src/events/event-search-params.ts' \
+  --file 'apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts=packages/app-features/src/events/events-client.helpers.ts' \
+  --target-project packages/app-features/tsconfig.json --map next-intl=use-intl \
+  --checker ts7 --out /tmp/events-batch.json
+
+node dist/cli.js plan move-file --project apps/web/tsconfig.json --root . \
+  --file 'apps/web/src/app/[locale]/dashboard/events' \
+  --to packages/app-features/src/events --exclude page.tsx \
+  --exclude '**/_hooks/**' --exclude '*adapter*' \
+  --target-project packages/app-features/tsconfig.json --map next-intl=use-intl \
+  --checker ts7 --out /tmp/events-directory.json
+```
+
+These commands assume runtime ports/types have been prepared, as in the real
+slice. Exclusions cannot make a client component independent of an excluded
+server module that it still imports. Run in the disposable target described in
+F57, not in an active migration worktree.
+
+### F52 — declaration selection copies the selected dependencies
+
+The r3 help's `move-file --only` described import-binding filtering, while the
+slice used it to extract `TenancyEventFilters`, `TenancyEventsPage` and
+`TenancyEvent`. R4 gives this operation the intended declaration-selection
+meaning: compiler `Move to file` refactors move selected exported declarations,
+copy necessary imports and update semantic callers. Contiguous selections move
+together; nonadjacent selections reuse the same analysis and destination. A
+compiler-generated self-import from an earlier selection is removed. The
+unselected preload function and its framework-only import stay in the source.
+Required imported symbols are checked for preservation, so a same-spelled alias
+in the destination cannot silently rebind a selected declaration.
+
+```sh
+export PATH=/usr/local/bin:$PATH
+node dist/cli.js plan move-file --project apps/web/tsconfig.json --root . \
+  --file 'apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts' \
+  --to packages/app-features/src/events/types.ts \
+  --target-project packages/app-features/tsconfig.json \
+  --only TenancyEventFilters,TenancyEventsPage,TenancyEvent \
+  --checker ts7 --out /tmp/events-types.json
+```
+
+Supported selections: exported types/interfaces, functions and safe classes/enums.
+Runtime variables, merged declarations, default exports and re-export selections
+require preparation. Selection currently takes one file and a new destination;
+whole-file batches remain separate. For the old r3 mapping-only `--only` behavior,
+run `retarget-import --only` before moving. This is an intentional CLI/API behavior
+change, documented in help and the TS move skill.
+
+### F53 — E2E stale inputs are discovery reads, not a whole-root fallback
+
+Events failed on `readFile .../e2e/app/properties/dashboard-events.spec.ts`.
+Utility-readings supplies the same proof for both operations:
+
+- `inline-reexports`: `readFile .../e2e/app/properties/utility-readings.spec.ts`.
+- `_components` move: `readFile .../e2e/utility-readings.spec.ts`.
+- `_lib` apply: `readDirectory .../<root>` changed; the log does not include that
+  query's arguments, so it cannot establish which matching path was added/removed.
+
+These are **STALE_PROJECT_INPUTS**, not STALE_SNAPSHOT. Both paths use
+`analyzeFileOperation`, return `inputs.snapshot()` and create schema-3 plans.
+`Workspace.loadGraph` calls `importsAffected` for other configs. The root
+uber-platform tsconfig includes `e2e/**/*`; its discovery program reads those
+specs to prove whether they import moved/changed modules. Discovery reads join
+the exact read set even when that project never joins native validation.
+Content edits may change its imports, ambient declarations or project inclusion;
+discarding those reads would invalidate that proof. The read-set guard worked as
+designed. No unsafe narrowing was made.
+
+A regression now covers discovery-only project reads becoming stale, alongside
+the existing test proving unread E2E content does not affect plan identity or
+freshness. Stale messages now explain discovery inputs and print directory query
+arguments. Serialize writers to those inputs during mechanical operations.
+
+```sh
+export PATH=/usr/local/bin:$PATH
+bun test tests/read-set.test.ts --test-name-pattern 'discovery-only|unread content'
+```
+
+### F54 — references to a future destination are valid expectations
+
+Previously module-reference counts included only callers resolving to the source.
+A pre-existing adapter import of the destination was unresolved, so resolving it
+after a move looked like a new unexplained reference. R4 records original
+unresolved edges and admits an additional expected caller only when its unchanged
+specifier now resolves to a moved destination. Existing resolved edges still
+must bind to their original relocated target; arbitrary count increases remain
+rejected. A future package import also publishes the anticipated destination export when no resolved source caller exists yet.
+
+```sh
+export PATH=/usr/local/bin:$PATH
+bun test tests/typescript-move-file.test.ts --test-name-pattern 'pre-existing unresolved destination|future destination'
+```
+
+For the real slice, an adapter may already import
+`@uber-platform/app-features/events/events-client` before the batch publishes that
+path. No temporary source-path rewrite is required.
+
+### F55 — mocks follow moved APIs and deleted transparent shims
+
+`inline-reexports` retargets vi.mock, vi.doMock and vi.importActual (and the other
+recognized Vitest/Jest module calls) before removing a transparent single-origin
+shim. It retains shims when their renamed or split exports require a runtime
+adapter, and explains why. `move-file --map` rewrites module literals in moved
+tests, including nested actual imports; transformations are simultaneous.
+Factories remain unchanged. Unmoved transitive consumers get a mock report;
+`--mocks add` keeps original registrations and clones registrations for the
+mapped module. These resolutions use the tracked filesystem/overlay view.
+
+```sh
+export PATH=/usr/local/bin:$PATH
+bun test tests/typescript-inline-reexports.test.ts --test-name-pattern 'retargets mock|retains shims'
+bun test tests/typescript-move-file.test.ts --test-name-pattern 'move mappings retarget|mocks add'
+```
+
+### F56 — state configuration, consumer hints and named-import maps
+
+Generated `.refactor-ai/.gitignore` is now `*`, `!equivalents.json`, `!.gitignore`.
+CLI/apply and the diagnostics cache upgrade the exact legacy generated `*\n`
+content; custom ignore contents are preserved and symlinks are not followed.
+`equivalents.json` remains eligible for version control. NEW_DIAGNOSTICS move
+errors list affected consumer paths and suggest adapting them first or batching
+dependencies. Package dependency hints also name the importing and imported path.
+
+Optional goal 7 is included: `--map 'next-intl#NextIntlClientProvider=use-intl#IntlProvider'`
+can accompany `--map next-intl=use-intl`. Named imports/re-exports target the new
+export while retaining their local/public names through explicit aliases. JSX
+and shadowed local references therefore keep their original binding. The rule
+applies to moved test files too. Mock factories still need runtime API review;
+export mapping does not rewrite arbitrary object keys or actual-module accesses.
+
+```sh
+export PATH=/usr/local/bin:$PATH
+bun test tests/snapshot.test.ts --test-name-pattern 'generated state ignore'
+bun test tests/typescript-move-file.test.ts --test-name-pattern 'named module maps|participant validation'
+```
+
+### F57 — reproducible events benchmark and limits of the comparison
+
+The disposable worktree `/tmp/ra-target` starts at
+`9f66b9dc4c2177cf7141b67984849d89a11688f2`, with `bun install` there. Active
+uber-platform worktrees and the coordinator's refactor-ai checkout are untouched.
+`prepare-r4-events.py` reconstructs all 13 original pre-move source texts from the
+recorded events previews, reverses already-moved intra-slice imports, and stages
+the actual type split and Next adapter from events commit `67b19ec8`. The column
+test's provider name is corrected to `IntlProvider`, as in the final slice. These
+runtime preparations are required for a valid framework boundary; this is not a
+claim that an unprepared whole Next route can move unchanged.
+
+`bench-r4.mjs` runs three full single-plan sequences with the unchanged 59f05a8
+runtime and three atomic batches with R4. Single mode applies plans **only in the
+disposable /tmp worktree**, then restores exact pre-run contents. Batch mode
+never applies. Plan latency excludes apply; stdout, stderr, complete plans,
+phase timings, checker identity, CLI hashes, load averages, read counts and
+fixture statuses are retained. Each successful run must leave the same fixture
+status. No performance sample uses a failed plan.
+
+```sh
+export PATH=/usr/local/bin:$PATH
+# Run from the implementation checkout; create /tmp/ra-target at 9f66b9dc first.
+python3 scripts/prepare-r4-events.py /tmp/ra-target \
+  /home/wooboo/.t3/worktrees/uber-platform/t3-791f7838/.scratch/events/refactor.log
+node scripts/bench-r4.mjs /tmp/ra-target /tmp/refactor-r4-baseline/cli.mjs single /tmp/ra-r4-singles
+node scripts/bench-r4.mjs /tmp/ra-target "$PWD/dist/cli.js" batch /tmp/ra-r4-batches
+```
+
+The original events log records 45 commands / 558.850 s, including rejected plans,
+previews and applies. Its successful 13-plan sum is historical context, not the
+same-machine control above. R4 does not claim to make every one-file plan faster;
+the benefit is avoiding twelve repeated analyses.
+
+
+### Final round-four measurements
+
+Seconds; three complete runs each, Node v24.22.0, Bun 1.4.3, TS7 7.0.2,
+cold processes, persistent cache off, OS cache retained. Single controls ran
+first, then batches; these are sequential series, not interleaved pairs. No agent
+tests ran during the recorded series. Load averages are in the compact report.
+
+| Run | R3: sum of 13 single plans | R4: one 13-file batch |
+| --- | ---: | ---: |
+| 1 | 276.485 | 20.305 |
+| 2 | 265.848 | 20.264 |
+| 3 | 254.915 | 19.735 |
+| Median | 265.848 | 20.264 |
+
+Median reduction **92.38%**, **13.12×**; every batch is below 60 s.
+All 42 plans pass. The three batch IDs and exact edit hashes match; each records
+51,351 compiler observations and 29 changes. All three single
+sequences produce identical final bytes. Their changed-path sets match the batch,
+and 28/29 file contents are byte-identical. Only package.json differs: sequential
+moves publish helper entries needed by their intermediate source-project callers;
+the batch only publishes its required entry points. This is intentional public-
+surface reduction, not a missing import rewrite. The historical events 13-plan
+sum was 442.933 s; it is excluded from the controlled comparison.
+
+Compact evidence: [summary.json](perf-r4-2026-10-19/summary.json). Full plans and
+logs remain in `/tmp/ra-r4-singles` and `/tmp/ra-r4-final-batches`; earlier pilots
+are excluded. Both series leave the prepared /tmp fixture's status unchanged.
+
+
+The original `--only` failure is also replayed on a separate **clean**
+`/tmp/ra-only-target` at 9f66b9dc, with its own `bun install`: the unchanged R3
+CLI rejects `@/lib/preload-authenticated`; the final R4 CLI passes with zero
+after-diagnostics, retaining the preload function and copying only the selected
+types/imports. No plan is applied, and Git status stays clean. Raw evidence:
+`/tmp/ra-r4-only-before.log`, `/tmp/ra-r4-only-after.log` and the after plan.
+
+A further real directory plan excludes `page.tsx`, `**/_hooks/**` and `*adapter*`,
+while the retained Next adapter already imports the **future destination**. It
+moves exactly the same 13 files, publishes the anticipated view export, and
+passes native validation with zero diagnostics. It is never applied; the
+adapter's temporary fixture edit is restored. Full plan/log:
+`/tmp/ra-r4-directory-future.json` and `.log`. These repros are excluded from
+performance samples.
+
+The [interactive report](perf-r4-2026-10-19/results.html) includes the table,
+demo commands and remaining boundaries.
+
+
+Verification: `bun run typecheck`, `bun run test --timeout 60000` and
+`bun run build` pass: **326/326 tests**, 1,491 assertions, 20 files, 239.81 s.
+The new machine needed a temporary user-local .NET **8.0.426**, installed at
+`/tmp/ra-dotnet8`; npm **11.19.1** was selected explicitly with `npm_execpath`.
+The TS move skill passes `quick_validate.py`; `git diff --check` is clean.
+The final rebuilt CLI SHA256 matches the one measured in all three final batches.
+Re-running the committed preparation script preserves the prepared fixture status;
+the separate declaration-repro worktree remains clean. Generated skill runtimes,
+SDK declarations and copied API docs belong in a separate commit from sources.
+No push or apply to an active user worktree was performed.

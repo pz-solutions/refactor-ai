@@ -63,6 +63,24 @@ function exportedPaths(pkg: Package, target: string): string[] {
   return [...new Set(candidates)].sort((a, b) => a.length - b.length || a.localeCompare(b));
 }
 
+function defaultExportKey(pkg: Package, target: string): string {
+  const path = portablePath(relative(pkg.directory, target));
+  const subpath = path.replace(/^src\//, "").slice(0, -extname(path).length).replace(/(^|\/)index$/, "");
+  return subpath ? `./${subpath}` : ".";
+}
+
+/** Publish an explicitly anticipated destination even when it has no resolved source callers yet. */
+export function anticipatePackageExport(ws: Workspace, target: string, specifier: string): boolean {
+  const pkg = packageFor(ws, target);
+  if (!pkg) return false;
+  const keys = exportedPaths(pkg, target);
+  const matches = (key: string) => specifier === pkg.name + (key === "." ? "" : key.slice(1));
+  if (keys.some(matches)) return true;
+  if (!matches(defaultExportKey(pkg, target))) return false;
+  addExport(ws, pkg, target);
+  return true;
+}
+
 /** Append without reprinting the manifest, preserving existing whitespace, ordering and trailing commas. */
 function addExport(ws: Workspace, pkg: Package, target: string): string {
   const text = ws.vfs.readFile(pkg.path)!;
@@ -79,8 +97,7 @@ function addExport(ws: Workspace, pkg: Package, target: string): string {
   const path = portablePath(relative(pkg.directory, target));
   if (path.startsWith("../")) fail("PACKAGE_EXPORTS_UNSUPPORTED", target);
   // A directory's index module is published as the directory (`./feature`, or `.` for src/index).
-  const subpath = path.replace(/^src\//, "").slice(0, -extname(path).length).replace(/(^|\/)index$/, "");
-  const key = subpath ? `./${subpath}` : ".";
+  const key = defaultExportKey(pkg, target);
   const entries = property.initializer.properties;
   if (entries.some(item => ts.isPropertyAssignment(item) && ts.isStringLiteral(item.name) && item.name.text === key)) {
     fail("PACKAGE_EXPORT_CONFLICT", `${pkg.path}: ${key} already names another target`);
@@ -112,7 +129,7 @@ export function packageSpecifier(ws: Workspace, importer: string, target: string
     const value = source.json[field];
     return value && typeof value === "object" && Object.hasOwn(value, destination.name);
   });
-  if (!declares) fail("MISSING_DEPENDENCY", `${source.path} must declare ${destination.name} in dependencies, devDependencies or peerDependencies`);
+  if (!declares) fail("MISSING_DEPENDENCY", `${source.path} must declare ${destination.name} in dependencies, devDependencies or peerDependencies (${importer} imports ${target})`);
   const paths = exportedPaths(destination, target);
   const nameFor = (key: string) => destination.name + (key === "." ? "" : key.slice(1));
   const owner = ws.ownersOf(importer)[0];

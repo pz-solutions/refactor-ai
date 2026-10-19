@@ -1,0 +1,23 @@
+<!doctype html><html lang="pl"><meta charset="utf-8"><style>
+body{font-family:var(--font-sans,system-ui);color:var(--foreground,#202020);line-height:1.45}p{margin:12px 0}.kicker{font-weight:650;font-size:15px}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{padding:10px 8px;border-bottom:1px solid var(--border,#ddd);text-align:right}th:first-child,td:first-child{text-align:left}th{font-size:12px;color:var(--muted-foreground,#666);font-weight:500}.median{font-weight:700}.good{color:var(--success,#187448)}.note{font-size:12px;color:var(--muted-foreground,#666)}details{border-top:1px solid var(--border,#ddd);padding:9px 0}summary{cursor:pointer;font-size:13px}pre{font-family:var(--font-mono,monospace);font-size:11px;overflow:auto;padding:12px;background:var(--code-background,#f3f3f3);border-radius:var(--radius,6px);white-space:pre}
+</style><p class="kicker">Events · 13 plików · TS7 7.0.2</p><table aria-label="Czas planowania w sekundach"><thead><tr><th>Przebieg</th><th>R3: suma 13 planów, s</th><th>R4: jeden batch, s</th></tr></thead><tbody><tr><td>1</td><td>276,485</td><td>20,305</td></tr><tr><td>2</td><td>265,848</td><td>20,264</td></tr><tr><td>3</td><td>254,915</td><td>19,735</td></tr><tr class="median"><td>Mediana</td><td>265,848</td><td>20,264</td></tr></tbody></table><p class="good"><strong>92,38% mniej czasu · 13,12× szybciej · każdy batch poniżej 60 s</strong></p><p class="note">42/42 planów poprawnych; trzy identyczne ID batcha. Node 24.22.0; zimne procesy, cache narzędzia wyłączony, cache systemu zachowany. Serie pojedynczych planów wykonano przed batchami. Preparacja obejmuje typy i adapter Next z rzeczywistej migracji. Planowanie i zastosowanie kontroli wyłącznie w jednorazowym /tmp; aktywne worktree bez apply.</p><p class="note">28/29 wynikowych plików identycznych bajtowo. Batch publikuje potrzebne wejścia pakietu; sekwencja dodaje też eksporty helperów potrzebne przejściowym konsumentom.</p><details><summary>Batch i wykluczenia adapterów</summary><pre>export PATH=/usr/local/bin:$PATH;
+node dist/cli.js plan move-file --project /tmp/ra-target/apps/web/tsconfig.json \
+  --root /tmp/ra-target \
+  --file &#x27;/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events&#x27; \
+  --to /tmp/ra-target/packages/app-features/src/events \
+  --exclude page.tsx --exclude &#x27;**/_hooks/**&#x27; --exclude &#x27;*adapter*&#x27; \
+  --target-project /tmp/ra-target/packages/app-features/tsconfig.json \
+  --map next-intl=use-intl --checker ts7 --out /tmp/events-batch.json</pre></details><details><summary>Wybrane typy bez importu preload</summary><pre>export PATH=/usr/local/bin:$PATH;
+node dist/cli.js plan move-file --project /tmp/ra-only-target/apps/web/tsconfig.json \
+  --root /tmp/ra-only-target \
+  --file &#x27;/tmp/ra-only-target/apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts&#x27; \
+  --to /tmp/ra-only-target/packages/app-features/src/events/types.ts \
+  --target-project /tmp/ra-only-target/packages/app-features/tsconfig.json \
+  --only TenancyEventFilters,TenancyEventsPage,TenancyEvent \
+  --checker ts7 --out /tmp/events-types.json</pre></details><details><summary>Przyszłe importy, mocki, gitignore, nazwane eksporty</summary><pre>export PATH=/usr/local/bin:$PATH;
+bun test tests/typescript-move-file.test.ts --test-name-pattern &#x27;future destination|pre-existing unresolved|move mappings retarget|mocks add|named module maps&#x27;
+bun test tests/typescript-inline-reexports.test.ts --test-name-pattern &#x27;retargets mock|retains shims&#x27;
+bun test tests/snapshot.test.ts --test-name-pattern &#x27;generated state ignore&#x27;
+# Przy move-file: --map next-intl=use-intl \
+#   --map &#x27;next-intl#NextIntlClientProvider=use-intl#IntlProvider&#x27;</pre></details><details><summary>Świeżość odczytów discovery</summary><pre>export PATH=/usr/local/bin:$PATH;
+bun test tests/read-set.test.ts --test-name-pattern &#x27;discovery-only|unread content&#x27;</pre></details><p class="note">Pozostaje: discovery nadal chroni odczytane E2E; wybrane zmienne/merged declarations i shimy z różnymi lub przemianowanymi źródłami wymagają przygotowania. Fabryki mocków wymagają kontroli zgodności runtime. --only w move-file oznacza teraz wybór deklaracji; stary wybór importowanych nazw wykonuje retarget-import --only.</p></html>

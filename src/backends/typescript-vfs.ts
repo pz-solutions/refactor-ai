@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type { FileSystem } from "typescript7/unstable/fs";
+import { inputQueryDetails } from "../core/read-set";
 import { CompilerInputs } from "./typescript-diagnostics-cache";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, relative, resolve, sep } from "node:path";
@@ -114,6 +115,11 @@ function wildcardRegex(specs: readonly string[] | undefined, basePath: string, u
   const patterns = (specs ?? []).map((spec) => subPattern(spec, basePath, usage)).filter((item): item is string => !!item);
   if (!patterns.length) return undefined;
   return new RegExp(`^(?:${patterns.map((item) => `(?:${item})`).join("|")})${usage === "exclude" ? "(?:$|/)" : "$"}`, flags);
+}
+
+/** Same exclude-glob rules as tsconfig, including literal bracketed route directories. */
+export function excludedByPatterns(path: string, base: string, patterns: string[]): boolean {
+  return wildcardRegex(patterns, base, "exclude", ts.sys.useCaseSensitiveFileNames ? "" : "i")?.test(portablePath(resolve(path))) ?? false;
 }
 
 function includeBasePath(absolute: string): string {
@@ -294,7 +300,7 @@ export class VirtualFs {
   /** Cached metadata must not hide ignored generator inputs outside the Git snapshot. */
   assertStableMetadata(): void {
     const changed = this.inputs.changed();
-    if (changed) fail("STALE_PROJECT_INPUTS", `${changed.method} changed during analysis: ${changed.args[0]}; retry after writers/generators settle`);
+    if (changed) fail("STALE_PROJECT_INPUTS", `${changed.method} changed during analysis: ${changed.args[0]}${inputQueryDetails(changed)}; compiler inputs include project-discovery reads; retry after those writers/generators settle`);
   }
 
   private virtualPaths(): string[] {

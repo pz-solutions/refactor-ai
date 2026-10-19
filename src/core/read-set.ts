@@ -12,6 +12,13 @@ export function assertReadSetShape(inputs: ReadSetEntry[]): void {
   }
 }
 
+/** Explain directory guards without dumping file contents or opaque digests. */
+export function inputQueryDetails(input: ReadSetEntry): string {
+  if (input.method !== "readDirectory") return "";
+  const [, extensions, excludes, includes, depth] = input.args;
+  return ` (query: ${JSON.stringify({ extensions, excludes, includes, depth })})`;
+}
+
 /** Loaded only for plans that recorded TypeScript inputs; C# has no TS dependency. */
 export async function assertReadSetFresh(inputs: ReadSetEntry[], compilerBase?: string): Promise<void> {
   assertReadSetShape(inputs);
@@ -21,7 +28,7 @@ export async function assertReadSetFresh(inputs: ReadSetEntry[], compilerBase?: 
   for (const input of inputs) {
     const method = ts.sys[input.method];
     if (!method || inputHash((method as Function)(...input.args.map(value => value === null ? undefined : value))) !== input.digest) {
-      throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}; create a new plan after writers/generators settle`);
+      throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}${inputQueryDetails(input)}; compiler inputs include project-discovery reads; create a new plan after those writers/generators settle`);
     }
   }
 }

@@ -152,7 +152,19 @@ async function gitFiles(root: string): Promise<string[] | null> {
 }
 
 /** Keep plans, journals and locks out of the user's version control without touching their ignore files. */
+export const stateIgnoreText = "*\n!equivalents.json\n!.gitignore\n";
+
 export async function ignoreStateDirectory(stateDirectory: string): Promise<void> {
-  try { await writeFile(resolve(stateDirectory, ".gitignore"), "*\n", { flag: "wx", mode: 0o644 }); }
+  const path = resolve(stateDirectory, ".gitignore");
+  const stat = await lstat(path).catch(error => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (stat?.isSymbolicLink()) throw new Error("SYMLINK_UNSUPPORTED: state .gitignore");
+  if (stat?.isFile()) {
+    if ((await readFile(path, "utf8")) === "*\n") await writeFile(path, stateIgnoreText);
+    return;
+  }
+  try { await writeFile(path, stateIgnoreText, { flag: "wx", mode: 0o644 }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
 }

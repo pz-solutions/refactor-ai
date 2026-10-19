@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import type { RefactorRequest } from "../types";
 import { isInside } from "./typescript-paths";
 import { fail } from "./typescript-vfs";
+import { isModuleMockCall, moduleSpecifiers } from "./typescript-workspace";
 import { addParallelMocks, affectedMockFiles } from "./typescript-retarget-mocks";
 
 type Declaration = ts.ImportDeclaration | ts.ExportDeclaration;
@@ -258,16 +259,51 @@ export function retargetImports(context: Context, request: RefactorRequest): str
   return notes;
 }
 
-/** Exact, simultaneous module mappings; --only uses the retarget-import selection rules. */
+interface MoveMap { from: string; to: string; imported?: string; exported?: string; }
+
+/** A # separator after the first character denotes an exported binding, not a package import alias. */
+export function moveMapEntries(mappings: Record<string, string>): MoveMap[] {
+  return Object.entries(mappings).map(([source, destination]) => {
+    const fromHash = source.lastIndexOf("#"), toHash = destination.lastIndexOf("#");
+    if (fromHash <= 0 && toHash <= 0) return { from: source, to: destination };
+    const from = source.slice(0, fromHash), to = destination.slice(0, toHash);
+    const imported = source.slice(fromHash + 1), exported = destination.slice(toHash + 1);
+    if (fromHash <= 0 || toHash <= 0 || !identifier(imported) || !identifier(exported)) fail("INVALID_NAME", `use module#Export=module#Export: ${source}=${destination}`);
+    return { from, to, imported, exported };
+  });
+}
+
+/** Preserve local/public names through aliases so JSX, shadowing and explicit aliases stay bound. */
+function aliasMappedBindings(source: ts.SourceFile, rules: MoveMap[]): string {
+  const changes: ts.TextChange[] = [];
+  for (const statement of source.statements) {
+    if ((!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) || !statement.moduleSpecifier || !ts.isStringLiteralLike(statement.moduleSpecifier)) continue;
+    const names = new Set(rules.filter(rule => rule.from === (statement.moduleSpecifier as ts.StringLiteralLike).text && rule.imported && rule.imported !== rule.exported).map(rule => rule.imported));
+    for (const item of members(statement) ?? []) {
+      if (!item.propertyName && names.has(item.name.text)) changes.push({ span: { start: item.name.end, length: 0 }, newText: ` as ${item.name.getText(source)}` });
+    }
+  }
+  return replace(source.text, changes);
+}
+
+/** Exact, simultaneous module and named-export mappings. */
 export function mapMoveImports(source: ts.SourceFile, mappings: Record<string, string>, only?: string[]): string {
   if (!mappings || typeof mappings !== "object" || Array.isArray(mappings)
     || Object.entries(mappings).some(([from, to]) => !from || typeof to !== "string" || !to)) fail("INVALID_REQUEST", "module mappings must contain nonempty from=to strings");
   validate({ operation: "retarget-import", root: "", project: "", file: source.fileName, from: "refactor-ai:source", to: "refactor-ai:target", only });
-  let text = source.text;
+  const rules = moveMapEntries(mappings);
+  let text = aliasMappedBindings(source, rules);
   const pending: [string, string][] = [];
-  for (const [index, [from, to]] of Object.entries(mappings).entries()) {
-    const request: RefactorRequest = { operation: "retarget-import", root: "", project: "", file: source.fileName, from, to, only };
-    validate(request);
+  // Named rules run before whole-module rules; placeholders prevent cascading.
+  const ordered = [...rules.filter(rule => rule.imported), ...rules.filter(rule => !rule.imported)];
+  for (const [index, rule] of ordered.entries()) {
+    const { from, to, imported, exported } = rule;
+    const request: RefactorRequest = { operation: "retarget-import", root: "", project: "", file: source.fileName, from, to,
+      ...(imported ? { only: [imported], map: { [imported]: exported! } } : { only }) };
+    // Identity module rules are useful alongside named rules.
+    if (from.includes("*") || to.includes("*")) fail("UNSUPPORTED_SPECIFIER", "module mappings require exact specifiers");
+    if (from !== to) validate(request);
+    else if (!imported) continue;
     let temporary = `refactor-ai:move-map:${index}`;
     while (text.includes(temporary) || Object.hasOwn(mappings, temporary) || Object.values(mappings).includes(temporary)) temporary += ":";
     text = transformFile(ts.createSourceFile(source.fileName, text, ts.ScriptTarget.Latest, true), { ...request, to: temporary }, new Set());
@@ -278,5 +314,15 @@ export function mapMoveImports(source: ts.SourceFile, mappings: Record<string, s
       operation: "retarget-import", root: "", project: "", file: source.fileName, from, to,
     }, new Set());
   }
-  return text;
+  const current = ts.createSourceFile(source.fileName, text, ts.ScriptTarget.Latest, true);
+  // Module mocks keep factory text intact. Named rules can imply a destination
+  // only when all mappings for that source agree on the same module.
+  return replace(text, moduleSpecifiers(current).filter(specifier => isModuleMockCall(specifier.parent)).flatMap(specifier => {
+    const targets = new Set(rules.filter(rule => rule.from === specifier.text).map(rule => rule.to));
+    if (!targets.size) return [];
+    if (targets.size !== 1) fail("UNSUPPORTED_MOCK_MAPPING", `${source.fileName}: ${specifier.text} maps to several modules; prepare separate mocks first`);
+    const quote = text[specifier.getStart(current)]!;
+    const name = [...targets][0]!.replaceAll("\\", "\\\\").replaceAll(quote, `\\${quote}`).replaceAll("$" + "{", quote === "`" ? "\\$" + "{" : "$" + "{");
+    return [{ span: { start: specifier.getStart(current), length: specifier.getWidth(current) }, newText: quote + name + quote }];
+  }));
 }

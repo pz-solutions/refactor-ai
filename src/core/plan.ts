@@ -146,6 +146,25 @@ export function assertPlanShape(plan: Plan): void {
 async function canonicalRequest(request: RefactorRequest): Promise<RefactorRequest> {
   const root = await realpath(request.root);
   const result: RefactorRequest = { ...request, root, project: await realpath(request.project), file: await realpath(request.file) };
+  if (request.operation === "move-file") {
+    if (request.only) result.only = [...request.only].sort();
+    if (request.exclude) result.exclude = [...new Set(request.exclude)].sort();
+    if (request.map) result.map = Object.fromEntries(Object.entries(request.map).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  }
+  if (request.moves) {
+    if (request.operation !== "move-file" || !request.moves.length) throw new Error("INVALID_REQUEST: moves requires move-file pairs");
+    result.moves = [];
+    for (const move of request.moves) {
+      const file = await realpath(move.file), target = inside(root, await canonicalMissing(move.target));
+      const directory = (await lstat(file)).isDirectory();
+      await assertRegularPath(root, file, false, directory);
+      await assertRegularPath(root, target, true, directory);
+      result.moves.push({ file, target });
+    }
+    result.moves.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : a.target < b.target ? -1 : 1);
+    result.file = result.moves[0]!.file;
+    result.target = result.moves[0]!.target;
+  }
   await assertRegularPath(root, result.project);
   const directory = (request.operation === "move-file" && (await lstat(result.file)).isDirectory()) || request.operation === "retarget-import";
   await assertRegularPath(root, result.file, false, directory);
@@ -153,8 +172,8 @@ async function canonicalRequest(request: RefactorRequest): Promise<RefactorReque
     result.targetProject = await realpath(request.targetProject);
     await assertRegularPath(root, result.targetProject);
   }
-  if (request.target !== undefined) {
-    result.target = inside(root, await canonicalMissing(request.target));
+  if (result.target !== undefined) {
+    result.target = inside(root, await canonicalMissing(result.target));
     await assertRegularPath(root, result.target, true, directory);
   }
   return result;
@@ -209,10 +228,12 @@ export async function createPlan(
   const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat(request.file)).mode & 0o777 : 0o600;
   const creationMode = async (path: string): Promise<number> => {
     if (request.operation !== "move-file" || !request.target) return createdMode;
-    const directory = (await lstat(request.file)).isDirectory();
-    if (!directory && path !== request.target) return createdMode;
+    const pair = request.moves?.find(move => path === move.target || path.startsWith(move.target + sep));
+    const moveFile = pair?.file ?? request.file, moveTarget = pair?.target ?? request.target;
+    const directory = (await lstat(moveFile)).isDirectory();
+    if (!directory && path !== moveTarget) return createdMode;
     const source = directory
-      ? resolve(request.file, relative(request.target, path)) : request.file;
+      ? resolve(moveFile, relative(moveTarget, path)) : moveFile;
     if (!changes.some(change => change.path === source && change.after === null)) return 0o600;
     return (await lstat(source)).mode & 0o777;
   };

@@ -1,5 +1,6 @@
 import { inputMethods as methods, inputHash as hash, type ReadSetEntry as Input } from "../core/read-set";
 import ts from "typescript";
+import { stateIgnoreText } from "../core/snapshot";
 import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -91,8 +92,12 @@ export function baselineDiagnostics(
     // Do not persist a result when an external compiler input changed while it was checked.
     if (inputs.unchanged() && regularDirectory(directory, true)) {
       if (!process.env.REFACTOR_AI_CACHE_DIR) {
-        try { writeFileSync(resolve(root, ".refactor-ai/.gitignore"), "*\n", { flag: "wx", mode: 0o600 }); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+        try { writeFileSync(resolve(root, ".refactor-ai/.gitignore"), stateIgnoreText, { flag: "wx", mode: 0o600 }); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+          const path = resolve(root, ".refactor-ai/.gitignore");
+          if (!lstatSync(path).isSymbolicLink() && readFileSync(path, "utf8") === "*\n") writeFileSync(path, stateIgnoreText);
+        }
       }
       const body = { version: 1 as const, key, inputs: observed, diagnostics };
       const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;

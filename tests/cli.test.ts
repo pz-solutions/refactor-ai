@@ -131,6 +131,28 @@ describe("CLI", () => {
     expect(await readFile(join(root, "src.ts"), "utf8")).toBe("export const value = 1;\n");
   }, 30_000);
 
+
+  test("CLI accepts repeatable move pairs and keeps the saved plan independent of pair order", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "refactor-ai-cli-batch-")));
+    roots.push(root);
+    await mkdir(join(root, "src"));
+    const project = join(root, "tsconfig.json");
+    await writeFile(project, JSON.stringify({ compilerOptions: { module: "esnext", moduleResolution: "bundler", skipLibCheck: true }, include: ["src"] }));
+    await writeFile(join(root, "src/a.ts"), 'import { b } from "./b"; export const a = b;');
+    await writeFile(join(root, "src/b.ts"), 'export const b = 1;');
+    const pairs = [join(root, "src/a.ts") + "=" + join(root, "src/ui/a.ts"), join(root, "src/b.ts") + "=" + join(root, "src/ui/b.ts")];
+    const context = { write: (_text: string) => {} };
+    const out = join(root, ".refactor-ai", "batch.json");
+    const args = ["plan", "move-file", "--project", project, "--out", out];
+    await main([...args, ...pairs.flatMap(pair => ["--file", pair])], context);
+    const first = await readFile(out, "utf8");
+    await main([...args, ...pairs.reverse().flatMap(pair => ["--file", pair])], context);
+    expect(await readFile(out, "utf8")).toBe(first);
+    expect(JSON.parse(first).changes).toHaveLength(4);
+    await expect(main([...args, "--file", pairs[0]!, "--file", join(root, "src/b.ts")], context)).rejects.toThrow("INVALID_ARGUMENT");
+    await expect(main([...args, "--file", join(root, "src/a.ts"), "--file", join(root, "src/b.ts")], context)).rejects.toThrow("INVALID_ARGUMENT");
+  });
+
   test("rejects invalid arguments and supports a no-op plan", async () => {
     await expect(main(["plan", "rename", "--bad", "value"])).rejects.toThrow("INVALID_ARGUMENT: --bad");
 

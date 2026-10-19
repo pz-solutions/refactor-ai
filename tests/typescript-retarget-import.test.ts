@@ -317,7 +317,7 @@ test("test-runner module-loading calls count as imports without treating registr
 test("--mocks validates values and operation scope through API and CLI", async () => {
   const p = await fixture({ "src/a.ts": 'export { x } from "old-lib";' });
   await expect(p.plan({ mocks: "invalid" as "add" })).rejects.toThrow("INVALID_ARGUMENT");
-  await expect(p.plan({ operation: "format", file: p.path("src/a.ts"), from: undefined, to: undefined, mocks: "add" })).rejects.toThrow("mocks require retarget-import");
+  await expect(p.plan({ operation: "format", file: p.path("src/a.ts"), from: undefined, to: undefined, mocks: "add" })).rejects.toThrow("mocks requires TypeScript retarget-import or move-file");
   const cli = join(import.meta.dir, "../src/cli.ts");
   const args = [cli, "plan", "retarget-import", "--project", p.path("tsconfig.json"), "--from", "old-lib", "--to", "new-lib", "--mocks", "add"];
   const result = spawnSync("bun", args, { encoding: "utf8" });

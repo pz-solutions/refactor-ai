@@ -1,3 +1,5 @@
+import ts from "typescript";
+import { mapMoveImports } from "../src/backends/typescript-retarget-import";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
@@ -52,6 +54,164 @@ const changed = (result: { changes: Awaited<ReturnType<typeof analyze>>["changes
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 describe("move-file", () => {
+  test("batch moves are order independent, preserve interdependent imports and modes", async () => {
+    const w = await packages({
+      "apps/web/src/helper.ts": 'export const helper = () => 42;',
+      "apps/web/src/component.ts": 'import { helper } from "./helper"; export const component = helper;',
+    });
+    await chmod(w.path("apps/web/src/helper.ts"), 0o755);
+    const api = createRefactorApi({ loadBackend });
+    const moves = [
+      { file: w.path("apps/web/src/helper.ts"), target: w.path("packages/feature/src/helper.ts") },
+      { file: w.path("apps/web/src/component.ts"), target: w.path("packages/feature/src/ui/component.ts") },
+    ];
+    const opts = { operation: "move-file" as const, project: w.path("apps/web/tsconfig.json"), targetProject: w.path("packages/feature/tsconfig.json"), root: w.root, moves };
+    const plan = await api.plan(opts);
+    expect(await api.plan({ ...opts, moves: [...moves].reverse() })).toEqual(plan);
+    expect(changed(plan, moves[1]!.target)).toContain('"../helper"');
+    expect(changed(plan, w.path("apps/web/src/use.ts"))).toContain('@scope/feature/ui/component');
+    expect(plan.validation.status).toBe("passed");
+    await api.apply(plan);
+    expect((await stat(moves[0]!.target)).mode & 0o777).toBe(0o755);
+  });
+
+
+  test("selected declarations ignore imports used only by the retained preload function", async () => {
+    const w = await packages({
+      "apps/web/tsconfig.json": config({ compilerOptions: { ...options, baseUrl: ".", paths: { "@/*": ["src/*"] } } }),
+      "apps/web/src/component.ts": 'import { preload } from "@/server";\nimport type { Existing } from "@scope/feature/existing";\n/** filters */\nexport type Filters = Existing;\nexport type Page = { page: Filters[] };\nexport type Event = Page["page"][number];\nexport function component(filters: Filters) { return preload(filters); }\n',
+      "apps/web/src/server.ts": 'export const preload = (x: unknown) => x;',
+      "packages/feature/src/existing.ts": 'export interface Existing { id: string }',
+      "apps/web/src/use.ts": 'import { component, type Event } from "./component"; export const value = (e: Event) => component(e);',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan({ ...packageRequest(w), only: ["Event", "Filters", "Page"] });
+    const moved = changed(plan, w.path("packages/feature/src/ui/component.ts"))!;
+    expect(moved).toContain("export type Event");
+    expect(moved).toContain("/** filters */");
+    expect(moved).not.toContain("preload");
+    expect(changed(plan, w.path("apps/web/src/component.ts"))).toContain('from "@/server"');
+    expect(changed(plan, w.path("apps/web/src/component.ts"))).toContain("export function component");
+    expect(changed(plan, w.path("apps/web/src/use.ts"))).toContain("@scope/feature/ui/component");
+    expect(plan.validation.status).toBe("passed");
+    await applyPlan(plan);
+  });
+
+  test("pre-existing unresolved destination references are admitted after they resolve", async () => {
+    const w = await packages({
+      "apps/web/src/adapter.ts": 'export { component } from "@scope/feature/ui/component";',
+    });
+    const plan = await createPlan(packageRequest(w), analyze);
+    expect(plan.validation.status).toBe("passed");
+    expect(changed(plan, w.path("apps/web/src/adapter.ts"))).toBeUndefined();
+    expect(plan.diagnosticsAfter).toEqual([]);
+  });
+
+  test("publishes a future destination whose only external caller was unresolved", async () => {
+    const w = await packages({
+      "apps/web/src/use.ts": 'export { component } from "@scope/feature/ui/component";',
+    });
+    const plan = await createPlan(packageRequest(w), analyze);
+    expect(changed(plan, w.path("packages/feature/package.json"))).toContain('"./ui/component"');
+    expect(plan.diagnosticsAfter).toEqual([]);
+  });
+
+  test("move mappings retarget mock, doMock and importActual literals simultaneously", async () => {
+    const w = await packages({
+      "apps/web/src/component.ts": 'import { existing } from "@scope/feature/existing"; declare const vi: any; vi.mock("@scope/feature/existing", () => ({ existing: 2 })); vi.doMock("@scope/feature/existing"); vi.importActual("@scope/feature/existing"); export const component = () => existing;',
+      "packages/feature/src/alternative.ts": 'export const existing = 1;',
+      "packages/feature/package.json": '{"name":"@scope/feature","exports":{"./*":"./src/*.ts"}}',
+    });
+    const plan = await createPlan(packageRequest(w, { map: { "@scope/feature/existing": "@scope/feature/alternative" } }), analyze);
+    const moved = changed(plan, w.path("packages/feature/src/ui/component.ts"))!;
+    expect(moved).toContain('vi.mock("../alternative", () => ({ existing: 2 }))');
+    expect(moved).toContain('vi.doMock("../alternative")');
+    expect(moved).toContain('vi.importActual("../alternative")');
+  });
+
+
+  test("directory exclusions keep framework adapters and server files in the source", async () => {
+    const w = await packages({
+      "apps/web/src/route/view.ts": 'export const view = 1;',
+      "apps/web/src/route/page.ts": 'import { view } from "./view"; export const page = view;',
+      "apps/web/src/route/_hooks/preload.ts": 'export const preload = 1;',
+      "apps/web/src/route/next-adapter.ts": 'export { view } from "./view";',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan({ ...packageRequest(w), file: w.path("apps/web/src/route"), target: w.path("packages/feature/src/route"), exclude: ["**/_hooks/**", "page.ts", "*adapter*"] });
+    expect(changed(plan, w.path("packages/feature/src/route/view.ts"))).toContain("view = 1");
+    expect(changed(plan, w.path("apps/web/src/route/page.ts"))).toContain("@scope/feature/route/view");
+    expect(changed(plan, w.path("apps/web/src/route/_hooks/preload.ts"))).toBeUndefined();
+    expect(plan.changes.some(change => change.path.endsWith("route/page.ts") && change.after === null)).toBe(false);
+    await applyPlan(plan);
+  });
+
+  test("batch preserves triple-slash references and nonmoving JSON resources", async () => {
+    const w = await workspace({
+      "tsconfig.json": config({ compilerOptions: { ...options, resolveJsonModule: true } }),
+      "src/component.ts": '/// <reference path="./types.d.ts" />\nimport data from "./data.json"; export const component: Extra = data.n;',
+      "src/types.d.ts": 'type Extra = number;',
+      "src/data.json": '{"n":42}',
+      "src/use.ts": '/// <reference path="./types.d.ts" />\nimport { component } from "./component"; export { component };',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan({ operation: "move-file", project: w.path("tsconfig.json"), root: w.root,
+      moves: [{ file: w.path("src/component.ts"), target: w.path("src/ui/component.ts") }, { file: w.path("src/types.d.ts"), target: w.path("src/ui/types.d.ts") }] });
+    expect(changed(plan, w.path("src/use.ts"))).toContain('path="./ui/types.d.ts"');
+    expect(changed(plan, w.path("src/ui/component.ts"))).toContain('path="./types.d.ts"');
+    expect(changed(plan, w.path("src/ui/component.ts"))).toContain('"../data.json"');
+  });
+
+  test("selected moves reject silent alias rebinding and support nonadjacent declarations", async () => {
+    const w = await packages({
+      "apps/web/tsconfig.json": config({ compilerOptions: { ...options, baseUrl: ".", paths: { "@/*": ["src/*"] } } }),
+      "packages/feature/tsconfig.json": config({ compilerOptions: { ...options, baseUrl: ".", paths: { "@/*": ["src/*"] } } }),
+      "apps/web/src/component.ts": 'import type { Model } from "@/model"; export interface A { model: Model } export function component() { return 1; } export type B = A;',
+      "apps/web/src/model.ts": 'export interface Model { id: string }',
+      "packages/feature/src/model.ts": 'export interface Model { id: string }',
+    });
+    await expect(createPlan(packageRequest(w, { only: ["A", "B"] }), analyze)).rejects.toThrow(/REFERENCES_NOT_PRESERVED|PROJECT_DEPENDENCY_CYCLE/);
+    await writeFile(w.path("apps/web/src/component.ts"), 'export interface A { id: string } export function component() { return 1; } export type B = A;');
+    const plan = await createPlan(packageRequest(w, { only: ["B", "A"] }), analyze);
+    expect(changed(plan, w.path("packages/feature/src/ui/component.ts"))).toContain("export type B");
+    expect(changed(plan, w.path("apps/web/src/component.ts"))).toContain("function component");
+    expect(plan.validation.status).toBe("passed");
+  });
+
+  test("named module maps preserve local JSX bindings and public export names", async () => {
+    const w = await workspace({
+      "tsconfig.json": config({ compilerOptions: { ...options, jsx: "preserve" } }),
+      "src/component.tsx": 'import { OldProvider, other } from "./old"; export { OldProvider } from "./old"; export const view = <OldProvider n={other} />;',
+      "src/old.ts": 'export function OldProvider(props: { n: number }) { return null; } export const other = 1;',
+      "src/new.ts": 'export function Provider(props: { n: number }) { return null; } export const other = 1;',
+    });
+    const plan = await createPlan(request(w, { file: w.path("src/component.tsx"), target: w.path("src/ui/component.tsx"), map: { "./old": "./new", "./old#OldProvider": "./new#Provider" } }), analyze);
+    const moved = changed(plan, w.path("src/ui/component.tsx"))!;
+    expect(moved).toContain("Provider as OldProvider");
+    expect(moved).toContain("<OldProvider n={other}");
+    expect(moved).not.toContain('"../old"');
+    expect(plan.validation.status).toBe("passed");
+  });
+
+  test("--mocks add keeps source mocks and adds mapped registrations in unmoved consumers", async () => {
+    const w = await workspace({
+      "tsconfig.json": config(),
+      "src/component.ts": 'import { n } from "./old"; export const component = n;',
+      "src/old.ts": 'export const n = 1;',
+      "src/new.ts": 'export const n = 2;',
+      "src/use.test.ts": 'declare const vi: any; vi.mock("./old", () => ({ n: 3 })); import { component } from "./component"; export { component };',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan({ ...request(w), map: { "./old": "./new" }, mocks: "add" });
+    const text = changed(plan, w.path("src/use.test.ts"))!;
+    expect(text).toContain('vi.mock("./old", () => ({ n: 3 }))');
+    expect(text).toContain('vi.mock("./new", () => ({ n: 3 }))');
+    expect(plan.validation.status).toBe("passed");
+  });
+
+  test("batch rejects duplicate sources and destinations", async () => {
+    const w = await packages();
+    const pair = { file: w.path("apps/web/src/component.ts"), target: w.path("packages/feature/src/component.ts") };
+    await expect(createRefactorApi({ loadBackend }).plan({ operation: "move-file", project: w.path("apps/web/tsconfig.json"), root: w.root,
+      targetProject: w.path("packages/feature/tsconfig.json"), moves: [pair, pair] })).rejects.toThrow("unique");
+  });
+
   test("advertises the operation and moves functions with imports, BOM and CRLF without writing", async () => {
     const w = await workspace({
       "tsconfig.json": config(),
@@ -83,22 +243,20 @@ describe("move-file", () => {
     expect(changed(plan, w.path("apps/web/src/use.ts"))).toContain('@scope/feature/ui/component');
   });
 
-  test("--only splits moved declarations and preserves comments, type imports and explicit aliases", async () => {
+  test("module-map selection helper preserves comments, type imports and explicit aliases", async () => {
     const w = await workspace({
       "tsconfig.json": config(),
       "src/component.ts": '"use client";\nimport { /* selected */ a as value, b } from "./old";\nimport type { Options } from "./old";\nexport { a as publicValue, b as keep } from "./old";\nexport const component = (o: Options) => value + b + o.count;\n',
       "src/old.ts": 'export const a = 1, b = 2; export interface Options { count: number }',
       "src/new.ts": 'export const a = 3; export interface Options { count: number }',
     });
-    const plan = await createRefactorApi({ loadBackend }).plan({ ...request(w), map: { "./old": "./new" }, only: ["a", "Options"] });
-    const text = changed(plan, w.path("src/ui/component.ts"))!;
+    const text = mapMoveImports(ts.createSourceFile(w.path("src/component.ts"), await readFile(w.path("src/component.ts"), "utf8"), ts.ScriptTarget.Latest, true), { "./old": "./new" }, ["a", "Options"]);
     expect(text).toContain('"use client"');
     expect(text).toContain('/* selected */ a as value');
-    expect(text).toContain('from "../new"');
-    expect(text).toContain('b } from "../old"');
+    expect(text).toContain('from "./new"');
+    expect(text).toContain('b } from "./old"');
     expect(text).toContain('a as publicValue');
     expect(text).toContain('import type { Options }');
-    expect(plan.validation.status).toBe("passed");
   });
 
   test("directory module maps are simultaneous, repeatable, scoped to moved files and reject wildcard/default selection", async () => {
@@ -120,7 +278,7 @@ describe("move-file", () => {
     await expect(analyze({ ...req, map: { "../a": "../b" }, only: ["x"] })).rejects.toThrow("UNSUPPORTED_SELECTION");
   });
 
-  test("workspace equivalents map declared alternatives, allow overrides and give partial-selection hints", async () => {
+  test("workspace equivalents map declared alternatives and allow overrides", async () => {
     const w = await packages({
       ".refactor-ai/equivalents.json": '{"next-intl":"use-intl"}',
       "apps/web/package.json": '{"name":"@scope/web","dependencies":{"@scope/feature":"workspace:*","next-intl":"^4"}}',
@@ -134,7 +292,7 @@ describe("move-file", () => {
     const plan = await createPlan(packageRequest(w), analyze);
     expect(changed(plan, w.path("packages/feature/src/ui/component.ts"))).toContain('from "use-intl"');
     expect(plan.readSet!.some(input => input.args[0] === w.path(".refactor-ai/equivalents.json"))).toBe(true);
-    await expect(analyze(packageRequest(w, { only: ["useTranslations"] }))).rejects.toThrow("destination declares use-intl; map next-intl=use-intl");
+    await expect(analyze(packageRequest(w, { only: ["useTranslations"] }))).rejects.toThrow("UNSUPPORTED_SELECTION");
     await expect(analyze(packageRequest(w, { map: { "next-intl": "@scope/feature/existing" } }))).rejects.toThrow("NEW_DIAGNOSTICS");
     await writeFile(w.path("packages/feature/package.json"), '{"name":"@scope/feature","exports":{"./existing":"./src/existing.ts"}}');
     await expect(analyze(packageRequest(w))).rejects.toThrow("add next-intl@^4");

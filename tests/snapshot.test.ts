@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { snapshot } from "../src/core/snapshot.ts";
@@ -33,4 +33,25 @@ describe("snapshot", () => {
     const first = await snapshot(root);
     expect(first.files.linked).toBe("symlink:../outside");
   });
+});
+
+
+test("generated state ignore preserves equivalents and upgrades only the legacy generated content", async () => {
+  const { ignoreStateDirectory, stateIgnoreText } = await import("../src/core/snapshot");
+  const root = await mkdtemp(join(tmpdir(), "refactor-ai-ignore-"));
+  try {
+    await ignoreStateDirectory(root);
+    expect(await readFile(join(root, ".gitignore"), "utf8")).toBe(stateIgnoreText);
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    await writeFile(join(root, "equivalents.json"), '{}');
+    await writeFile(join(root, "plan.json"), '{}');
+    const listed = execFileSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8" }).trim().split("\n").sort();
+    expect(listed).toEqual([".gitignore", "equivalents.json"]);
+    await writeFile(join(root, ".gitignore"), "*\n");
+    await ignoreStateDirectory(root);
+    expect(await readFile(join(root, ".gitignore"), "utf8")).toContain("!equivalents.json");
+    await writeFile(join(root, ".gitignore"), "custom\n");
+    await ignoreStateDirectory(root);
+    expect(await readFile(join(root, ".gitignore"), "utf8")).toBe("custom\n");
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -106,3 +106,13 @@ test("unread content does not enter the snapshot or deterministic plan identity"
   expect(second).toEqual(first);
   expect(Object.keys(first.snapshot.files)).not.toContain("e2e/unrelated.test.ts");
 });
+
+
+test("discovery-only project reads remain inputs even when their files are not edited", async () => {
+  const f = await fixture();
+  await f.write("e2e/tsconfig.json", JSON.stringify({ compilerOptions: { noEmit: true, module: "esnext", moduleResolution: "bundler", skipLibCheck: true }, include: ["*.ts"] }));
+  const plan = await f.api.plan(f.request);
+  expect(plan.readSet!.some(input => input.method === "readFile" && input.args[0] === f.path("e2e/unrelated.test.ts"))).toBe(true);
+  await f.write("e2e/unrelated.test.ts", 'export { value } from "../src/leaf";');
+  await expect(f.api.validate(plan)).rejects.toThrow("STALE_PROJECT_INPUTS");
+});

@@ -1,6 +1,6 @@
 ---
 name: refactor-move-file
-description: Move whole TypeScript or JavaScript modules or directories within or between workspace packages, updating imports, package exports and project file lists with compiler tooling.
+description: Move TypeScript or JavaScript modules as an atomic batch or directory, or extract selected exported declarations, updating callers, package exports and project file lists.
 ---
 
 Resolve `<skill-root>` to the directory containing this installed `SKILL.md`. Run `node "<skill-root>/scripts/refactor.mjs" plan move-file --help` for required inputs, options, supported languages, limitations and examples. The launcher's `--help` lists all commands and the plan workflow; help requires no project or dependency installation.
@@ -9,11 +9,14 @@ Use the deterministic runner to plan, preview, validate and apply the same plan 
 
 For multi-step refactorings, consider a custom script using the [importable API](scripts/API.md).
 
-For workspace migrations, stop dev servers and let generators settle before planning. Use `--checker ts7` when the repository typechecks with TS7; the default remains TS5.
+For workspace migrations, use `--checker ts7` when the repository typechecks with TS7; the default remains TS5. Serialize writes to compiler inputs during planning/apply, including E2E files read during project discovery.
 
-1. Prefer one `move-file` plan with repeatable exact module mappings, for example `--map @/lib/convex-hooks=@scope/features/hooks --map next-intl=use-intl`. Mappings affect only moved files’ imports/re-exports. `--only Name,Name` selects original named exports and splits declarations using retarget-import semantics; default/namespace imports require it absent. Root `.refactor-ai/equivalents.json` (for example `{"next-intl":"use-intl"}`) supplies defaults only for alternatives the destination declares; explicit mappings win. Use alternatives only when their APIs fit the call sites: compiler validation does not prove runtime compatibility.
-2. If preparation needs export/binding renames or runtime adapters, retarget aliases first in the source project (`plan retarget-import --file <source-dir>`), preview/apply, then move. Move shared dependencies before their consumers. Preview package exports and caller rewrites alongside the moved imports before applying.
-3. Run the destination’s typecheck and affected application tests. Missing dependencies and unresolved aliases identify preparation still needed; fix and replan.
+1. Prepare runtime ports and framework adapters, then batch mutually importing files in one analysis: repeat `--file src/a.ts=packages/features/src/a.ts --file src/b.ts=packages/features/src/b.ts` without `--to`. Pair order does not matter. For a mixed directory, use `--file src/route --to packages/features/src/route --exclude page.tsx --exclude '**/_hooks/**' --exclude '*adapter*'`. Exclusion globs are relative to each source directory; review retained adapters’ rewritten imports.
+2. Combine relocation with exact module maps such as `--map @/lib/convex-hooks=@scope/features/hooks --map next-intl=use-intl`. Renamed imports use `--map 'next-intl#NextIntlClientProvider=use-intl#IntlProvider'` alongside the module map; the engine preserves local/public names through aliases. Moved test mock/actual specifiers follow module maps, keeping factory text unchanged. Review factory API names; `--mocks add` copies registrations in unmoved consumers while preserving their original mocks.
+3. Extract types needed by shared modules before the batch: `--file src/route/_hooks/preload.ts --to packages/features/src/types.ts --only Filters,Page,Event`. Only selected exported declarations and required imports move. Unselected preload code stays. Variables with runtime initialization, merged declarations and re-exports require preparation. For the old r3 import-binding selection behavior, use `retarget-import --only` before moving.
+4. Preview package exports, caller rewrites and suppression transfers. Run destination typecheck and affected application tests after apply. Missing dependencies, consumer diagnostics and unresolved aliases identify preparation still needed; fix and replan.
+
+Root `.refactor-ai/equivalents.json` supplies default module maps only for alternatives declared by the destination; explicit maps win. Use alternatives whose APIs fit the call sites. Generated state ignores keep this file trackable. Compiler validation does not prove runtime compatibility.
 
 New TS plans record compiler reads, including configs, dependencies and negative resolution probes. Unrelated files outside that read set can change; changes to read inputs or edited paths require replanning. Empty plans apply successfully despite other changes. Legacy plans and backends without read tracking retain whole-root freshness.
 

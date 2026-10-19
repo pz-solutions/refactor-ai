@@ -2,7 +2,7 @@ import ts from "typescript";
 import { dirname, extname, relative, resolve, sep } from "node:path";
 import { portablePath, isInside } from "./typescript-paths";
 import { eolOf, fail } from "./typescript-vfs";
-import { applyTextChanges, moduleSpecifiers, type Workspace } from "./typescript-workspace";
+import { applyTextChanges, isModuleMockCall, moduleSpecifiers, type Workspace } from "./typescript-workspace";
 
 interface Origin {
   specifier: ts.StringLiteralLike;
@@ -255,6 +255,23 @@ function rewrite(origins: Origins, shim: ts.SourceFile, source: ts.SourceFile, n
     const suffix = source.text.slice(specifier.end, statement.end);
     const output = groups.map((group) => renderGroup(group, exporting, typeOnly, quote, suffix)).join("\n").replace(/\n/g, eolOf(source.text));
     changes.push({ span: { start, length: statement.end - start }, newText: output });
+  }
+  for (const specifier of moduleSpecifiers(source)) {
+    if (!isModuleMockCall(specifier.parent)) continue;
+    const resolved = origins.ws.resolveModule(specifier, source);
+    if (!resolved || !origins.ws.vfs.samePath(resolved.resolvedFileName, shim.fileName)) continue;
+    const exports = origins.exports(shim);
+    const found = exports.map(symbol => ({ name: symbol.name, origin: origins.find(shim, symbol.name) }));
+    const targets = new Set(found.map(item => item.origin && originSpecifier(item.origin, source)));
+    if (!found.length || targets.size !== 1 || targets.has(undefined) || found.some(item => item.origin!.name !== item.name)) {
+      notes.push(`Kept mock/actual reference to ${shim.fileName} in ${source.fileName}: split or renamed exports require a runtime adapter.`);
+      continue;
+    }
+    const direct = [...targets][0]!;
+    const target = resolveAs(origins.ws, direct, source, specifier);
+    if (!target || !origins.ws.vfs.samePath(target.resolvedFileName, found[0]!.origin!.target.fileName)) fail("REEXPORT_RESOLUTION_CHANGED", direct);
+    changes.push({ span: { start: specifier.getStart(source), length: specifier.getWidth(source) }, newText: literal(direct, source.text[specifier.getStart(source)]!) });
+    notes.push(`Retargeted mock/actual module ${specifier.text} to ${direct} in ${source.fileName}; review factory runtime compatibility.`);
   }
   return changes;
 }

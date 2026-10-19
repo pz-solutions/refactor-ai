@@ -25,6 +25,33 @@ function after(result: Pick<BackendResult, "changes">, path: string) { return re
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("inline-reexports", () => {
+  test("retargets mock, doMock and importActual before deleting a transparent shim", async () => {
+    const w = await workspace({
+      "src/shim.ts": 'export { value } from "./origin";',
+      "src/origin.ts": 'export const value = 1;',
+      "src/use.test.ts": 'declare const vi: any; vi.mock("./shim", () => ({ value: 2 })); vi.doMock("./shim"); const actual = vi.importActual("./shim"); import { value } from "./shim"; export { value, actual };',
+    });
+    const plan = await createPlan(w.request, analyze);
+    expect(after(plan, w.path("src/shim.ts"))).toBeNull();
+    const text = after(plan, w.path("src/use.test.ts"))!;
+    expect(text).toContain('vi.mock("./origin", () => ({ value: 2 }))');
+    expect(text).toContain('vi.doMock("./origin")');
+    expect(text).toContain('vi.importActual("./origin")');
+    expect(text).not.toContain('"./shim"');
+  });
+
+  test("retains shims when mocks need renamed or multiple origins", async () => {
+    const w = await workspace({
+      "src/shim.ts": 'export { value as renamed } from "./origin";',
+      "src/origin.ts": 'export const value = 1;',
+      "src/use.test.ts": 'declare const vi: any; vi.mock("./shim", () => ({ renamed: 2 })); import { renamed } from "./shim"; export { renamed };',
+    });
+    const result = await w.run();
+    expect(after(result, w.path("src/shim.ts"))).toBeUndefined();
+    expect(after(result, w.path("src/use.test.ts"))).toContain('vi.mock("./shim"');
+    expect(result.notes.join(" ")).toContain("runtime adapter");
+  });
+
   test("deletes pure star shims, preserves named/type aliases, updates config lists and records schema 3 reads without writes", async () => {
     const w = await workspace({
       "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true, module: "esnext", moduleResolution: "bundler" }, files: ["src/shim.ts", "src/origin.ts", "src/use.ts"] }),
