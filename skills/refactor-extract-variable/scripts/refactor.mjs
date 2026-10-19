@@ -11,12 +11,14 @@ var languageOperations = {
 // src/help.ts
 var operationHelp = {
   "move-file": {
-    description: "Move a whole module or directory within or between workspace packages.",
+    description: "Move modules atomically, selected declarations, or a directory with exclusions.",
     support: "TypeScript and JavaScript",
-    required: "--to <destination> [--target-project <config>] [--root <directory>]",
-    details: "--file accepts a file or directory. A directory moves every file below it in one plan, preserving relative layout. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Repeat --map source=destination to retarget moved files’ own imports/re-exports in this same plan; --only selects original named exports and splits declarations, as in retarget-import. Module maps are simultaneous and scoped to moved files. Root .refactor-ai/equivalents.json supplies default module maps only when the destination declares the alternative; explicit maps win. Compiler checks do not prove runtime compatibility. Aliases between moved files become relative imports; unresolved source-project aliases fail MOVE_IMPORT_UNRESOLVED before program loading; missing destination packages fail MISSING_DEPENDENCY with source versions and install hints. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
+    required: "--to <destination> OR repeated --file <source=destination> [--exclude <glob> ...] [--target-project <config>] [--root <directory>]",
+    details: "--file accepts a file or directory with --to, or repeated source=destination pairs without --to. A batch loads the workspace once and validates the final graph; mutually importing batch files may move together in any argument order. Directory moves preserve relative layout. Repeat --exclude with tsconfig-style globs relative to each source directory to keep server files/adapters; e.g. page.tsx and **/_hooks/**. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Repeat --map source=destination to retarget moved files’ own imports/re-exports and vi.mock/doMock/importActual literals. Add --map source#Old=destination#New for named exports, preserving local/public names with aliases. Mock factory text stays unchanged: review runtime compatibility. External consumer mocks are reported; --mocks add clones standalone registrations for the mapped module. --only selects exported declarations from one source file and moves only their required imports; unselected declarations stay in the source. Types, functions and safe classes/enums are supported; variable initialization, merged declarations and re-exports require preparation. The r3 mapping-only --only behavior is now available through retarget-import --only before moving. Module maps are simultaneous and scoped to moved files. Root .refactor-ai/equivalents.json supplies default module maps only when the destination declares the alternative; explicit maps win. Compiler checks do not prove runtime compatibility. Aliases between moved files become relative imports; unresolved source-project aliases fail MOVE_IMPORT_UNRESOLVED before program loading; missing destination packages fail MISSING_DEPENDENCY with source versions and install hints. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
     examples: [
       "plan move-file --project ./tsconfig.json --file ./src/components/button.tsx --to ./src/ui/button.tsx",
+      "plan move-file --project ./tsconfig.json --file ./src/a.ts=./src/ui/a.ts --file ./src/b.ts=./src/ui/b.ts",
+      "plan move-file --project ./tsconfig.json --file ./src/route --to ./src/ui/route --exclude page.tsx --exclude **/_hooks/**",
       "plan move-file --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/components --to ./packages/feature/src/components --target-project ./packages/feature/tsconfig.json --map @/lib/hooks=@scope/feature/hooks --map next-intl=use-intl --checker ts7"
     ]
   },
@@ -153,6 +155,7 @@ function optionsText(language) {
   return `  --project <config>       Required for capabilities and plan; ${project}.
 ${language !== "csharp" ? `                           Named TS configurations are supported by file/type operations.
 ` : ""}  --file <source>          Required for plan except retarget-import; a file, or a directory for move-file/retarget-import.
+                           move-file also accepts repeated --file source=destination pairs.
   --keep                   Retain the shim for inline-reexports.
 ${language !== "csharp" ? `  --checker <ts5|ts7|both> TS5 default; ts7 uses installed Go 7.0.2 diagnostics.
                            both audits TS5+TS7, rejecting any disagreement.
@@ -166,8 +169,9 @@ ${language !== "csharp" ? `  --checker <ts5|ts7|both> TS5 default; ts7 uses inst
                            several types exist, or use --at.
   --to <path|specifier>    Destination for move-type/move-file (path) or retarget-import (specifier).
   --from <specifier>       Source module specifier for retarget-import.
-  --map <from=to>          Repeatable export mapping (retarget-import) or exact module mapping (move-file).
-  --only <Name,Name>       Pre-map export names to retarget; other bindings stay.
+  --map <from=to>          Repeatable export mapping (retarget-import), module or module#Export mapping (move-file).
+  --only <Name,Name>       retarget-import: pre-map export names; move-file: declarations to move.
+  --exclude <glob>         Repeatable directory move exclusions, relative to each source directory.
   --mocks <report|add>     Report affected test mocks (default), or add parallel mocks.
   --target-project <config> Destination project config; move-type or move-file.
 ${language !== "typescript" ? `  --root-namespace <name>  C# namespace convention override for sync-namespace

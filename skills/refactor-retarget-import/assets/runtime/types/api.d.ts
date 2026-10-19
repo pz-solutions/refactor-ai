@@ -7,6 +7,13 @@ export interface PlanOptions {
     checker?: "ts5" | "ts7" | "both";
     project: string;
     file?: string;
+    /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
+    moves?: {
+        file: string;
+        target: string;
+    }[];
+    /** TS-style globs relative to each moved directory; excluded adapters remain. */
+    exclude?: string[];
     /** Defaults to the project configuration's directory. Must cover all changed files. */
     root?: string;
     /** Required for the aggregate API; operation packages select their own operation. */
@@ -14,11 +21,11 @@ export interface PlanOptions {
     /** Exact source/destination module specifiers for retarget-import. */
     from?: string;
     to?: string;
-    /** retarget-import: export names; move-file: exact module specifiers in moved files. */
+    /** retarget-import: export names; move-file: module or module#Export mappings. */
     map?: Record<string, string>;
-    /** Select original named exports for either mapping operation; other bindings stay. */
+    /** retarget-import: imported export names; move-file: declarations to extract. */
     only?: string[];
-    /** retarget-import: report affected test mocks (default), or add parallel mocks. */
+    /** Report affected external test mocks (default), or add parallel mapped mocks. */
     mocks?: "report" | "add";
     /** A 1-based UTF-16 line:column string or a zero-based UTF-16 offset. */
     at?: string | number;

@@ -33,6 +33,12 @@ function assertReadSetShape(inputs) {
     throw new Error("INVALID_PLAN: malformed read set");
   }
 }
+function inputQueryDetails(input) {
+  if (input.method !== "readDirectory")
+    return "";
+  const [, extensions, excludes, includes, depth] = input.args;
+  return ` (query: ${JSON.stringify({ extensions, excludes, includes, depth })})`;
+}
 async function assertReadSetFresh(inputs, compilerBase) {
   assertReadSetShape(inputs);
   if (!inputs.length)
@@ -42,7 +48,7 @@ async function assertReadSetFresh(inputs, compilerBase) {
   for (const input of inputs) {
     const method = ts.sys[input.method];
     if (!method || inputHash(method(...input.args.map((value) => value === null ? undefined : value))) !== input.digest) {
-      throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}; create a new plan after writers/generators settle`);
+      throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}${inputQueryDetails(input)}; compiler inputs include project-discovery reads; create a new plan after those writers/generators settle`);
     }
   }
 }
@@ -630,15 +636,31 @@ async function gitFiles(root) {
   }
 }
 async function ignoreStateDirectory(stateDirectory) {
+  const path = resolve(stateDirectory, ".gitignore");
+  const stat = await lstat(path).catch((error) => {
+    if (error.code === "ENOENT")
+      return;
+    throw error;
+  });
+  if (stat?.isSymbolicLink())
+    throw new Error("SYMLINK_UNSUPPORTED: state .gitignore");
+  if (stat?.isFile()) {
+    if (await readFile(path, "utf8") === `*
+`)
+      await writeFile(path, stateIgnoreText);
+    return;
+  }
   try {
-    await writeFile(resolve(stateDirectory, ".gitignore"), `*
-`, { flag: "wx", mode: 420 });
+    await writeFile(path, stateIgnoreText, { flag: "wx", mode: 420 });
   } catch (error) {
     if (error.code !== "EEXIST")
       throw error;
   }
 }
-var excluded, run;
+var excluded, run, stateIgnoreText = `*
+!equivalents.json
+!.gitignore
+`;
 var init_snapshot = __esm(() => {
   excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
   run = promisify(execFile);
@@ -752,6 +774,29 @@ function assertPlanShape(plan) {
 async function canonicalRequest(request) {
   const root = await realpath2(request.root);
   const result = { ...request, root, project: await realpath2(request.project), file: await realpath2(request.file) };
+  if (request.operation === "move-file") {
+    if (request.only)
+      result.only = [...request.only].sort();
+    if (request.exclude)
+      result.exclude = [...new Set(request.exclude)].sort();
+    if (request.map)
+      result.map = Object.fromEntries(Object.entries(request.map).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  }
+  if (request.moves) {
+    if (request.operation !== "move-file" || !request.moves.length)
+      throw new Error("INVALID_REQUEST: moves requires move-file pairs");
+    result.moves = [];
+    for (const move of request.moves) {
+      const file = await realpath2(move.file), target = inside(root, await canonicalMissing(move.target));
+      const directory = (await lstat2(file)).isDirectory();
+      await assertRegularPath(root, file, false, directory);
+      await assertRegularPath(root, target, true, directory);
+      result.moves.push({ file, target });
+    }
+    result.moves.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : a.target < b.target ? -1 : 1);
+    result.file = result.moves[0].file;
+    result.target = result.moves[0].target;
+  }
   await assertRegularPath(root, result.project);
   const directory = request.operation === "move-file" && (await lstat2(result.file)).isDirectory() || request.operation === "retarget-import";
   await assertRegularPath(root, result.file, false, directory);
@@ -759,8 +804,8 @@ async function canonicalRequest(request) {
     result.targetProject = await realpath2(request.targetProject);
     await assertRegularPath(root, result.targetProject);
   }
-  if (request.target !== undefined) {
-    result.target = inside(root, await canonicalMissing(request.target));
+  if (result.target !== undefined) {
+    result.target = inside(root, await canonicalMissing(result.target));
     await assertRegularPath(root, result.target, true, directory);
   }
   return result;
@@ -816,10 +861,12 @@ async function createPlan(request, analyze, compilerBase) {
   const creationMode = async (path) => {
     if (request.operation !== "move-file" || !request.target)
       return createdMode;
-    const directory = (await lstat2(request.file)).isDirectory();
-    if (!directory && path !== request.target)
+    const pair = request.moves?.find((move) => path === move.target || path.startsWith(move.target + sep2));
+    const moveFile = pair?.file ?? request.file, moveTarget = pair?.target ?? request.target;
+    const directory = (await lstat2(moveFile)).isDirectory();
+    if (!directory && path !== moveTarget)
       return createdMode;
-    const source = directory ? resolve2(request.file, relative2(request.target, path)) : request.file;
+    const source = directory ? resolve2(moveFile, relative2(moveTarget, path)) : moveFile;
     if (!changes.some((change) => change.path === source && change.after === null))
       return 384;
     return (await lstat2(source)).mode & 511;
@@ -1166,7 +1213,7 @@ function createRefactorApi(context) {
           assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
           throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
-        if (["move-type", "move-file"].includes(operation) && !options.target)
+        if (["move-type", "move-file"].includes(operation) && !options.target && !options.moves?.length)
           throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
         if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file"].includes(operation)) {
           throw new Error("INVALID_ARGUMENT: target and targetProject require move-type or move-file");
@@ -1175,19 +1222,27 @@ function createRefactorApi(context) {
           throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
         if (operation === "retarget-import" && (!options.from || !options.to))
           throw new Error("INVALID_ARGUMENT: from and to required for retarget-import");
-        if (operation !== "retarget-import" && [options.from, options.to, options.mocks].some((value) => value !== undefined)) {
-          throw new Error("INVALID_ARGUMENT: from, to and mocks require retarget-import");
+        if (operation !== "retarget-import" && [options.from, options.to].some((value) => value !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: from and to require retarget-import");
         }
         if (!["retarget-import", "move-file"].includes(operation) && [options.map, options.only].some((value) => value !== undefined))
           throw new Error("INVALID_ARGUMENT: map and only require retarget-import or move-file");
         if (operation === "move-file" && languageForProject(options.project) !== "typescript" && (options.map || options.only))
           throw new Error("INVALID_ARGUMENT: move-file mappings require TypeScript/JavaScript");
+        if (options.mocks !== undefined && (!["retarget-import", "move-file"].includes(operation) || languageForProject(options.project) !== "typescript"))
+          throw new Error("INVALID_ARGUMENT: mocks requires TypeScript retarget-import or move-file");
         if (options.mocks !== undefined && !["report", "add"].includes(options.mocks))
           throw new Error("INVALID_ARGUMENT: mocks report|add");
-        if (!options.file && operation !== "retarget-import")
+        if (options.exclude !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || options.only || !Array.isArray(options.exclude) || options.exclude.some((pattern) => typeof pattern !== "string" || !pattern || pattern.startsWith("!") || /^(?:[A-Za-z]:|[\\/])/.test(pattern) || pattern.split(/[\\/]/).includes("..")))) {
+          throw new Error("INVALID_ARGUMENT: exclude requires relative move-file directory globs without --only");
+        }
+        if (options.moves !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || !Array.isArray(options.moves) || !options.moves.length || options.file !== undefined || options.target !== undefined || options.moves.some((move) => !move || typeof move.file !== "string" || !move.file || typeof move.target !== "string" || !move.target))) {
+          throw new Error("INVALID_ARGUMENT: moves requires TypeScript move-file pairs, without file/target");
+        }
+        if (!options.file && !options.moves?.length && operation !== "retarget-import")
           throw new Error("INVALID_ARGUMENT: file required");
         const project = await realpath3(resolve4(options.project));
-        const file = await realpath3(resolve4(options.file ?? dirname3(project)));
+        const file = await realpath3(resolve4(options.file ?? options.moves?.[0]?.file ?? dirname3(project)));
         const root = await realpath3(resolve4(options.root ?? dirname3(project)));
         const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile4(file, "utf8") : "";
         const position = (point) => {
@@ -1202,9 +1257,11 @@ function createRefactorApi(context) {
           root,
           file,
           operation,
+          ...options.moves ? { moves: options.moves.map((move) => ({ file: resolve4(move.file), target: resolve4(move.target) })), target: resolve4(options.moves[0].target) } : {},
+          ...options.exclude ? { exclude: [...new Set(options.exclude)].sort() } : {},
           ...options.checker !== undefined ? { checker: options.checker } : {},
           ...options.keep !== undefined ? { keep: options.keep } : {},
-          ...operation === "move-file" ? { ...options.map ? { map: options.map } : {}, ...options.only ? { only: options.only } : {} } : {},
+          ...operation === "move-file" ? { ...options.mocks ? { mocks: options.mocks } : {}, ...options.map ? { map: options.map } : {}, ...options.only ? { only: options.only } : {} } : {},
           ...operation === "retarget-import" ? {
             from: options.from,
             to: options.to,
@@ -1273,6 +1330,7 @@ function optionsText(language) {
   return `  --project <config>       Required for capabilities and plan; ${project}.
 ${language !== "csharp" ? `                           Named TS configurations are supported by file/type operations.
 ` : ""}  --file <source>          Required for plan except retarget-import; a file, or a directory for move-file/retarget-import.
+                           move-file also accepts repeated --file source=destination pairs.
   --keep                   Retain the shim for inline-reexports.
 ${language !== "csharp" ? `  --checker <ts5|ts7|both> TS5 default; ts7 uses installed Go 7.0.2 diagnostics.
                            both audits TS5+TS7, rejecting any disagreement.
@@ -1286,8 +1344,9 @@ ${language !== "csharp" ? `  --checker <ts5|ts7|both> TS5 default; ts7 uses inst
                            several types exist, or use --at.
   --to <path|specifier>    Destination for move-type/move-file (path) or retarget-import (specifier).
   --from <specifier>       Source module specifier for retarget-import.
-  --map <from=to>          Repeatable export mapping (retarget-import) or exact module mapping (move-file).
-  --only <Name,Name>       Pre-map export names to retarget; other bindings stay.
+  --map <from=to>          Repeatable export mapping (retarget-import), module or module#Export mapping (move-file).
+  --only <Name,Name>       retarget-import: pre-map export names; move-file: declarations to move.
+  --exclude <glob>         Repeatable directory move exclusions, relative to each source directory.
   --mocks <report|add>     Report affected test mocks (default), or add parallel mocks.
   --target-project <config> Destination project config; move-type or move-file.
 ${language !== "typescript" ? `  --root-namespace <name>  C# namespace convention override for sync-namespace
@@ -1471,12 +1530,14 @@ var init_help = __esm(() => {
   init_languages();
   operationHelp = {
     "move-file": {
-      description: "Move a whole module or directory within or between workspace packages.",
+      description: "Move modules atomically, selected declarations, or a directory with exclusions.",
       support: "TypeScript and JavaScript",
-      required: "--to <destination> [--target-project <config>] [--root <directory>]",
-      details: "--file accepts a file or directory. A directory moves every file below it in one plan, preserving relative layout. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Repeat --map source=destination to retarget moved files’ own imports/re-exports in this same plan; --only selects original named exports and splits declarations, as in retarget-import. Module maps are simultaneous and scoped to moved files. Root .refactor-ai/equivalents.json supplies default module maps only when the destination declares the alternative; explicit maps win. Compiler checks do not prove runtime compatibility. Aliases between moved files become relative imports; unresolved source-project aliases fail MOVE_IMPORT_UNRESOLVED before program loading; missing destination packages fail MISSING_DEPENDENCY with source versions and install hints. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
+      required: "--to <destination> OR repeated --file <source=destination> [--exclude <glob> ...] [--target-project <config>] [--root <directory>]",
+      details: "--file accepts a file or directory with --to, or repeated source=destination pairs without --to. A batch loads the workspace once and validates the final graph; mutually importing batch files may move together in any argument order. Directory moves preserve relative layout. Repeat --exclude with tsconfig-style globs relative to each source directory to keep server files/adapters; e.g. page.tsx and **/_hooks/**. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Repeat --map source=destination to retarget moved files’ own imports/re-exports and vi.mock/doMock/importActual literals. Add --map source#Old=destination#New for named exports, preserving local/public names with aliases. Mock factory text stays unchanged: review runtime compatibility. External consumer mocks are reported; --mocks add clones standalone registrations for the mapped module. --only selects exported declarations from one source file and moves only their required imports; unselected declarations stay in the source. Types, functions and safe classes/enums are supported; variable initialization, merged declarations and re-exports require preparation. The r3 mapping-only --only behavior is now available through retarget-import --only before moving. Module maps are simultaneous and scoped to moved files. Root .refactor-ai/equivalents.json supplies default module maps only when the destination declares the alternative; explicit maps win. Compiler checks do not prove runtime compatibility. Aliases between moved files become relative imports; unresolved source-project aliases fail MOVE_IMPORT_UNRESOLVED before program loading; missing destination packages fail MISSING_DEPENDENCY with source versions and install hints. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
       examples: [
         "plan move-file --project ./tsconfig.json --file ./src/components/button.tsx --to ./src/ui/button.tsx",
+        "plan move-file --project ./tsconfig.json --file ./src/a.ts=./src/ui/a.ts --file ./src/b.ts=./src/ui/b.ts",
+        "plan move-file --project ./tsconfig.json --file ./src/route --to ./src/ui/route --exclude page.tsx --exclude **/_hooks/**",
         "plan move-file --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/components --to ./packages/feature/src/components --target-project ./packages/feature/tsconfig.json --map @/lib/hooks=@scope/feature/hooks --map next-intl=use-intl --checker ts7"
       ]
     },
@@ -1606,8 +1667,10 @@ function parse(args) {
   const command = args.shift() ?? "help";
   const operation = args[0] && !args[0].startsWith("--") ? args.shift() : undefined;
   const flags = {};
-  const allowed = new Set(["project", "file", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker"]);
+  const allowed = new Set(["project", "file", "exclude", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker"]);
   const mappings = [];
+  const files = [];
+  const excludes = [];
   while (args.length) {
     const key = args.shift();
     if (key === "--keep" && flags.keep === undefined) {
@@ -1618,12 +1681,26 @@ function parse(args) {
     if (!key.startsWith("--") || !allowed.has(key.slice(2)) || !value || value.startsWith("--") || flags[key.slice(2)] !== undefined) {
       throw new Error(`INVALID_ARGUMENT: ${key}`);
     }
+    if (key === "--exclude") {
+      excludes.push(value);
+      continue;
+    }
+    if (key === "--file") {
+      files.push(value);
+      continue;
+    }
     if (key === "--map") {
       mappings.push(value);
       continue;
     }
     flags[key.slice(2)] = value;
   }
+  if (excludes.length)
+    flags.exclude = excludes.join(`
+`);
+  if (files.length)
+    flags.file = files.join(`
+`);
   if (mappings.length)
     flags.map = mappings.join(`
 `);
@@ -1691,10 +1768,24 @@ async function runCli(args, context) {
   }
   if (command !== "plan")
     throw new Error(`INVALID_ARGUMENT: unknown command ${command}`);
+  const fileArgs = flags.file?.split(`
+`) ?? [];
+  const paired = operation === "move-file" && fileArgs.some((file) => file.includes("="));
+  if (fileArgs.length > 1 && !paired)
+    throw new Error("INVALID_ARGUMENT: repeated --file requires move-file source=destination pairs");
+  const moves = paired ? fileArgs.map((item) => {
+    const parts = item.split("=");
+    if (parts.length !== 2 || !parts[0] || !parts[1] || flags.to)
+      throw new Error("INVALID_ARGUMENT: use --file source=destination pairs without --to");
+    return { file: parts[0], target: parts[1] };
+  }) : undefined;
   const plan = await api.plan({
     project: required(flags, "project"),
-    file: operation === "retarget-import" ? flags.file : required(flags, "file"),
+    file: moves ? undefined : operation === "retarget-import" ? flags.file : required(flags, "file"),
+    moves,
     operation,
+    exclude: flags.exclude?.split(`
+`),
     keep: flags.keep === "true" ? true : undefined,
     root: flags.root,
     at: flags.at,
@@ -1874,11 +1965,14 @@ function baselineDiagnostics(root, config, program, only, inputs, compute) {
     if (inputs.unchanged() && regularDirectory(directory, true)) {
       if (!process.env.REFACTOR_AI_CACHE_DIR) {
         try {
-          writeFileSync(resolve6(root, ".refactor-ai/.gitignore"), `*
-`, { flag: "wx", mode: 384 });
+          writeFileSync(resolve6(root, ".refactor-ai/.gitignore"), stateIgnoreText, { flag: "wx", mode: 384 });
         } catch (error) {
           if (error.code !== "EEXIST")
             throw error;
+          const path = resolve6(root, ".refactor-ai/.gitignore");
+          if (!lstatSync(path).isSymbolicLink() && readFileSync(path, "utf8") === `*
+`)
+            writeFileSync(path, stateIgnoreText);
         }
       }
       const body = { version: 1, key, inputs: observed, diagnostics };
@@ -1891,6 +1985,7 @@ function baselineDiagnostics(root, config, program, only, inputs, compute) {
 }
 var init_typescript_diagnostics_cache = __esm(() => {
   init_read_set();
+  init_snapshot();
 });
 
 // src/backends/typescript-paths.ts
@@ -2009,6 +2104,9 @@ function wildcardRegex(specs, basePath, usage, flags) {
   if (!patterns.length)
     return;
   return new RegExp(`^(?:${patterns.map((item) => `(?:${item})`).join("|")})${usage === "exclude" ? "(?:$|/)" : "$"}`, flags);
+}
+function excludedByPatterns(path, base, patterns) {
+  return wildcardRegex(patterns, base, "exclude", ts2.sys.useCaseSensitiveFileNames ? "" : "i")?.test(portablePath(resolve7(path))) ?? false;
 }
 function includeBasePath(absolute) {
   const wildcard = absolute.search(/[*?]/);
@@ -2197,7 +2295,7 @@ class VirtualFs {
   assertStableMetadata() {
     const changed = this.inputs.changed();
     if (changed)
-      fail("STALE_PROJECT_INPUTS", `${changed.method} changed during analysis: ${changed.args[0]}; retry after writers/generators settle`);
+      fail("STALE_PROJECT_INPUTS", `${changed.method} changed during analysis: ${changed.args[0]}${inputQueryDetails(changed)}; compiler inputs include project-discovery reads; retry after those writers/generators settle`);
   }
   virtualPaths() {
     const paths = [...this.generated.values()].map((item) => item.path);
@@ -2410,6 +2508,7 @@ class VirtualFs {
 }
 var BOM = "\uFEFF", packageFolders = "(?!(node_modules|bower_components|jspm_packages)(/|$))", matchers;
 var init_typescript_vfs = __esm(() => {
+  init_read_set();
   init_typescript_diagnostics_cache();
   init_typescript_paths();
   init_typescript_paths();
@@ -3577,13 +3676,19 @@ function affectedMockFiles(context, affected, from) {
   const program = context.service.getProgram();
   const files = program.getSourceFiles().filter((source) => isInside(context.root, resolve11(source.fileName)) && !source.fileName.replaceAll("\\", "/").includes("/node_modules/"));
   const callers = new Map;
-  const cache = ts5.createModuleResolutionCache(context.root, (path) => path, context.options);
+  const caches = new Map;
   for (const source of files) {
+    const options = context.optionsFor?.(source) ?? context.options;
+    let cache = caches.get(options);
+    if (!cache) {
+      cache = ts5.createModuleResolutionCache(context.root, (path) => path, options);
+      caches.set(options, cache);
+    }
     for (const specifier of moduleSpecifiers(source)) {
       if (isModuleMockCall(specifier.parent) && ts5.isPropertyAccessExpression(specifier.parent.expression) && !["importActual", "importMock", "requireActual", "requireMock"].includes(specifier.parent.expression.name.text))
         continue;
-      const mode = ts5.getModeForUsageLocation(source, specifier, context.options);
-      const target = ts5.resolveModuleName(specifier.text, source.fileName, context.options, ts5.sys, cache, undefined, mode).resolvedModule;
+      const mode = ts5.getModeForUsageLocation(source, specifier, options);
+      const target = ts5.resolveModuleName(specifier.text, source.fileName, options, context.sys ?? ts5.sys, cache, undefined, mode).resolvedModule;
       if (!target)
         continue;
       const key = resolve11(target.resolvedFileName);
@@ -3617,8 +3722,9 @@ function addParallelMocks(context, files, request) {
         fail("UNSUPPORTED_MOCK_CALL", `${file}: --mocks add requires standalone mock statements in a source file or block; use --mocks report`);
       }
       const specifier = call.arguments[0];
-      const mode = ts5.getModeForUsageLocation(source, specifier, context.options);
-      if (!ts5.resolveModuleName(request.to, file, context.options, ts5.sys, undefined, undefined, mode).resolvedModule) {
+      const options = context.optionsFor?.(source) ?? context.options;
+      const mode = ts5.getModeForUsageLocation(source, specifier, options);
+      if (!ts5.resolveModuleName(request.to, file, options, context.sys ?? ts5.sys, undefined, undefined, mode).resolvedModule) {
         fail("TARGET_UNRESOLVED", `${file} (${request.to})`);
       }
       const start = call.getStart(source);
@@ -3638,6 +3744,7 @@ function addParallelMocks(context, files, request) {
     for (const edit of edits.sort((a, b) => b.start - a.start))
       text = text.slice(0, edit.start) + edit.text + text.slice(edit.start);
     if (edits.length) {
+      context.onInsert?.(file, source, edits);
       context.setText(file, text);
       added.push(file);
     }
@@ -3899,15 +4006,56 @@ function retargetImports(context, request) {
   }
   return notes;
 }
+function moveMapEntries(mappings) {
+  return Object.entries(mappings).map(([source, destination]) => {
+    const fromHash = source.lastIndexOf("#"), toHash = destination.lastIndexOf("#");
+    if (fromHash <= 0 && toHash <= 0)
+      return { from: source, to: destination };
+    const from = source.slice(0, fromHash), to = destination.slice(0, toHash);
+    const imported = source.slice(fromHash + 1), exported = destination.slice(toHash + 1);
+    if (fromHash <= 0 || toHash <= 0 || !identifier(imported) || !identifier(exported))
+      fail("INVALID_NAME", `use module#Export=module#Export: ${source}=${destination}`);
+    return { from, to, imported, exported };
+  });
+}
+function aliasMappedBindings(source, rules) {
+  const changes = [];
+  for (const statement of source.statements) {
+    if (!ts6.isImportDeclaration(statement) && !ts6.isExportDeclaration(statement) || !statement.moduleSpecifier || !ts6.isStringLiteralLike(statement.moduleSpecifier))
+      continue;
+    const names = new Set(rules.filter((rule) => rule.from === statement.moduleSpecifier.text && rule.imported && rule.imported !== rule.exported).map((rule) => rule.imported));
+    for (const item of members(statement) ?? []) {
+      if (!item.propertyName && names.has(item.name.text))
+        changes.push({ span: { start: item.name.end, length: 0 }, newText: ` as ${item.name.getText(source)}` });
+    }
+  }
+  return replace(source.text, changes);
+}
 function mapMoveImports(source, mappings, only) {
   if (!mappings || typeof mappings !== "object" || Array.isArray(mappings) || Object.entries(mappings).some(([from, to]) => !from || typeof to !== "string" || !to))
     fail("INVALID_REQUEST", "module mappings must contain nonempty from=to strings");
   validate({ operation: "retarget-import", root: "", project: "", file: source.fileName, from: "refactor-ai:source", to: "refactor-ai:target", only });
-  let text = source.text;
+  const rules = moveMapEntries(mappings);
+  let text = aliasMappedBindings(source, rules);
   const pending = [];
-  for (const [index, [from, to]] of Object.entries(mappings).entries()) {
-    const request = { operation: "retarget-import", root: "", project: "", file: source.fileName, from, to, only };
-    validate(request);
+  const ordered = [...rules.filter((rule) => rule.imported), ...rules.filter((rule) => !rule.imported)];
+  for (const [index, rule] of ordered.entries()) {
+    const { from, to, imported, exported } = rule;
+    const request = {
+      operation: "retarget-import",
+      root: "",
+      project: "",
+      file: source.fileName,
+      from,
+      to,
+      ...imported ? { only: [imported], map: { [imported]: exported } } : { only }
+    };
+    if (from.includes("*") || to.includes("*"))
+      fail("UNSUPPORTED_SPECIFIER", "module mappings require exact specifiers");
+    if (from !== to)
+      validate(request);
+    else if (!imported)
+      continue;
     let temporary = `refactor-ai:move-map:${index}`;
     while (text.includes(temporary) || Object.hasOwn(mappings, temporary) || Object.values(mappings).includes(temporary))
       temporary += ":";
@@ -3924,12 +4072,23 @@ function mapMoveImports(source, mappings, only) {
       to
     }, new Set);
   }
-  return text;
+  const current = ts6.createSourceFile(source.fileName, text, ts6.ScriptTarget.Latest, true);
+  return replace(text, moduleSpecifiers(current).filter((specifier) => isModuleMockCall(specifier.parent)).flatMap((specifier) => {
+    const targets = new Set(rules.filter((rule) => rule.from === specifier.text).map((rule) => rule.to));
+    if (!targets.size)
+      return [];
+    if (targets.size !== 1)
+      fail("UNSUPPORTED_MOCK_MAPPING", `${source.fileName}: ${specifier.text} maps to several modules; prepare separate mocks first`);
+    const quote = text[specifier.getStart(current)];
+    const name = [...targets][0].replaceAll("\\", "\\\\").replaceAll(quote, `\\${quote}`).replaceAll("$" + "{", quote === "`" ? "\\$" + "{" : "$" + "{");
+    return [{ span: { start: specifier.getStart(current), length: specifier.getWidth(current) }, newText: quote + name + quote }];
+  }));
 }
 var init_typescript_retarget_import = __esm(() => {
   init_typescript_package_inputs();
   init_typescript_paths();
   init_typescript_vfs();
+  init_typescript_workspace();
   init_typescript_retarget_mocks();
 });
 
@@ -4042,6 +4201,51 @@ var init_typescript_prechecks = __esm(() => {
   init_typescript_vfs();
   builtins = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
   dependencyFields = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
+});
+
+// src/backends/typescript-move-mocks.ts
+function prepareMoveMocks(ws, renames, request, notes) {
+  const moved = new Set(renames.map(([file]) => ws.vfs.key(file)));
+  const groups = new Map;
+  for (const [file, target] of renames) {
+    for (const { from, to } of moveMapEntries(moveMappings(ws.root, target, request.map, ws.vfs.inputs.sys))) {
+      if (from === to)
+        continue;
+      const key = JSON.stringify([from, to]);
+      const group = groups.get(key) ?? { from, to, sources: [] };
+      group.sources.push(file);
+      groups.set(key, group);
+    }
+  }
+  const context = { sys: ws.vfs.moduleResolutionHost(), service: ws.service, options: ws.editOptions, optionsFor: (source) => {
+    const owner = ws.ownersOf(source.fileName)[0];
+    return owner ? ws.participant(owner).parsed.options : ws.editOptions;
+  }, root: ws.root, setText: (file, text) => ws.vfs.write(file, text) };
+  const program = ws.program();
+  const pending = [...groups.values()].map((group) => ({
+    ...group,
+    files: affectedMockFiles(context, group.sources.flatMap((file) => {
+      const source = program.getSourceFile(file);
+      return source ? [source] : [];
+    }), group.from).filter((file) => !moved.has(ws.vfs.key(file)))
+  }));
+  return (onInsert) => {
+    for (const { from, to, files } of pending) {
+      if (!files.length)
+        continue;
+      if (request.mocks === "add") {
+        const added = addParallelMocks({ ...context, onInsert }, files, { ...request, from, to });
+        if (added.length)
+          notes.push(`Added parallel mocks for ${to} in ${added.join(", ")}; review factory runtime compatibility.`);
+      } else
+        notes.push(`Tests mocking ${from} import moved files: ${files.join(", ")}; review mocks or use --mocks add for ${to}.`);
+    }
+  };
+}
+var init_typescript_move_mocks = __esm(() => {
+  init_typescript_retarget_import();
+  init_typescript_retarget_mocks();
+  init_typescript_prechecks();
 });
 
 // src/backends/typescript-inline-reexports.ts
@@ -4295,6 +4499,26 @@ function rewrite(origins, shim, source, notes) {
 `).replace(/\n/g, eolOf(source.text));
     changes.push({ span: { start, length: statement.end - start }, newText: output });
   }
+  for (const specifier of moduleSpecifiers(source)) {
+    if (!isModuleMockCall(specifier.parent))
+      continue;
+    const resolved = origins.ws.resolveModule(specifier, source);
+    if (!resolved || !origins.ws.vfs.samePath(resolved.resolvedFileName, shim.fileName))
+      continue;
+    const exports = origins.exports(shim);
+    const found = exports.map((symbol) => ({ name: symbol.name, origin: origins.find(shim, symbol.name) }));
+    const targets = new Set(found.map((item) => item.origin && originSpecifier(item.origin, source)));
+    if (!found.length || targets.size !== 1 || targets.has(undefined) || found.some((item) => item.origin.name !== item.name)) {
+      notes.push(`Kept mock/actual reference to ${shim.fileName} in ${source.fileName}: split or renamed exports require a runtime adapter.`);
+      continue;
+    }
+    const direct = [...targets][0];
+    const target = resolveAs(origins.ws, direct, source, specifier);
+    if (!target || !origins.ws.vfs.samePath(target.resolvedFileName, found[0].origin.target.fileName))
+      fail("REEXPORT_RESOLUTION_CHANGED", direct);
+    changes.push({ span: { start: specifier.getStart(source), length: specifier.getWidth(source) }, newText: literal(direct, source.text[specifier.getStart(source)]) });
+    notes.push(`Retargeted mock/actual module ${specifier.text} to ${direct} in ${source.fileName}; review factory runtime compatibility.`);
+  }
   return changes;
 }
 function inlineReexports(ws, file, source, notes, keep = false) {
@@ -4384,6 +4608,24 @@ function exportedPaths(pkg, target) {
   }
   return [...new Set(candidates)].sort((a, b) => a.length - b.length || a.localeCompare(b));
 }
+function defaultExportKey(pkg, target) {
+  const path = portablePath(relative8(pkg.directory, target));
+  const subpath = path.replace(/^src\//, "").slice(0, -extname3(path).length).replace(/(^|\/)index$/, "");
+  return subpath ? `./${subpath}` : ".";
+}
+function anticipatePackageExport(ws, target, specifier) {
+  const pkg = packageFor(ws, target);
+  if (!pkg)
+    return false;
+  const keys = exportedPaths(pkg, target);
+  const matches = (key) => specifier === pkg.name + (key === "." ? "" : key.slice(1));
+  if (keys.some(matches))
+    return true;
+  if (!matches(defaultExportKey(pkg, target)))
+    return false;
+  addExport(ws, pkg, target);
+  return true;
+}
 function addExport(ws, pkg, target) {
   const text = ws.vfs.readFile(pkg.path);
   const json = ts9.parseJsonText(pkg.path, text);
@@ -4399,8 +4641,7 @@ function addExport(ws, pkg, target) {
   const path = portablePath(relative8(pkg.directory, target));
   if (path.startsWith("../"))
     fail("PACKAGE_EXPORTS_UNSUPPORTED", target);
-  const subpath = path.replace(/^src\//, "").slice(0, -extname3(path).length).replace(/(^|\/)index$/, "");
-  const key = subpath ? `./${subpath}` : ".";
+  const key = defaultExportKey(pkg, target);
   const entries = property.initializer.properties;
   if (entries.some((item) => ts9.isPropertyAssignment(item) && ts9.isStringLiteral(item.name) && item.name.text === key)) {
     fail("PACKAGE_EXPORT_CONFLICT", `${pkg.path}: ${key} already names another target`);
@@ -4436,7 +4677,7 @@ function packageSpecifier(ws, importer, target, mode) {
     return value && typeof value === "object" && Object.hasOwn(value, destination.name);
   });
   if (!declares)
-    fail("MISSING_DEPENDENCY", `${source.path} must declare ${destination.name} in dependencies, devDependencies or peerDependencies`);
+    fail("MISSING_DEPENDENCY", `${source.path} must declare ${destination.name} in dependencies, devDependencies or peerDependencies (${importer} imports ${target})`);
   const paths = exportedPaths(destination, target);
   const nameFor = (key) => destination.name + (key === "." ? "" : key.slice(1));
   const owner = ws.ownersOf(importer)[0];
@@ -5253,7 +5494,7 @@ function moveType(context, request) {
     fail("PROJECT_DEPENDENCY_CYCLE", `the move would make projects depend on each other (${cycles.join("; ")}); move the type's dependencies first or choose another target`);
   }
 }
-function movePaths(root, file, target) {
+function movePaths(root, file, target, exclude = []) {
   if (!isInside(root, target))
     fail("OUTSIDE_ROOT", `target is outside ${root}`);
   let stat;
@@ -5265,6 +5506,8 @@ function movePaths(root, file, target) {
   if (stat.isSymbolicLink())
     fail("SYMLINK_UNSUPPORTED", file);
   if (stat.isFile()) {
+    if (exclude.length)
+      fail("INVALID_REQUEST", "--exclude requires directory sources");
     if (extname4(file) !== extname4(target))
       fail("UNSUPPORTED_TARGET", "move-file must retain the file extension");
     return [[file, target]];
@@ -5277,6 +5520,8 @@ function movePaths(root, file, target) {
   const visit = (directory) => {
     for (const entry of readdirSync3(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const path = resolve17(directory, entry.name);
+      if (excludedByPatterns(path, file, exclude))
+        continue;
       if (entry.isSymbolicLink())
         fail("SYMLINK_UNSUPPORTED", path);
       if (entry.isDirectory())
@@ -5342,23 +5587,36 @@ function moveFile(context, request, renames) {
       beforeOwners.set(key, [...beforeOwners.get(key) ?? [], config]);
   }
   const graphBefore = projectGraph(ws, userFiles(ws), (path) => ws.ownersOf(path));
+  const updateMocks = prepareMoveMocks(ws, renames, request, context.notes);
   for (const [from, to] of renames) {
     const source = parseFile(ws, from);
     if (!source)
       continue;
-    const mapped = mapMoveImports(source, moveMappings(root, to, request.map, ws.vfs.inputs.sys), request.only);
+    const mapped = mapMoveImports(source, moveMappings(root, to, request.map, ws.vfs.inputs.sys));
     if (mapped !== source.text)
       ws.vfs.write(from, mapped);
   }
+  const references = userFiles(ws).flatMap((path) => {
+    const source = parseFile(ws, path);
+    return source?.referencedFiles.map((reference) => ({ file: path, start: reference.pos, length: reference.end - reference.pos, target: resolve17(dirname13(path), reference.fileName) })) ?? [];
+  });
   const imports = relocationImports(ws, renames);
   const mapping = new Map(renames.map(([from, to]) => [ws.vfs.key(from), to]));
   const relocated = (path) => mapping.get(ws.vfs.key(path)) ?? path;
   const styleCache = new Map;
-  const retargeted = imports.filter((edge) => mapping.has(ws.vfs.key(edge.target)) || mapping.has(ws.vfs.key(edge.file)) && packageSelfImport(ws, relocated(edge.file), relocated(edge.target), edge.original));
+  const retargeted = imports.filter((edge) => mapping.has(ws.vfs.key(edge.file)) && edge.original.startsWith(".") || mapping.has(ws.vfs.key(edge.target)) || mapping.has(ws.vfs.key(edge.file)) && packageSelfImport(ws, relocated(edge.file), relocated(edge.target), edge.original));
   const styles = new Map(retargeted.map((edge) => [edge, relativeStyle(ws, relocated(edge.target), edge.original, styleCache)]));
-  const beforeImporters = importerMap(ws, renames.map(([from]) => from));
-  const expectedImporters = new Map(renames.map(([from, to]) => [to, beforeImporters.get(ws.vfs.key(from)).map(relocated).map((path) => ws.vfs.key(path)).sort()]));
-  applyEdits(context, ws.service.getEditsForFileRename(file, target, formatFor(context.sourceFile.text), preferencesFor(ws)));
+  const pendingImports = userFiles(ws).flatMap((file) => {
+    const source = parseFile(ws, file);
+    return source ? moduleSpecifiers(source).flatMap((specifier, index) => ws.resolveModule(specifier, source) ? [] : [{ file, index, original: specifier.text }]) : [];
+  });
+  const beforeImporters = importerMap(ws, renames.flatMap(([from, to]) => [from, to]));
+  const expectedImporters = new Map(renames.map(([from, to]) => [
+    to,
+    [...beforeImporters.get(ws.vfs.key(from)), ...beforeImporters.get(ws.vfs.key(to))].map(relocated).map((path) => ws.vfs.key(path)).sort()
+  ]));
+  if (!request.moves && !request.exclude?.length)
+    applyEdits(context, ws.service.getEditsForFileRename(file, target, formatFor(context.sourceFile.text), preferencesFor(ws)));
   for (const [from, to] of renames) {
     const text = ws.vfs.readFile(from);
     const bom = ws.vfs.hasBom(from);
@@ -5366,7 +5624,8 @@ function moveFile(context, request, renames) {
     ws.vfs.write(to, text, bom);
   }
   const sameProject = ws.vfs.samePath(ws.sourceConfig, ws.targetConfig);
-  const configRenames = directory ? [[file, target], ...renames] : renames;
+  const directoryRenames = (request.moves ?? [{ file, target }]).filter((move) => !request.exclude?.length && lstatSync2(move.file).isDirectory()).map((move) => [move.file, move.target]);
+  const configRenames = [...directoryRenames, ...renames];
   const substitutions = new Map;
   if (!sameProject)
     for (const item of ws.participants.values()) {
@@ -5397,7 +5656,7 @@ function moveFile(context, request, renames) {
       fail("REFERENCES_NOT_PRESERVED", `module specifier disappeared in ${from}`);
     const owner = ws.ownersOf(from)[0];
     const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
-    const bare = packageSpecifier(ws, from, to, ts10.getModeForUsageLocation(source, specifier, options));
+    const bare = mapping.has(ws.vfs.key(edge.target)) || !edge.original.startsWith(".") ? packageSpecifier(ws, from, to, ts10.getModeForUsageLocation(source, specifier, options)) : undefined;
     const style = styles.get(edge);
     const name = bare ?? specifierLike(from, to, style, edge.target);
     const start = specifier.getStart(source) + 1;
@@ -5405,9 +5664,34 @@ function moveFile(context, request, renames) {
     list.push({ span: { start, length: specifier.end - start - 1 }, newText: JSON.stringify(name).slice(1, -1) });
     changes.set(from, list);
   }
+  if (request.moves || request.exclude?.length)
+    for (const reference of references) {
+      if (!mapping.has(ws.vfs.key(reference.file)) && !mapping.has(ws.vfs.key(reference.target)))
+        continue;
+      const from = relocated(reference.file), to = relocated(reference.target);
+      const path = portablePath(relative10(dirname13(from), to));
+      const edits = changes.get(from) ?? [];
+      edits.push({ span: { start: reference.start, length: reference.length }, newText: path.startsWith(".") ? path : `./${path}` });
+      changes.set(from, edits);
+    }
   for (const [path, edits] of changes)
     ws.vfs.write(path, applyTextChanges(ws.vfs.readFile(path), edits));
   ws.reparse();
+  for (const edge of pendingImports) {
+    const from = relocated(edge.file), source = parseFile(ws, from);
+    const specifier = source && moduleSpecifiers(source)[edge.index];
+    if (!source || !specifier || specifier.text !== edge.original)
+      continue;
+    for (const [, to] of renames)
+      if (anticipatePackageExport(ws, to, edge.original)) {
+        const owner = ws.ownersOf(from)[0];
+        const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
+        packageSpecifier(ws, from, to, ts10.getModeForUsageLocation(source, specifier, options));
+        const resolved = ws.resolveModule(specifier, source, options);
+        if (!resolved || !ws.vfs.samePath(resolved.resolvedFileName, to))
+          fail("REFERENCES_NOT_PRESERVED", `${edge.original} in ${from} must resolve to anticipated destination ${to}`);
+      }
+  }
   context.aliasHints = imports.filter((edge) => edge.alias && mapping.has(ws.vfs.key(edge.file)) && !mapping.has(ws.vfs.key(edge.target))).filter((edge) => {
     const source = parseFile(ws, relocated(edge.file));
     const specifier = moduleSpecifiers(source)[edge.index];
@@ -5435,15 +5719,179 @@ function moveFile(context, request, renames) {
         fail("REFERENCES_NOT_PRESERVED", `${edge.original} in ${from} must still resolve to ${to}`);
       }
     }
+    const additional = new Map(renames.map(([, to]) => [ws.vfs.key(to), []]));
+    for (const edge of pendingImports) {
+      const from = relocated(edge.file), source = parseFile(ws, from);
+      const specifier = source && moduleSpecifiers(source)[edge.index];
+      if (!source || !specifier || specifier.text !== edge.original)
+        continue;
+      const resolved = ws.resolveModule(specifier, source);
+      if (resolved)
+        additional.get(ws.vfs.key(resolved.resolvedFileName))?.push(ws.vfs.key(from));
+    }
     const afterImporters = importerMap(ws, renames.map(([, to]) => to));
-    for (const [to, expected] of expectedImporters) {
+    for (const [to, original] of expectedImporters) {
+      const expected = [...original, ...additional.get(ws.vfs.key(to))].sort();
       const actual = afterImporters.get(ws.vfs.key(to));
       if (JSON.stringify(expected) !== JSON.stringify(actual))
         fail("REFERENCES_NOT_PRESERVED", `${expected.length} module references expected for ${to}, found ${actual.length}`);
     }
   };
+  updateMocks((path, source, edits) => {
+    const specifiers = moduleSpecifiers(source);
+    const inserted = edits.map((edit) => ({ start: edit.start, count: moduleSpecifiers(ts10.createSourceFile(path, edit.text, ts10.ScriptTarget.Latest, true)).length }));
+    for (const edge of [...imports, ...pendingImports]) {
+      if (!ws.vfs.samePath(relocated(edge.file), path))
+        continue;
+      const start = specifiers[edge.index]?.getStart(source);
+      if (start !== undefined)
+        edge.index += inserted.filter((edit) => edit.start <= start).reduce((sum, edit) => sum + edit.count, 0);
+    }
+  });
   moveSuppressions(ws, renames, context.notes);
   context.notes.push(`Moved ${renames.length} file(s) from ${relative10(root, file)} to ${relative10(root, target)}; validated source and target project membership.`);
+}
+function selectedStatement(source, name) {
+  const matches = source.statements.filter((statement) => {
+    if (!ts10.canHaveModifiers(statement) || ts10.getModifiers(statement)?.some((modifier) => modifier.kind === ts10.SyntaxKind.DefaultKeyword) || !ts10.getModifiers(statement)?.some((modifier) => modifier.kind === ts10.SyntaxKind.ExportKeyword))
+      return false;
+    if (ts10.isVariableStatement(statement))
+      return statement.declarationList.declarations.some((item) => ts10.isIdentifier(item.name) && item.name.text === name);
+    return "name" in statement && statement.name && ts10.isIdentifier(statement.name) && statement.name.text === name;
+  });
+  if (matches.length !== 1)
+    fail("UNSUPPORTED_SELECTION", `${source.fileName}: --only requires one exported declaration for '${name}' (merged declarations and re-exports are unsupported)`);
+  const statement = matches[0];
+  if (ts10.isVariableStatement(statement) && statement.declarationList.declarations.length !== 1)
+    fail("UNSUPPORTED_SELECTION", `${name}: split multi-variable declarations before moving`);
+  if (ts10.isClassDeclaration(statement) || ts10.isEnumDeclaration(statement))
+    assertSafeInitialization(statement);
+  if (ts10.isVariableStatement(statement))
+    fail("UNSUPPORTED_SELECTION", `${name}: runtime variable initialization requires a whole-file move`);
+  return statement;
+}
+function moveSelected(context, request) {
+  const { ws, file, sourceFile, root } = context;
+  const target = assertAbsolute("target", request.target);
+  if (request.moves || lstatSync2(file).isDirectory())
+    fail("UNSUPPORTED_SELECTION", "--only requires one source file; batch whole files separately");
+  if (!request.only?.length || new Set(request.only).size !== request.only.length)
+    fail("INVALID_REQUEST", "--only requires distinct exported declaration names");
+  if (ws.vfs.fileExists(target) || ws.vfs.directoryExists(target))
+    fail("TARGET_EXISTS", target);
+  assertCaseSafe(root, target);
+  const bytes = readFileSync4(file);
+  if (!Buffer.from(bytes.toString("utf8")).equals(bytes))
+    fail("UNSUPPORTED_ENCODING", `${file}: selected moves require UTF-8 text`);
+  const selected = request.only.map((name) => ({ name, statement: selectedStatement(sourceFile, name) })).sort((a, b) => a.statement.pos - b.statement.pos);
+  const before = membership(ws);
+  const graphBefore = projectGraph(ws, userFiles(ws), (path) => ws.ownersOf(path));
+  const mappings = moveMappings(root, target, request.map, ws.vfs.inputs.sys);
+  const rules = moveMapEntries(mappings);
+  const remapped = sourceFile.statements.filter(ts10.isImportDeclaration).flatMap((statement) => {
+    if (!ts10.isStringLiteralLike(statement.moduleSpecifier))
+      return [];
+    const resolved = ws.resolveModule(statement.moduleSpecifier, sourceFile);
+    return resolved ? rules.filter((rule) => rule.from === statement.moduleSpecifier.text).map((rule) => ({ target: ws.vfs.key(resolved.resolvedFileName), imported: rule.imported })) : [];
+  });
+  const required = selected.map((item) => ({ name: item.name, imports: [...typeImportTargets(ws, item.statement)].filter((dependency) => !remapped.some((rule) => dependency.startsWith(rule.target + "\x00") && (!rule.imported || dependency === rule.target + "\x00" + rule.imported))) }));
+  const preferences = preferencesFor(ws);
+  const groups = [];
+  for (const item of selected) {
+    const previous = groups.at(-1)?.at(-1);
+    if (previous && sourceFile.statements.indexOf(item.statement) === sourceFile.statements.indexOf(previous.statement) + 1)
+      groups.at(-1).push(item);
+    else
+      groups.push([item]);
+  }
+  for (const group of groups) {
+    const current = ws.program().getSourceFile(file);
+    const first = selectedStatement(current, group[0].name), last = selectedStatement(current, group.at(-1).name);
+    const range = { pos: first.getStart(current), end: last.end };
+    const result = ws.service.getEditsForRefactor(file, formatFor(sourceFile.text), range, "Move to file", "Move to file", preferences, { targetFile: target });
+    if (!result || result.notApplicableReason || !result.edits.length)
+      fail("REFACTOR_UNAVAILABLE", result?.notApplicableReason ?? `TypeScript cannot move ${group.map((item) => item.name).join(", ")}`);
+    applyEdits(context, result.edits, { eol: eolOf(sourceFile.text), bom: ws.vfs.hasBom(file) });
+    for (const { name } of group)
+      updateReexports(context, target, name, true, false);
+  }
+  removeSelectedSelfImports(ws, target, new Set(selected.map((item) => item.name)));
+  const moved = parseFile(ws, target);
+  if (!moved)
+    fail("REFACTOR_UNAVAILABLE", "selected declarations did not produce a target file");
+  const mapped = mapMoveImports(moved, moveMappings(root, target, request.map, ws.vfs.inputs.sys));
+  ws.vfs.write(target, mapped);
+  const empty = parseFile(ws, file).statements.length === 0;
+  if (empty)
+    ws.vfs.write(file, null);
+  ws.updateConfigLists([], empty ? [file] : []);
+  ws.reparse();
+  if (!ws.fileNames(ws.targetConfig).some((path) => ws.vfs.samePath(path, target))) {
+    if (!ws.addToFiles(ws.targetConfig, target))
+      fail("TARGET_NOT_IN_PROJECT", `${target} is not matched by ${ws.targetConfig}`);
+    ws.reparse();
+  }
+  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname13(config), dirname13(ws.targetConfig)));
+  assertMembership(ws, before, [], empty ? [file] : [], { path: target, must: [ws.targetConfig], may: siblings });
+  normalizeSelectedImports(ws, target);
+  ws.reparse();
+  const cycles = introducedCycles(graphBefore, projectGraph(ws, userFiles(ws), (path) => ws.ownersOf(path)));
+  if (cycles.length)
+    fail("PROJECT_DEPENDENCY_CYCLE", `selected declarations still depend on the source project (${cycles.join("; ")}); select their dependencies too or move them first`);
+  context.verify = () => {
+    for (const { name, imports } of required) {
+      const declaration = selectedStatement(ws.program().getSourceFile(target), name);
+      const actual = typeImportTargets(ws, declaration);
+      for (const dependency of imports)
+        if (!actual.has(dependency))
+          fail("REFERENCES_NOT_PRESERVED", `${name} no longer imports ${dependency.replace("\x00", " export ")}; map its source alias explicitly or move the dependency too`);
+    }
+  };
+  context.notes.push(`Moved selected declarations ${selected.map((item) => item.name).join(", ")} to ${relative10(root, target)}; unselected declarations stay in ${relative10(root, file)}.`);
+}
+function removeSelectedSelfImports(ws, target, names) {
+  const source = parseFile(ws, target);
+  const edits = [];
+  for (const statement of source.statements) {
+    if (!ts10.isImportDeclaration(statement) || !ts10.isStringLiteralLike(statement.moduleSpecifier))
+      continue;
+    const resolved = ws.resolveModule(statement.moduleSpecifier, source);
+    if (!resolved || !ws.vfs.samePath(resolved.resolvedFileName, target))
+      continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (statement.importClause?.name || !bindings || !ts10.isNamedImports(bindings) || bindings.elements.some((item) => item.propertyName && item.propertyName.text !== item.name.text))
+      fail("UNSUPPORTED_SELECTION", "aliased self-import produced by selected move");
+    const kept = bindings.elements.filter((item) => !names.has(item.name.text));
+    if (!kept.length)
+      edits.push({ span: { start: statement.getStart(source), length: statement.getWidth(source) }, newText: "" });
+    else
+      edits.push({ span: { start: bindings.getStart(source), length: bindings.getWidth(source) }, newText: `{ ${kept.map((item) => item.getText(source)).join(", ")} }` });
+  }
+  if (edits.length)
+    ws.vfs.write(target, applyTextChanges(source.text, edits));
+}
+function normalizeSelectedImports(ws, target) {
+  for (const path of [...new Set([...userFiles(ws), target])]) {
+    const source = parseFile(ws, path);
+    if (!source)
+      continue;
+    const edits = [];
+    for (const specifier of moduleSpecifiers(source)) {
+      const resolved = ws.resolveModule(specifier, source);
+      if (!resolved)
+        continue;
+      const to = resolve17(resolved.resolvedFileName);
+      if (!ws.vfs.samePath(to, target) && !(ws.vfs.samePath(path, target) && packageSelfImport(ws, path, to, specifier.text)))
+        continue;
+      const owner = ws.ownersOf(path)[0];
+      const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
+      const bare = packageSpecifier(ws, path, to, ts10.getModeForUsageLocation(source, specifier, options));
+      const name = bare ?? specifierLike(path, to, "./module", to);
+      edits.push({ span: { start: specifier.getStart(source), length: specifier.getWidth(source) }, newText: JSON.stringify(name) });
+    }
+    if (edits.length)
+      ws.vfs.write(path, applyTextChanges(source.text, edits));
+  }
 }
 function newDiagnostics2(before, after) {
   const key = (item) => `${item.file}\x00${item.code}\x00${item.message}`;
@@ -5463,7 +5911,13 @@ async function analyzeFileOperation(request) {
   const file = assertAbsolute("file", request.file);
   if (!isInside(root, file))
     fail("OUTSIDE_ROOT", `file is outside ${root}`);
-  const movingFiles = request.operation === "move-file" ? movePaths(root, file, assertAbsolute("target", request.target)) : undefined;
+  const movingFiles = request.operation === "move-file" ? (request.moves ?? [{ file, target: assertAbsolute("target", request.target) }]).flatMap((move) => movePaths(root, assertAbsolute("file", move.file), assertAbsolute("target", move.target), request.exclude)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0) : undefined;
+  if (movingFiles) {
+    const sources = new Set(movingFiles.map(([from]) => from)), targets = new Set(movingFiles.map(([, to]) => to));
+    if (sources.size !== movingFiles.length || targets.size !== movingFiles.length || [...targets].some((to) => sources.has(to) || [...targets].some((other) => other !== to && isInside(to, other)))) {
+      fail("INVALID_REQUEST", "batch sources/destinations must be unique and must not overlap");
+    }
+  }
   const extension = movingFiles ? extname4(file) : sourceExtension(file);
   const sourceConfig = configPathFor(assertAbsolute("project", request.project));
   const targetConfig = ["move-type", "move-file"].includes(request.operation) && request.targetProject ? configPathFor(assertAbsolute("targetProject", request.targetProject)) : sourceConfig;
@@ -5471,7 +5925,7 @@ async function analyzeFileOperation(request) {
   if (request.operation === "move-type" && request.target && isAbsolute4(request.target) && existsSync4(request.target))
     affected.push(resolve17(request.target));
   const inputs = new CompilerInputs(true);
-  if (movingFiles || sourceConfig !== targetConfig)
+  if (!request.only && (movingFiles || sourceConfig !== targetConfig))
     precheckMove(root, sourceConfig, targetConfig, movingFiles ?? [], request, inputs.sys);
   const checkerMode = request.checker === "both" ? "both" : "ts7";
   const nativeChecker = request.checker === "ts7" || request.checker === "both" ? await loadTs7Checker(checkerMode) : undefined;
@@ -5499,6 +5953,8 @@ async function analyzeFileOperation(request) {
       renamed = renameFile(context, request).renamed;
     else if (request.operation === "move-type")
       moveType(context, request);
+    else if (movingFiles && request.only)
+      timed("workspace.move", () => moveSelected(context, request));
     else if (movingFiles)
       timed("workspace.move", () => moveFile(context, request, movingFiles));
     else if (request.operation === "inline-reexports") {
@@ -5517,13 +5973,13 @@ async function analyzeFileOperation(request) {
     }
     const layoutsBefore = new Map(ws.layouts);
     const { before: diagnosticsBefore, after: diagnosticsAfter, affected: validatedFiles, affectedProjects: validatedProjects = ws.participants.size } = timed("workspace.validate", validate);
-    const renameMap = new Map((movingFiles ?? (renamed ? [renamed] : [])).map(([from, to]) => [ws.vfs.key(from), to]));
+    const renameMap = new Map(((request.only ? [] : movingFiles) ?? (renamed ? [renamed] : [])).map(([from, to]) => [ws.vfs.key(from), to]));
     const comparable = movingFiles ? diagnosticsBefore.map((item) => ({ ...item, file: renameMap.get(ws.vfs.key(item.file)) ?? item.file })) : renamed ? diagnosticsBefore.map((item) => ws.vfs.samePath(item.file, renamed[0]) ? { ...item, file: renamed[1] } : item) : diagnosticsBefore;
     if (!diagnosticsAfter.length && ![...ws.participants.values()].some((item) => item.references.length))
       context.notes.push("Skipped baseline diagnostics: the planned affected set has no errors.");
     const introduced = newDiagnostics2(comparable, diagnosticsAfter);
     if (introduced.length)
-      fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ") + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : ""));
+      fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ") + (movingFiles ? `; affected consumers: ${[...new Set(introduced.map((item) => relative10(root, item.file)))].join(", ")}; adapt these consumers before moving, or include dependent files in the same --file source=destination batch` : "") + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : ""));
     context.verify?.();
     for (const [key, layout] of layoutsBefore) {
       const after = ws.layouts.get(key);
@@ -5566,6 +6022,7 @@ async function analyzeFileOperation(request) {
 }
 var fileCapabilities, tsExtensions, jsExtensions, jsEquivalent;
 var init_typescript_fileops = __esm(() => {
+  init_typescript_move_mocks();
   init_typescript_diagnostics_cache();
   init_typescript_retarget_import();
   init_typescript_prechecks();

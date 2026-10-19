@@ -6,13 +6,20 @@ export interface RefactorRequest {
     project: string;
     root: string;
     file: string;
+    /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
+    moves?: {
+        file: string;
+        target: string;
+    }[];
+    /** TS-style globs relative to each moved directory; excluded adapters remain. */
+    exclude?: string[];
     operation: Operation;
     /** Retain the source shim after inline-reexports. */
     keep?: boolean;
     /** Module specifiers for retarget-import; exact matches only. */
     from?: string;
     to?: string;
-    /** retarget-import: export names; move-file: exact module specifiers. */
+    /** retarget-import: export names; move-file: module or module#Export mappings. */
     map?: Record<string, string>;
     only?: string[];
     /** Report affected test mocks (default), or add a parallel destination mock. */
@@ -34,6 +41,13 @@ export interface RefactorRequest {
 }
 export interface Diagnostic {
     file: string;
+    /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
+    moves?: {
+        file: string;
+        target: string;
+    }[];
+    /** TS-style globs relative to each moved directory; excluded adapters remain. */
+    exclude?: string[];
     code: string;
     message: string;
 }

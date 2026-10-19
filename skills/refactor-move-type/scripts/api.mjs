@@ -21,6 +21,12 @@ function assertReadSetShape(inputs) {
     throw new Error("INVALID_PLAN: malformed read set");
   }
 }
+function inputQueryDetails(input) {
+  if (input.method !== "readDirectory")
+    return "";
+  const [, extensions, excludes, includes, depth] = input.args;
+  return ` (query: ${JSON.stringify({ extensions, excludes, includes, depth })})`;
+}
 async function assertReadSetFresh(inputs, compilerBase) {
   assertReadSetShape(inputs);
   if (!inputs.length)
@@ -30,7 +36,7 @@ async function assertReadSetFresh(inputs, compilerBase) {
   for (const input of inputs) {
     const method = ts.sys[input.method];
     if (!method || inputHash(method(...input.args.map((value) => value === null ? undefined : value))) !== input.digest) {
-      throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}; create a new plan after writers/generators settle`);
+      throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}${inputQueryDetails(input)}; compiler inputs include project-discovery reads; create a new plan after those writers/generators settle`);
     }
   }
 }
@@ -607,10 +613,27 @@ async function gitFiles(root) {
     return null;
   }
 }
+var stateIgnoreText = `*
+!equivalents.json
+!.gitignore
+`;
 async function ignoreStateDirectory(stateDirectory) {
+  const path = resolve(stateDirectory, ".gitignore");
+  const stat = await lstat(path).catch((error) => {
+    if (error.code === "ENOENT")
+      return;
+    throw error;
+  });
+  if (stat?.isSymbolicLink())
+    throw new Error("SYMLINK_UNSUPPORTED: state .gitignore");
+  if (stat?.isFile()) {
+    if (await readFile(path, "utf8") === `*
+`)
+      await writeFile(path, stateIgnoreText);
+    return;
+  }
   try {
-    await writeFile(resolve(stateDirectory, ".gitignore"), `*
-`, { flag: "wx", mode: 420 });
+    await writeFile(path, stateIgnoreText, { flag: "wx", mode: 420 });
   } catch (error) {
     if (error.code !== "EEXIST")
       throw error;
@@ -723,6 +746,29 @@ function assertPlanShape(plan) {
 async function canonicalRequest(request) {
   const root = await realpath2(request.root);
   const result = { ...request, root, project: await realpath2(request.project), file: await realpath2(request.file) };
+  if (request.operation === "move-file") {
+    if (request.only)
+      result.only = [...request.only].sort();
+    if (request.exclude)
+      result.exclude = [...new Set(request.exclude)].sort();
+    if (request.map)
+      result.map = Object.fromEntries(Object.entries(request.map).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  }
+  if (request.moves) {
+    if (request.operation !== "move-file" || !request.moves.length)
+      throw new Error("INVALID_REQUEST: moves requires move-file pairs");
+    result.moves = [];
+    for (const move of request.moves) {
+      const file = await realpath2(move.file), target = inside(root, await canonicalMissing(move.target));
+      const directory = (await lstat2(file)).isDirectory();
+      await assertRegularPath(root, file, false, directory);
+      await assertRegularPath(root, target, true, directory);
+      result.moves.push({ file, target });
+    }
+    result.moves.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : a.target < b.target ? -1 : 1);
+    result.file = result.moves[0].file;
+    result.target = result.moves[0].target;
+  }
   await assertRegularPath(root, result.project);
   const directory = request.operation === "move-file" && (await lstat2(result.file)).isDirectory() || request.operation === "retarget-import";
   await assertRegularPath(root, result.file, false, directory);
@@ -730,8 +776,8 @@ async function canonicalRequest(request) {
     result.targetProject = await realpath2(request.targetProject);
     await assertRegularPath(root, result.targetProject);
   }
-  if (request.target !== undefined) {
-    result.target = inside(root, await canonicalMissing(request.target));
+  if (result.target !== undefined) {
+    result.target = inside(root, await canonicalMissing(result.target));
     await assertRegularPath(root, result.target, true, directory);
   }
   return result;
@@ -788,10 +834,12 @@ async function createPlan(request, analyze, compilerBase) {
   const creationMode = async (path) => {
     if (request.operation !== "move-file" || !request.target)
       return createdMode;
-    const directory = (await lstat2(request.file)).isDirectory();
-    if (!directory && path !== request.target)
+    const pair = request.moves?.find((move) => path === move.target || path.startsWith(move.target + sep2));
+    const moveFile = pair?.file ?? request.file, moveTarget = pair?.target ?? request.target;
+    const directory = (await lstat2(moveFile)).isDirectory();
+    if (!directory && path !== moveTarget)
       return createdMode;
-    const source = directory ? resolve2(request.file, relative2(request.target, path)) : request.file;
+    const source = directory ? resolve2(moveFile, relative2(moveTarget, path)) : moveFile;
     if (!changes.some((change) => change.path === source && change.after === null))
       return 384;
     return (await lstat2(source)).mode & 511;
@@ -1121,7 +1169,7 @@ function createRefactorApi(context) {
           assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
           throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
-        if (["move-type", "move-file"].includes(operation) && !options.target)
+        if (["move-type", "move-file"].includes(operation) && !options.target && !options.moves?.length)
           throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
         if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file"].includes(operation)) {
           throw new Error("INVALID_ARGUMENT: target and targetProject require move-type or move-file");
@@ -1130,19 +1178,27 @@ function createRefactorApi(context) {
           throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
         if (operation === "retarget-import" && (!options.from || !options.to))
           throw new Error("INVALID_ARGUMENT: from and to required for retarget-import");
-        if (operation !== "retarget-import" && [options.from, options.to, options.mocks].some((value) => value !== undefined)) {
-          throw new Error("INVALID_ARGUMENT: from, to and mocks require retarget-import");
+        if (operation !== "retarget-import" && [options.from, options.to].some((value) => value !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: from and to require retarget-import");
         }
         if (!["retarget-import", "move-file"].includes(operation) && [options.map, options.only].some((value) => value !== undefined))
           throw new Error("INVALID_ARGUMENT: map and only require retarget-import or move-file");
         if (operation === "move-file" && languageForProject(options.project) !== "typescript" && (options.map || options.only))
           throw new Error("INVALID_ARGUMENT: move-file mappings require TypeScript/JavaScript");
+        if (options.mocks !== undefined && (!["retarget-import", "move-file"].includes(operation) || languageForProject(options.project) !== "typescript"))
+          throw new Error("INVALID_ARGUMENT: mocks requires TypeScript retarget-import or move-file");
         if (options.mocks !== undefined && !["report", "add"].includes(options.mocks))
           throw new Error("INVALID_ARGUMENT: mocks report|add");
-        if (!options.file && operation !== "retarget-import")
+        if (options.exclude !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || options.only || !Array.isArray(options.exclude) || options.exclude.some((pattern) => typeof pattern !== "string" || !pattern || pattern.startsWith("!") || /^(?:[A-Za-z]:|[\\/])/.test(pattern) || pattern.split(/[\\/]/).includes("..")))) {
+          throw new Error("INVALID_ARGUMENT: exclude requires relative move-file directory globs without --only");
+        }
+        if (options.moves !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || !Array.isArray(options.moves) || !options.moves.length || options.file !== undefined || options.target !== undefined || options.moves.some((move) => !move || typeof move.file !== "string" || !move.file || typeof move.target !== "string" || !move.target))) {
+          throw new Error("INVALID_ARGUMENT: moves requires TypeScript move-file pairs, without file/target");
+        }
+        if (!options.file && !options.moves?.length && operation !== "retarget-import")
           throw new Error("INVALID_ARGUMENT: file required");
         const project = await realpath3(resolve4(options.project));
-        const file = await realpath3(resolve4(options.file ?? dirname3(project)));
+        const file = await realpath3(resolve4(options.file ?? options.moves?.[0]?.file ?? dirname3(project)));
         const root = await realpath3(resolve4(options.root ?? dirname3(project)));
         const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile4(file, "utf8") : "";
         const position = (point) => {
@@ -1157,9 +1213,11 @@ function createRefactorApi(context) {
           root,
           file,
           operation,
+          ...options.moves ? { moves: options.moves.map((move) => ({ file: resolve4(move.file), target: resolve4(move.target) })), target: resolve4(options.moves[0].target) } : {},
+          ...options.exclude ? { exclude: [...new Set(options.exclude)].sort() } : {},
           ...options.checker !== undefined ? { checker: options.checker } : {},
           ...options.keep !== undefined ? { keep: options.keep } : {},
-          ...operation === "move-file" ? { ...options.map ? { map: options.map } : {}, ...options.only ? { only: options.only } : {} } : {},
+          ...operation === "move-file" ? { ...options.mocks ? { mocks: options.mocks } : {}, ...options.map ? { map: options.map } : {}, ...options.only ? { only: options.only } : {} } : {},
           ...operation === "retarget-import" ? {
             from: options.from,
             to: options.to,
