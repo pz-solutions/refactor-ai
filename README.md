@@ -17,6 +17,7 @@ Deterministic refactorings exposed through skills and a CLI written in TypeScrip
 | Move whole modules or directories between workspace packages | Yes, including package exports and import updates | Not yet |
 | Match a filename to its declared type | Yes, including import updates | Yes, including explicit `Compile` entries |
 | Inline shim re-exports into their callers | Yes, with package entry preservation | Not yet |
+| Port a Next App Router route to TanStack Start (`port-route`) | Yes, view move + generated Next adapter and Start route from project templates | Not applicable |
 | Match a namespace to the project structure | Not applicable to ES modules | Yes, including semantic reference updates |
 
 ## Getting started
@@ -167,6 +168,7 @@ Ready-to-use runner instructions are included in the repository:
 - [refactor-move-file](skills/refactor-move-file/SKILL.md)
 - [refactor-inline-reexports](skills/refactor-inline-reexports/SKILL.md)
 - [refactor-retarget-import](skills/refactor-retarget-import/SKILL.md)
+- [refactor-port-route](skills/refactor-port-route/SKILL.md)
 
 Each skill is a self-contained directory with `SKILL.md`, a Node launcher in `scripts/refactor.mjs`, and the built CLI and npm lockfile in `assets/runtime/`. Skills supporting C# also include Roslyn helper sources in `assets/dotnet/`. They depend on files within their own directory and can run independently of the original checkout.
 
@@ -200,6 +202,19 @@ Stop dev servers and let generators settle before planning. Use `--checker ts7` 
 2. **Inline shims** that only re-export the target package: `inline-reexports --file <shim>`. Dynamic `import()` of a shim keeps it alive; retarget those by hand.
 3. **Move** the module or directory: `move-file --file <dir> --to packages/<pkg>/src/<dir> --target-project packages/<pkg>/tsconfig.json`. Importers get the package's `exports` subpath (entries are added, index modules publish the directory), `vi.mock` paths follow, same-package imports become relative, ESLint bulk-suppression entries move with their files.
 4. If the move fails with `NEW_DIAGNOSTICS`, read the first errors: an unresolved `@/…` alias means a dependency still lives in the app (retarget or move it first); `Cannot find module 'x'` means the destination package must declare `x` (add it with the app's version and install).
+
+## Recipe: porting a Next route to TanStack Start (`port-route`)
+
+Once a route's view is framework-free (steps above, or ports such as `navigation`/`search` props), one plan does the per-route mechanics:
+
+```sh
+node dist/cli.js plan port-route --project apps/web/tsconfig.json \
+  --target-project packages/app-features/tsconfig.json --root . \
+  --route 'apps/web/src/app/[locale]/dashboard/properties/[code]/units' \
+  --to packages/app-features/src/properties/units --checker ts7 --out /tmp/units.json
+```
+
+It moves the route's client files (keeping `page.tsx`, `_hooks/**`, adapters, server-only files and nested routes in Next), rewrites each `usePreloaded(preloadedX)` prop of the rendered view into an `initialX` data prop, generates the Next adapter that keeps the server preloads, makes `page.tsx` render it, and generates `apps/web-start/src/routes/<flat.route>.tsx` whose loader prefetches the same Convex queries with arguments translated from the page (route params, configured equivalents such as `await searchParams`, package imports and pure page consts). Untranslatable values become `TODO(port-route)` placeholders plus plan notes. All three projects are validated, with the ignored TanStack route tree regenerated in memory. Everything project-specific lives in `.refactor-ai/port-route.json`; see [examples/port-route/uber-platform](examples/port-route/uber-platform) and `plan port-route --help`.
 
 Always pass the workspace root as `--root`, run the project's formatter and linter on changed files after `apply` (the engine uses the TypeScript formatter), and run the application tests. Lint rules that depend on per-package configuration (for example shadcn's `components.json`) do not move with the code; compare the destination package's lint setup.
 

@@ -12,7 +12,7 @@ function parse(args: string[]): { command: string; operation?: string; flags: Re
   const command = args.shift() ?? "help";
   const operation = args[0] && !args[0].startsWith("--") ? args.shift() : undefined;
   const flags: Record<string, string> = {};
-  const allowed = new Set(["project", "file", "exclude", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker"]);
+  const allowed = new Set(["project", "file", "exclude", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker", "route", "start-routes", "config"]);
   const mappings: string[] = [];
   const files: string[] = [];
   const excludes: string[] = [];
@@ -91,8 +91,11 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
     if (parts.length !== 2 || !parts[0] || !parts[1] || flags.to) throw new Error("INVALID_ARGUMENT: use --file source=destination pairs without --to");
     return { file: parts[0], target: parts[1] };
   }) : undefined;
+  if (operation === "port-route" && flags.file !== undefined) throw new Error("INVALID_ARGUMENT: port-route selects its Next route with --route");
+  if (operation !== "port-route" && [flags.route, flags["start-routes"], flags.config].some(value => value !== undefined)) throw new Error("INVALID_ARGUMENT: --route, --start-routes and --config require port-route");
   const plan = await api.plan({
-    project: required(flags, "project"), file: moves ? undefined : operation === "retarget-import" ? flags.file : required(flags, "file"), moves, operation: operation as Operation,
+    project: required(flags, "project"), file: moves ? undefined : operation === "retarget-import" ? flags.file : operation === "port-route" ? required(flags, "route") : required(flags, "file"), moves, operation: operation as Operation,
+    startRoutes: flags["start-routes"], config: flags.config,
     exclude: flags.exclude?.split("\n"),
     keep: flags.keep === "true" ? true : undefined,
     root: flags.root, at: flags.at, end: flags.end, name: flags.name,

@@ -45,8 +45,14 @@ test("generated state ignore preserves equivalents and upgrades only the legacy 
     execFileSync("git", ["init", "-q"], { cwd: root });
     await writeFile(join(root, "equivalents.json"), '{}');
     await writeFile(join(root, "plan.json"), '{}');
+    await writeFile(join(root, "port-route.json"), '{}');
+    await mkdir(join(root, "port-route"));
+    await writeFile(join(root, "port-route", "start-route.tsx.tpl"), "");
     const listed = execFileSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8" }).trim().split("\n").sort();
-    expect(listed).toEqual([".gitignore", "equivalents.json"]);
+    expect(listed).toEqual([".gitignore", "equivalents.json", "port-route.json", "port-route/start-route.tsx.tpl"]);
+    await writeFile(join(root, ".gitignore"), "*\n!equivalents.json\n!.gitignore\n");
+    await ignoreStateDirectory(root);
+    expect(await readFile(join(root, ".gitignore"), "utf8")).toBe(stateIgnoreText);
     await writeFile(join(root, ".gitignore"), "*\n");
     await ignoreStateDirectory(root);
     expect(await readFile(join(root, ".gitignore"), "utf8")).toContain("!equivalents.json");

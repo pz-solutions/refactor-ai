@@ -456,7 +456,7 @@ function changedFiles(state: ProjectState, originals: Map<string, string | undef
 
 export async function analyze(request: RefactorRequest): Promise<BackendResult> {
   if (request.checker !== undefined && !["ts5", "ts7", "both"].includes(request.checker)) fail("INVALID_REQUEST", "checker must be ts5, ts7 or both");
-  if (request.operation === "rename-file" || request.operation === "move-type" || request.operation === "move-file" || request.operation === "inline-reexports") return analyzeFileOperation(request);
+  if (request.operation === "rename-file" || request.operation === "move-type" || request.operation === "move-file" || request.operation === "inline-reexports" || request.operation === "port-route") return analyzeFileOperation(request);
   if (request.operation === "sync-namespace") {
     fail("UNSUPPORTED_OPERATION", "sync-namespace is C# only; ES modules have no namespace-to-directory convention");
   }

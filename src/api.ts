@@ -42,6 +42,10 @@ export interface PlanOptions {
   targetProject?: string;
   typeName?: string;
   rootNamespace?: string;
+  /** port-route: TanStack Start routes directory (defaults to the config's start.routes). */
+  startRoutes?: string;
+  /** port-route: project configuration (defaults to <root>/.refactor-ai/port-route.json). */
+  config?: string;
 }
 
 export interface ValidationResult {
@@ -107,20 +111,24 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         if (options.checker !== undefined && (!["ts5", "ts7", "both"].includes(options.checker) || languageForProject(options.project) !== "typescript")) throw new Error("INVALID_ARGUMENT: checker ts5|ts7|both requires TypeScript/JavaScript");
         if (options.targetProject) assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode)) throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
-        if (["move-type", "move-file"].includes(operation) && !options.target && !options.moves?.length) throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
-        if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file"].includes(operation)) {
-          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type or move-file");
+        if (["move-type", "move-file", "port-route"].includes(operation) && !options.target && !options.moves?.length) throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
+        if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file", "port-route"].includes(operation)) {
+          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type, move-file or port-route");
         }
+        if (operation === "port-route" && (!options.targetProject || options.moves || options.only || options.mocks !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: port-route requires --route, --to and --target-project; moves, only and mocks are unsupported");
+        }
+        if ((options.startRoutes !== undefined || options.config !== undefined) && operation !== "port-route") throw new Error("INVALID_ARGUMENT: startRoutes and config require port-route");
         if (options.keep !== undefined && (operation !== "inline-reexports" || typeof options.keep !== "boolean")) throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
         if (operation === "retarget-import" && (!options.from || !options.to)) throw new Error("INVALID_ARGUMENT: from and to required for retarget-import");
         if (operation !== "retarget-import" && [options.from, options.to].some(value => value !== undefined)) {
           throw new Error("INVALID_ARGUMENT: from and to require retarget-import");
         }
-        if (!["retarget-import", "move-file"].includes(operation) && [options.map, options.only].some(value => value !== undefined)) throw new Error("INVALID_ARGUMENT: map and only require retarget-import or move-file");
+        if (!["retarget-import", "move-file", "port-route"].includes(operation) && [options.map, options.only].some(value => value !== undefined)) throw new Error("INVALID_ARGUMENT: map and only require retarget-import, move-file or port-route");
         if (operation === "move-file" && languageForProject(options.project) !== "typescript" && (options.map || options.only)) throw new Error("INVALID_ARGUMENT: move-file mappings require TypeScript/JavaScript");
         if (options.mocks !== undefined && (!["retarget-import", "move-file"].includes(operation) || languageForProject(options.project) !== "typescript")) throw new Error("INVALID_ARGUMENT: mocks requires TypeScript retarget-import or move-file");
         if (options.mocks !== undefined && !["report", "add"].includes(options.mocks)) throw new Error("INVALID_ARGUMENT: mocks report|add");
-        if (options.exclude !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || options.only
+        if (options.exclude !== undefined && (!["move-file", "port-route"].includes(operation) || languageForProject(options.project) !== "typescript" || options.only
           || !Array.isArray(options.exclude) || options.exclude.some(pattern => typeof pattern !== "string" || !pattern || pattern.startsWith("!") || /^(?:[A-Za-z]:|[\\/])/.test(pattern) || pattern.split(/[\\/]/).includes("..")))) {
           throw new Error("INVALID_ARGUMENT: exclude requires relative move-file directory globs without --only");
         }
@@ -146,6 +154,9 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
           ...(options.checker !== undefined ? { checker: options.checker } : {}),
           ...(options.keep !== undefined ? { keep: options.keep } : {}),
           ...(operation === "move-file" ? { ...(options.mocks ? { mocks: options.mocks } : {}), ...(options.map ? { map: options.map } : {}), ...(options.only ? { only: options.only } : {}) } : {}),
+          ...(operation === "port-route" ? { ...(options.map ? { map: options.map } : {}),
+            ...(options.startRoutes !== undefined ? { startRoutes: resolve(options.startRoutes) } : {}),
+            config: resolve(options.config ?? resolve(root, ".refactor-ai/port-route.json")) } : {}),
           ...(operation === "retarget-import" ? { from: options.from, to: options.to,
             ...(options.map ? { map: options.map } : {}), ...(options.only ? { only: options.only } : {}),
             ...(options.mocks !== undefined ? { mocks: options.mocks } : {}),

@@ -20,4 +20,6 @@ Root `.refactor-ai/equivalents.json` supplies default module maps only for alter
 
 New TS plans record compiler reads, including configs, dependencies and negative resolution probes. Unrelated files outside that read set can change; changes to read inputs or edited paths require replanning. Empty plans apply successfully despite other changes. Legacy plans and backends without read tracking retain whole-root freshness.
 
+For a whole Next App Router route ported to TanStack Start, prefer `plan port-route` (skill refactor-port-route): it batches this move with the generated Next adapter and Start route in one plan.
+
 In a monorepo set `--root` to the workspace root. After `apply`, run the project's own formatter and linter on the changed files; the engine formats with the TypeScript formatter.

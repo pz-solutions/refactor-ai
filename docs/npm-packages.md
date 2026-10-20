@@ -17,6 +17,7 @@ The npm distribution complements self-contained agent skills. It uses the same T
 | `@refactor-ai/ts-retarget-import` | `refactor-ts-retarget-import` | `plan` |
 | `@refactor-ai/ts-move-type` | `refactor-ts-move-type` | `plan` |
 | `@refactor-ai/ts-inline-reexports` | `refactor-ts-inline-reexports` | `plan` |
+| `@refactor-ai/ts-port-route` | `refactor-ts-port-route` | `plan` |
 | `@refactor-ai/csharp-rename` | `refactor-csharp-rename` | `plan` |
 | `@refactor-ai/csharp-imports` | `refactor-csharp-imports` | `plan` |
 | `@refactor-ai/csharp-format` | `refactor-csharp-format` | `plan` |

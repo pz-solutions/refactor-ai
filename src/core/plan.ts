@@ -1,6 +1,6 @@
 import { assertReadSetFresh, assertReadSetShape, type ReadSetEntry } from "./read-set";
 import { lstat, readFile, realpath } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createTwoFilesPatch } from "diff";
 import type { BackendResult, CheckerIdentity, Diagnostic, FileChange, RefactorRequest } from "../types.ts";
 import { assertRegularPath, canonicalMissing, inside, sha256, snapshot, snapshotChanges, type Snapshot } from "./snapshot.ts";
@@ -146,7 +146,7 @@ export function assertPlanShape(plan: Plan): void {
 async function canonicalRequest(request: RefactorRequest): Promise<RefactorRequest> {
   const root = await realpath(request.root);
   const result: RefactorRequest = { ...request, root, project: await realpath(request.project), file: await realpath(request.file) };
-  if (request.operation === "move-file") {
+  if (request.operation === "move-file" || request.operation === "port-route") {
     if (request.only) result.only = [...request.only].sort();
     if (request.exclude) result.exclude = [...new Set(request.exclude)].sort();
     if (request.map) result.map = Object.fromEntries(Object.entries(request.map).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
@@ -166,7 +166,22 @@ async function canonicalRequest(request: RefactorRequest): Promise<RefactorReque
     result.target = result.moves[0]!.target;
   }
   await assertRegularPath(root, result.project);
-  const directory = (request.operation === "move-file" && (await lstat(result.file)).isDirectory()) || request.operation === "retarget-import";
+  const directory = (request.operation === "move-file" && (await lstat(result.file)).isDirectory()) || request.operation === "retarget-import" || request.operation === "port-route";
+  if (request.operation === "port-route") {
+    if (!(await lstat(result.file)).isDirectory()) throw new Error(`INVALID_REQUEST: port-route requires a Next route directory: ${result.file}`);
+    if (request.config === undefined) throw new Error("INVALID_REQUEST: port-route requires a configuration path");
+    result.config = await realpath(request.config).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`PORT_ROUTE_CONFIG_NOT_FOUND: ${request.config}; copy examples/port-route/uber-platform/port-route.json to <root>/.refactor-ai/ and adapt it, or pass --config`);
+      throw error;
+    });
+    // The state directory holds project configuration; plan outputs stay excluded elsewhere.
+    const configRelative = relative(root, result.config);
+    if (!configRelative || configRelative.startsWith("..") || isAbsolute(configRelative) || !(await lstat(result.config)).isFile()) throw new Error(`INVALID_REQUEST: port-route configuration must be a file inside ${root}: ${result.config}`);
+    if (request.startRoutes !== undefined) {
+      result.startRoutes = await realpath(request.startRoutes);
+      await assertRegularPath(root, result.startRoutes, false, true);
+    }
+  }
   await assertRegularPath(root, result.file, false, directory);
   if (request.targetProject !== undefined) {
     result.targetProject = await realpath(request.targetProject);
@@ -225,8 +240,15 @@ export async function createPlan(
   }
   changes.sort(byPath);
   const fileModes: NonNullable<Plan["fileModes"]> = {};
-  const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat(request.file)).mode & 0o777 : 0o600;
+  const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat(request.file)).mode & 0o777
+    // Generated route files inherit the Next page's permissions.
+    : request.operation === "port-route" ? ((await lstat(resolve(request.file, "page.tsx")).catch(() => undefined))?.mode ?? 0o644) & 0o777 : 0o600;
   const creationMode = async (path: string): Promise<number> => {
+    if (request.operation === "port-route" && request.target && (path === request.target || path.startsWith(request.target + sep))) {
+      const source = resolve(request.file, relative(request.target, path));
+      return changes.some(change => change.path === source && change.after === null) ? (await lstat(source)).mode & 0o777 : createdMode;
+    }
+    if (request.operation === "port-route") return createdMode;
     if (request.operation !== "move-file" || !request.target) return createdMode;
     const pair = request.moves?.find(move => path === move.target || path.startsWith(move.target + sep));
     const moveFile = pair?.file ?? request.file, moveTarget = pair?.target ?? request.target;

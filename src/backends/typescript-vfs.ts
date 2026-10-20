@@ -139,6 +139,8 @@ export class VirtualFs {
   private readonly diskDirectoryExists = new Map<string, boolean>();
   private readonly overlays = new Map<string, Overlay>();
   private readonly generated = new Map<string, { path: string; text: string }>();
+  /** Planned-state inputs that are validated but never written (ignored generator outputs). */
+  private readonly ephemeral = new Map<string, { path: string; text: string }>();
   private readonly versions = new Map<string, number>();
   private readonly keys = new Map<string, string>();
   private virtualDirectoryVersion = -1;
@@ -237,6 +239,8 @@ export class VirtualFs {
     const generated = this.generated.get(key);
     if (generated) return generated.text;
     if (this.isHidden(path)) return undefined;
+    const ephemeral = this.suspended ? undefined : this.ephemeral.get(key);
+    if (ephemeral) return ephemeral.text;
     const overlay = this.suspended ? undefined : this.overlays.get(key);
     if (overlay) return overlay.text ?? undefined;
     const text = this.rawDisk(path);
@@ -257,6 +261,18 @@ export class VirtualFs {
     this.overlays.set(key, { path: existing?.path ?? resolve(path), text: text?.startsWith(BOM) ? text.slice(1) : text, bom });
     this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.version += 1;
+  }
+
+  /** Validation-only content, e.g. a regenerated ignored route tree; excluded from changes(). */
+  writeEphemeral(path: string, text: string): void {
+    const key = this.key(path);
+    this.ephemeral.set(key, { path: resolve(path), text: text.startsWith(BOM) ? text.slice(1) : text });
+    this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
+    this.version += 1;
+  }
+
+  ephemeralPaths(): string[] {
+    return [...this.ephemeral.values()].map(item => item.path).sort();
   }
 
   clearGenerated(): void {
@@ -307,6 +323,7 @@ export class VirtualFs {
     const paths = [...this.generated.values()].map((item) => item.path);
     if (!this.suspended) {
       for (const overlay of this.overlays.values()) if (overlay.text !== null) paths.push(overlay.path);
+      for (const item of this.ephemeral.values()) paths.push(item.path);
     }
     return paths;
   }
@@ -324,7 +341,7 @@ export class VirtualFs {
         }
       };
       for (const file of this.virtualPaths()) index(file, this.virtualDirectories);
-      if (!this.suspended) for (const overlay of this.overlays.values()) index(overlay.path, this.changedDirectories);
+      if (!this.suspended) for (const item of [...this.overlays.values(), ...this.ephemeral.values()]) index(item.path, this.changedDirectories);
       this.virtualDirectoryVersion = this.version;
     }
     return this.virtualDirectories.has(this.key(path));
@@ -378,7 +395,7 @@ export class VirtualFs {
   realpath(path: string): string {
     path = this.readPath(path);
     const key = this.key(path);
-    if (this.generated.has(key) || (!this.suspended && this.overlays.has(key))) return resolve(path);
+    if (this.generated.has(key) || (!this.suspended && (this.overlays.has(key) || this.ephemeral.has(key)))) return resolve(path);
     try { return this.inputs.sys.realpath?.(path) ?? path; } catch { return path; }
   }
 
@@ -440,7 +457,7 @@ export class VirtualFs {
   nativeFileSystem(): FileSystem {
     const virtual = (path: string) => {
       const canonical = this.readPath(path), key = this.key(canonical);
-      return this.isHidden(canonical) || this.generated.has(key) || (!this.suspended && this.overlays.has(key));
+      return this.isHidden(canonical) || this.generated.has(key) || (!this.suspended && (this.overlays.has(key) || this.ephemeral.has(key)));
     };
     return {
       readFile: path => { this.inputs.sys.readFile(this.readPath(path)); return virtual(path) ? this.readFile(path) ?? null : undefined; },

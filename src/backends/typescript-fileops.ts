@@ -15,8 +15,10 @@ import { anticipatePackageExport, packageSelfImport, packageSpecifier, relativeS
 import { moveSuppressions } from "./typescript-suppressions";
 import { portablePath } from "./typescript-paths";
 import { describeInputPath } from "../core/snapshot";
+import { RouteExtractor, generatePortRoute, portRouteExtractOptions, preparePortRoute, regenerateRouteTree, rewriteView, type PortRoutePrep } from "./typescript-port-route";
 
 export const fileCapabilities: Capability[] = [
+  { operation: "port-route", description: "Port a Next App Router route: move its client view into a feature package and generate the thin Next adapter and TanStack Start route from its preload calls." },
   { operation: "move-file", description: "Move whole TS/JS modules or directories within or between workspace packages, updating imports, exports and project file lists." },
   { operation: "inline-reexports", description: "Inline shim re-exports into workspace callers, deleting unreferenced pure shims unless kept." },
   {
@@ -1088,7 +1090,11 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
   const root = assertAbsolute("root", request.root);
   const file = assertAbsolute("file", request.file);
   if (!isInside(root, file)) fail("OUTSIDE_ROOT", `file is outside ${root}`);
-  const movingFiles = request.operation === "move-file" ? (request.moves ?? [{ file, target: assertAbsolute("target", request.target) }])
+  const inputs = new CompilerInputs(true);
+  const port: PortRoutePrep | undefined = request.operation === "port-route" ? preparePortRoute(request, inputs.sys) : undefined;
+  // port-route moves its client files as an explicit move-file batch.
+  const moveRequest: RefactorRequest = port ? { ...request, operation: "move-file", map: port.map, exclude: undefined, moves: port.moves.map(([from, to]) => ({ file: from, target: to })) } : request;
+  const movingFiles = port ? [...port.moves].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0) : request.operation === "move-file" ? (request.moves ?? [{ file, target: assertAbsolute("target", request.target) }])
     .flatMap(move => movePaths(root, assertAbsolute("file", move.file), assertAbsolute("target", move.target), request.exclude))
     .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0) : undefined;
   if (movingFiles) {
@@ -1099,16 +1105,15 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
   }
   const extension = movingFiles ? extname(file) : sourceExtension(file);
   const sourceConfig = configPathFor(assertAbsolute("project", request.project));
-  const targetConfig = ["move-type", "move-file"].includes(request.operation) && request.targetProject
+  const targetConfig = ["move-type", "move-file", "port-route"].includes(request.operation) && request.targetProject
     ? configPathFor(assertAbsolute("targetProject", request.targetProject))
     : sourceConfig;
   const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
   if (request.operation === "move-type" && request.target && isAbsolute(request.target) && existsSync(request.target)) affected.push(resolve(request.target));
-  const inputs = new CompilerInputs(true);
-  if (!request.only && (movingFiles || sourceConfig !== targetConfig)) precheckMove(root, sourceConfig, targetConfig, movingFiles ?? [], request, inputs.sys);
+  if (!request.only && (movingFiles || sourceConfig !== targetConfig)) precheckMove(root, sourceConfig, targetConfig, movingFiles ?? [], moveRequest, inputs.sys);
   const checkerMode = request.checker === "both" ? "both" : "ts7";
   const nativeChecker = request.checker === "ts7" || request.checker === "both" ? await loadTs7Checker(checkerMode) : undefined;
-  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode, inputs));
+  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode, inputs, port ? [port.startConfig] : []));
   try {
     if (!movingFiles && !ws.vfs.fileExists(file)) fail("FILE_NOT_FOUND", file);
     const selected = movingFiles ? movingFiles.map(([from]) => from).filter(path => /\.[cm]?[jt]sx?$/.test(path)) : [file];
@@ -1127,6 +1132,17 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     let renamed: [string, string] | undefined;
     if (request.operation === "rename-file") renamed = renameFile(context, request).renamed;
     else if (request.operation === "move-type") moveType(context, request);
+    else if (port && movingFiles) {
+      const model = timed("port-route.extract", () => new RouteExtractor(ws, portRouteExtractOptions(port, new Set(movingFiles.map(([from]) => ws.vfs.key(from))), path => ws.vfs.key(path))).extract(port.page));
+      const dataProps = rewriteView(ws, port, model);
+      timed("workspace.move", () => moveFile(context, moveRequest, movingFiles));
+      // Relocation identity is checked before the page renders the generated adapter instead of the view.
+      context.verify?.();
+      context.verify = undefined;
+      const [, start] = generatePortRoute(ws, port, model, dataProps, movingFiles, context.notes);
+      await regenerateRouteTree(ws, port, start!, context.notes);
+      context.notes.push(...model.notes);
+    }
     else if (movingFiles && request.only) timed("workspace.move", () => moveSelected(context, request));
     else if (movingFiles) timed("workspace.move", () => moveFile(context, request, movingFiles));
     else if (request.operation === "inline-reexports") {
@@ -1153,7 +1169,8 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     const introduced = newDiagnostics(comparable, diagnosticsAfter);
     if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ")
       + (movingFiles ? `; affected consumers: ${[...new Set(introduced.map(item => relative(root, item.file)))].join(", ")}; adapt these consumers before moving, or include dependent files in the same --file source=destination batch` : "")
-      + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : ""));
+      + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : "")
+      + (port ? `; port-route generated ${relative(root, port.startFile)} and the Next adapter from ${relative(root, port.config.path)}: fix its templates, snippets or ports for generated-file errors, or prepare the view (props, ports) before porting` : ""));
     context.verify?.();
     for (const [key, layout] of layoutsBefore) {
       const after = ws.layouts.get(key);

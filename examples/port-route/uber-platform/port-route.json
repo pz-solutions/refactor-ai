@@ -1,0 +1,121 @@
+{
+  "next": {
+    "appDirectory": "apps/web/src/app/[locale]",
+    "preloadFunctions": ["preloadAuthenticatedQuery"],
+    "adapterFile": "{{route}}-adapter.tsx"
+  },
+  "start": {
+    "project": "apps/web-start/tsconfig.json",
+    "routes": "apps/web-start/src/routes",
+    "routeTree": {
+      "generator": "@tanstack/router-generator",
+      "configDirectory": "apps/web-start",
+      "file": "apps/web-start/src/routeTree.gen.ts"
+    },
+    "imports": [
+      "import { createFileRoute } from \"@tanstack/react-router\";",
+      "import { HydratedContent } from \"../components/hydrated-content\";"
+    ]
+  },
+  "map": {
+    "@/contexts/organization-context": "@uber-platform/app-features/shell/organization-context",
+    "next-intl": "use-intl"
+  },
+  "translate": {
+    "await params": "params",
+    "await searchParams": "new URLSearchParams(location.searchStr)",
+    "await getServerBusinessNow()": "context.businessNow"
+  },
+  "data": {
+    "hook": { "module": "@uber-platform/app-features/shared/data/use-preloaded-query", "name": "usePreloaded" },
+    "prop": "initial{{Name}}",
+    "type": {
+      "imports": ["import type { FunctionReturnType } from \"convex/server\";"],
+      "value": "FunctionReturnType<typeof {{query}}> | undefined"
+    },
+    "typeArgument": "{{type}} | undefined"
+  },
+  "ports": {
+    "navigation": {
+      "next": {
+        "imports": ["import { useDashboardNavigation } from \"@/adapters/dashboard-navigation\";"],
+        "setup": ["const navigation = useDashboardNavigation();"],
+        "value": "navigation"
+      },
+      "start": {
+        "imports": [
+          "import { useAppNavigation } from \"../adapters/app-navigation\";",
+          "import { Route as DashboardRoute } from \"./dashboard\";"
+        ],
+        "setup": ["const navigation = useAppNavigation(DashboardRoute.useLoaderData().nextOrigin);"],
+        "value": "navigation"
+      }
+    },
+    "search": {
+      "next": {
+        "imports": [
+          "import { usePathname, useSearchParams } from \"next/navigation\";",
+          "import { replaceUrlSearchParams } from \"@uber-platform/app-features/shared/search-params\";"
+        ],
+        "setup": ["const pathname = usePathname();", "const searchParams = useSearchParams();"],
+        "value": "{ value: searchParams.toString(), replace: (value) => replaceUrlSearchParams(pathname, new URLSearchParams(value)) }"
+      },
+      "start": {
+        "imports": [
+          "import { useLocation, useRouter } from \"@tanstack/react-router\";",
+          "import { parseSearch } from \"../adapters/properties-search\";"
+        ],
+        "setup": ["const search = useLocation({ select: (location) => location.searchStr });", "const router = useRouter();"],
+        "value": "{ value: search, replace: (value) => void router.navigate({ to: \"{{path}}\", search: parseSearch(value), replace: true, resetScroll: false }) }"
+      }
+    }
+  },
+  "params": {
+    "next": {
+      "imports": ["import { useParams } from \"next/navigation\";"],
+      "setup": ["const { {{name}} } = useParams<{ {{name}}: string }>();"],
+      "value": "{{name}}"
+    },
+    "start": {
+      "setup": ["const { {{name}} } = Route.useParams();"],
+      "value": "{{name}}"
+    }
+  },
+  "snippets": {
+    "nextHookType": "Awaited<ReturnType<typeof {{hook}}>>",
+    "nextDirectType": {
+      "imports": ["import type { Preloaded } from \"convex/react\";"],
+      "value": "Preloaded<typeof {{query}}>"
+    },
+    "nextData": {
+      "imports": ["import { usePreloaded } from \"@uber-platform/app-features/shared/data\";"],
+      "setup": ["const {{name}} = usePreloaded({{prop}}).data;"],
+      "value": "{{name}}"
+    },
+    "startQuery": {
+      "imports": [
+        "import { convexQuery } from \"@convex-dev/react-query\";",
+        "import type { FunctionArgs } from \"convex/server\";"
+      ],
+      "value": "const {{name}}Query = (args: FunctionArgs<typeof {{query}}>) => ({\n  ...convexQuery({{query}}, args),\n  staleTime: \"static\" as const,\n});"
+    },
+    "startPrefetch": "context.clients.queryClient.query({{name}}Query({{args}}))",
+    "startData": {
+      "imports": ["import { useDashboardQuery } from \"../adapters/dashboard-query\";"],
+      "setup": ["const { data: {{name}} } = useDashboardQuery({{name}}Query({{args}}));"],
+      "value": "{{name}}"
+    },
+    "startLoader": "async ({{loaderArgs}}) => {\n  {{statements}}\n  await Promise.all([\n    {{prefetches}},\n  ]);\n  return { {{returns}} };\n}",
+    "startRecordLoader": {
+      "imports": ["import { preloadDashboardRecord } from \"../lib/dashboard-preload\";"],
+      "value": "({{loaderArgs}}) =>\n  preloadDashboardRecord(async () => {\n    {{statements}}\n    await Promise.all([\n      {{prefetches}},\n    ]);\n    return { {{returns}} };\n  })"
+    },
+    "startSearchDeps": "loaderDeps: ({ search }) => search,",
+    "todo": "(() => { throw new Error({{message}}); })()"
+  },
+  "afterApply": ["bun run ledger:generate", "bun run --cwd apps/web-start routes:generate"],
+  "templates": {
+    "nextAdapter": "port-route/next-adapter.tsx.tpl",
+    "startRoute": "port-route/start-route.tsx.tpl"
+  }
+}

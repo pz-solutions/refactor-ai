@@ -195,12 +195,13 @@ export class Workspace {
   private extendedConfigs: Set<string> | undefined;
 
   /** `affected` are the files whose module shape the operation changes (renamed, moved from or into). */
-  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = [], private readonly nativeChecker?: NativeChecker, private readonly checkerMode: "ts7" | "both" = "both", inputs?: CompilerInputs) {
+  /** `extraConfigs` join the graph as owning participants (e.g. a project receiving generated files). */
+  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = [], private readonly nativeChecker?: NativeChecker, private readonly checkerMode: "ts7" | "both" = "both", inputs?: CompilerInputs, private readonly extraConfigs: string[] = []) {
     this.vfs = new VirtualFs(root, inputs);
     this.registry = ts.createDocumentRegistry(this.vfs.caseSensitive);
     this.sourceConfig = sourceConfig;
     this.targetConfig = targetConfig;
-    for (const config of [sourceConfig, targetConfig]) {
+    for (const config of [sourceConfig, targetConfig, ...extraConfigs]) {
       if (!isInside(root, config)) fail("OUTSIDE_ROOT", `project config is outside ${root}: ${config}`);
     }
     this.discovered = discoverConfigs(root, this.vfs.inputs.sys);
@@ -282,8 +283,9 @@ export class Workspace {
 
   private loadGraph(): void {
     const vfs = this.vfs;
-    const affected = new Set([vfs.key(this.sourceConfig), vfs.key(this.targetConfig)]);
-    const paths = new Map([[vfs.key(this.sourceConfig), this.sourceConfig], [vfs.key(this.targetConfig), this.targetConfig]]);
+    const seeds = [this.sourceConfig, this.targetConfig, ...this.extraConfigs];
+    const affected = new Set(seeds.map(config => vfs.key(config)));
+    const paths = new Map(seeds.map(config => [vfs.key(config), config]));
     for (const config of this.discovered) {
       if (affected.has(vfs.key(config)) || !this.importsAffected(config, this.affected)) continue;
       affected.add(vfs.key(config));
@@ -748,7 +750,7 @@ export class Workspace {
 
   private validationClosure(before: ts.Program, after: ts.Program, oldGraph: Map<string, (string | undefined)[]>, newGraph: Map<string, (string | undefined)[]>): Set<string> | undefined {
     const changes = this.vfs.changes();
-    const changed = new Set(changes.map((change) => this.vfs.key(change.path)));
+    const changed = new Set([...changes.map((change) => change.path), ...this.vfs.ephemeralPaths()].map((path) => this.vfs.key(path)));
     const options = (program: ts.Program) => Object.fromEntries(Object.entries(program.getCompilerOptions()).filter(([key]) => key !== "configFile"));
     if (!sameValue(options(before), options(after))) return undefined;
     const oldRoots = new Set(before.getRootFileNames().map((path) => this.vfs.key(path)));
