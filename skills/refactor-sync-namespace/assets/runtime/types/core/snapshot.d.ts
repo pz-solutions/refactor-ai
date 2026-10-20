@@ -20,5 +20,5 @@ export declare function missingDirectories(root: string, file: string): Promise<
  */
 export declare function snapshot(rootPath: string): Promise<Snapshot>;
 /** Keep plans, journals and locks out of the user's version control without touching their ignore files. */
-export declare const stateIgnoreText = "*\n!equivalents.json\n!.gitignore\n";
+export declare const stateIgnoreText = "*\n!equivalents.json\n!port-route.json\n!port-route/\n!port-route/**\n!.gitignore\n";
 export declare function ignoreStateDirectory(stateDirectory: string): Promise<void>;

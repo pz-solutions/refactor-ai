@@ -4,12 +4,22 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/languages.ts
 var languageOperations = {
-  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import"],
+  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import", "port-route"],
   csharp: ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"]
 };
 
 // src/help.ts
 var operationHelp = {
+  "port-route": {
+    description: "Port a Next App Router route to TanStack Start in one plan: move its client view, generate the Next adapter and the Start route.",
+    support: "TypeScript and JavaScript (Next App Router to TanStack Start, React)",
+    required: "--route <next route directory> --to <feature directory> --target-project <config> [--start-routes <directory>] [--config <port-route.json>] [--map <from=to> ...] [--exclude <glob> ...]",
+    details: "Reads <root>/.refactor-ai/port-route.json (or --config): Next app directory, exclusions, preload functions, Start project/routes, route-tree generator, module maps, expression translations, ports and templates; project APIs are never built in (see examples/port-route/uber-platform). Client files of the route directory move to --to as one move-file batch with the configured maps; page.tsx, layout/loading/error files, **/_hooks/**, *adapter*, files importing server-only modules and nested route directories stay in Next. The page's default export is analyzed on the original program: const x = await hook(args), await Promise.all([...]) destructuring and direct configured preload calls are traced through hook modules to the Convex function reference and arguments. Arguments translate through configured equivalents (e.g. await searchParams), route parameters of the Start route, package imports, moved modules and the page's own const declarations; anything else (Next-only modules, let/try values, page parameters, functions) becomes a typechecking TODO(port-route) placeholder plus a plan note, never a guess. The page must render exactly one component imported from a moved file; each preloaded prop used as `const { data } = usePreloaded(prop)` or `usePreloaded(prop).data` becomes a data prop (data.prop pattern) typed by the hook's type argument or data.type. The generated Next adapter exports the page's view name, keeps the preloaded props and calls the configured data snippet; page.tsx imports the adapter instead of the view. The Start route file is named from the route's segments (dynamic [x] -> $x, groups dropped, .index when nested routes exist) and renders the view with loader prefetches, loader data and configured ports/params. View props that no page attribute, port or parameter provides become TODO placeholders when required. With start.routeTree the project's TanStack router generator regenerates the ignored route tree in a scratch mirror for validation only; regenerate it after apply. All participating projects, including the Start project, are validated; new diagnostics reject the plan with hints. Catch-all, parallel and private segments, spread or children props, memo/forwardRef views and views using a preloaded prop more than once are rejected. Review TODO notes, server-only logic (auth, redirects, notFound, metadata) and route ownership lists; run application tests and E2E.",
+    examples: [
+      "plan port-route --project apps/web/tsconfig.json --target-project packages/app-features/tsconfig.json --root . --route 'apps/web/src/app/[locale]/dashboard/properties/[code]/units' --to packages/app-features/src/properties/units --checker ts7 --out /tmp/units.json",
+      "plan port-route --project apps/web/tsconfig.json --target-project packages/feature/tsconfig.json --root . --route apps/web/src/app/dashboard/reports --to packages/feature/src/reports --start-routes apps/start/src/routes --config .refactor-ai/port-route.json"
+    ]
+  },
   "move-file": {
     description: "Move modules atomically, selected declarations, or a directory with exclusions.",
     support: "TypeScript and JavaScript",
@@ -173,8 +183,11 @@ ${language !== "csharp" ? `  --checker <ts5|ts7|both> TS5 default; ts7 uses inst
   --only <Name,Name>       retarget-import: pre-map export names; move-file: declarations to move.
   --exclude <glob>         Repeatable directory move exclusions, relative to each source directory.
   --mocks <report|add>     Report affected test mocks (default), or add parallel mocks.
-  --target-project <config> Destination project config; move-type or move-file.
-${language !== "typescript" ? `  --root-namespace <name>  C# namespace convention override for sync-namespace
+  --target-project <config> Destination project config; move-type, move-file or port-route.
+${language !== "csharp" ? `  --route <directory>      port-route: Next App Router route directory (instead of --file).
+  --start-routes <dir>     port-route: TanStack Start routes directory override.
+  --config <json>          port-route: configuration, default <root>/.refactor-ai/port-route.json.
+` : ""}${language !== "typescript" ? `  --root-namespace <name>  C# namespace convention override for sync-namespace
                            or move-type.
 ` : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
                            Within root, store plans only in .refactor-ai;
@@ -317,7 +330,7 @@ ${runtimeRequirements}`;
   if (operation) {
     return `${title}
 Usage:
-  ${invocation} plan ${operation} --project <config> ${operation === "retarget-import" ? "[--file <file|directory>]" : "--file <source>"} [operation options]
+  ${invocation} plan ${operation} --project <config> ${operation === "retarget-import" ? "[--file <file|directory>]" : operation === "port-route" ? "--route <directory>" : "--file <source>"} [operation options]
 
 ${operationText(operation, invocation, language)}
 Options and defaults:

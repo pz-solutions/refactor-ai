@@ -645,8 +645,7 @@ async function ignoreStateDirectory(stateDirectory) {
   if (stat?.isSymbolicLink())
     throw new Error("SYMLINK_UNSUPPORTED: state .gitignore");
   if (stat?.isFile()) {
-    if (await readFile(path, "utf8") === `*
-`)
+    if (legacyIgnoreTexts.includes(await readFile(path, "utf8")))
       await writeFile(path, stateIgnoreText);
     return;
   }
@@ -659,16 +658,24 @@ async function ignoreStateDirectory(stateDirectory) {
 }
 var excluded, run, stateIgnoreText = `*
 !equivalents.json
+!port-route.json
+!port-route/
+!port-route/**
 !.gitignore
-`;
+`, legacyIgnoreTexts;
 var init_snapshot = __esm(() => {
   excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
   run = promisify(execFile);
+  legacyIgnoreTexts = [`*
+`, `*
+!equivalents.json
+!.gitignore
+`];
 });
 
 // src/core/plan.ts
 import { lstat as lstat2, readFile as readFile2, realpath as realpath2 } from "node:fs/promises";
-import { relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
+import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
 function newDiagnostics(before, after) {
   const key = (d) => JSON.stringify([d.file, d.code, d.message]);
   const counts = new Map;
@@ -774,7 +781,7 @@ function assertPlanShape(plan) {
 async function canonicalRequest(request) {
   const root = await realpath2(request.root);
   const result = { ...request, root, project: await realpath2(request.project), file: await realpath2(request.file) };
-  if (request.operation === "move-file") {
+  if (request.operation === "move-file" || request.operation === "port-route") {
     if (request.only)
       result.only = [...request.only].sort();
     if (request.exclude)
@@ -798,7 +805,25 @@ async function canonicalRequest(request) {
     result.target = result.moves[0].target;
   }
   await assertRegularPath(root, result.project);
-  const directory = request.operation === "move-file" && (await lstat2(result.file)).isDirectory() || request.operation === "retarget-import";
+  const directory = request.operation === "move-file" && (await lstat2(result.file)).isDirectory() || request.operation === "retarget-import" || request.operation === "port-route";
+  if (request.operation === "port-route") {
+    if (!(await lstat2(result.file)).isDirectory())
+      throw new Error(`INVALID_REQUEST: port-route requires a Next route directory: ${result.file}`);
+    if (request.config === undefined)
+      throw new Error("INVALID_REQUEST: port-route requires a configuration path");
+    result.config = await realpath2(request.config).catch((error) => {
+      if (error.code === "ENOENT")
+        throw new Error(`PORT_ROUTE_CONFIG_NOT_FOUND: ${request.config}; copy examples/port-route/uber-platform/port-route.json to <root>/.refactor-ai/ and adapt it, or pass --config`);
+      throw error;
+    });
+    const configRelative = relative2(root, result.config);
+    if (!configRelative || configRelative.startsWith("..") || isAbsolute2(configRelative) || !(await lstat2(result.config)).isFile())
+      throw new Error(`INVALID_REQUEST: port-route configuration must be a file inside ${root}: ${result.config}`);
+    if (request.startRoutes !== undefined) {
+      result.startRoutes = await realpath2(request.startRoutes);
+      await assertRegularPath(root, result.startRoutes, false, true);
+    }
+  }
   await assertRegularPath(root, result.file, false, directory);
   if (request.targetProject !== undefined) {
     result.targetProject = await realpath2(request.targetProject);
@@ -857,8 +882,16 @@ async function createPlan(request, analyze, compilerBase) {
   }
   changes.sort(byPath);
   const fileModes = {};
-  const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat2(request.file)).mode & 511 : 384;
+  const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat2(request.file)).mode & 511 : request.operation === "port-route" ? ((await lstat2(resolve2(request.file, "page.tsx")).catch(() => {
+    return;
+  }))?.mode ?? 420) & 511 : 384;
   const creationMode = async (path) => {
+    if (request.operation === "port-route" && request.target && (path === request.target || path.startsWith(request.target + sep2))) {
+      const source = resolve2(request.file, relative2(request.target, path));
+      return changes.some((change) => change.path === source && change.after === null) ? (await lstat2(source)).mode & 511 : createdMode;
+    }
+    if (request.operation === "port-route")
+      return createdMode;
     if (request.operation !== "move-file" || !request.target)
       return createdMode;
     const pair = request.moves?.find((move) => path === move.target || path.startsWith(move.target + sep2));
@@ -1162,7 +1195,7 @@ function languageForProject(project) {
 var languageOperations;
 var init_languages = __esm(() => {
   languageOperations = {
-    typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import"],
+    typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import", "port-route"],
     csharp: ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"]
   };
 });
@@ -1213,11 +1246,16 @@ function createRefactorApi(context) {
           assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
           throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
-        if (["move-type", "move-file"].includes(operation) && !options.target && !options.moves?.length)
+        if (["move-type", "move-file", "port-route"].includes(operation) && !options.target && !options.moves?.length)
           throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
-        if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file"].includes(operation)) {
-          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type or move-file");
+        if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file", "port-route"].includes(operation)) {
+          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type, move-file or port-route");
         }
+        if (operation === "port-route" && (!options.targetProject || options.moves || options.only || options.mocks !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: port-route requires --route, --to and --target-project; moves, only and mocks are unsupported");
+        }
+        if ((options.startRoutes !== undefined || options.config !== undefined) && operation !== "port-route")
+          throw new Error("INVALID_ARGUMENT: startRoutes and config require port-route");
         if (options.keep !== undefined && (operation !== "inline-reexports" || typeof options.keep !== "boolean"))
           throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
         if (operation === "retarget-import" && (!options.from || !options.to))
@@ -1225,15 +1263,15 @@ function createRefactorApi(context) {
         if (operation !== "retarget-import" && [options.from, options.to].some((value) => value !== undefined)) {
           throw new Error("INVALID_ARGUMENT: from and to require retarget-import");
         }
-        if (!["retarget-import", "move-file"].includes(operation) && [options.map, options.only].some((value) => value !== undefined))
-          throw new Error("INVALID_ARGUMENT: map and only require retarget-import or move-file");
+        if (!["retarget-import", "move-file", "port-route"].includes(operation) && [options.map, options.only].some((value) => value !== undefined))
+          throw new Error("INVALID_ARGUMENT: map and only require retarget-import, move-file or port-route");
         if (operation === "move-file" && languageForProject(options.project) !== "typescript" && (options.map || options.only))
           throw new Error("INVALID_ARGUMENT: move-file mappings require TypeScript/JavaScript");
         if (options.mocks !== undefined && (!["retarget-import", "move-file"].includes(operation) || languageForProject(options.project) !== "typescript"))
           throw new Error("INVALID_ARGUMENT: mocks requires TypeScript retarget-import or move-file");
         if (options.mocks !== undefined && !["report", "add"].includes(options.mocks))
           throw new Error("INVALID_ARGUMENT: mocks report|add");
-        if (options.exclude !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || options.only || !Array.isArray(options.exclude) || options.exclude.some((pattern) => typeof pattern !== "string" || !pattern || pattern.startsWith("!") || /^(?:[A-Za-z]:|[\\/])/.test(pattern) || pattern.split(/[\\/]/).includes("..")))) {
+        if (options.exclude !== undefined && (!["move-file", "port-route"].includes(operation) || languageForProject(options.project) !== "typescript" || options.only || !Array.isArray(options.exclude) || options.exclude.some((pattern) => typeof pattern !== "string" || !pattern || pattern.startsWith("!") || /^(?:[A-Za-z]:|[\\/])/.test(pattern) || pattern.split(/[\\/]/).includes("..")))) {
           throw new Error("INVALID_ARGUMENT: exclude requires relative move-file directory globs without --only");
         }
         if (options.moves !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || !Array.isArray(options.moves) || !options.moves.length || options.file !== undefined || options.target !== undefined || options.moves.some((move) => !move || typeof move.file !== "string" || !move.file || typeof move.target !== "string" || !move.target))) {
@@ -1262,6 +1300,11 @@ function createRefactorApi(context) {
           ...options.checker !== undefined ? { checker: options.checker } : {},
           ...options.keep !== undefined ? { keep: options.keep } : {},
           ...operation === "move-file" ? { ...options.mocks ? { mocks: options.mocks } : {}, ...options.map ? { map: options.map } : {}, ...options.only ? { only: options.only } : {} } : {},
+          ...operation === "port-route" ? {
+            ...options.map ? { map: options.map } : {},
+            ...options.startRoutes !== undefined ? { startRoutes: resolve4(options.startRoutes) } : {},
+            config: resolve4(options.config ?? resolve4(root, ".refactor-ai/port-route.json"))
+          } : {},
           ...operation === "retarget-import" ? {
             from: options.from,
             to: options.to,
@@ -1348,8 +1391,11 @@ ${language !== "csharp" ? `  --checker <ts5|ts7|both> TS5 default; ts7 uses inst
   --only <Name,Name>       retarget-import: pre-map export names; move-file: declarations to move.
   --exclude <glob>         Repeatable directory move exclusions, relative to each source directory.
   --mocks <report|add>     Report affected test mocks (default), or add parallel mocks.
-  --target-project <config> Destination project config; move-type or move-file.
-${language !== "typescript" ? `  --root-namespace <name>  C# namespace convention override for sync-namespace
+  --target-project <config> Destination project config; move-type, move-file or port-route.
+${language !== "csharp" ? `  --route <directory>      port-route: Next App Router route directory (instead of --file).
+  --start-routes <dir>     port-route: TanStack Start routes directory override.
+  --config <json>          port-route: configuration, default <root>/.refactor-ai/port-route.json.
+` : ""}${language !== "typescript" ? `  --root-namespace <name>  C# namespace convention override for sync-namespace
                            or move-type.
 ` : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
                            Within root, store plans only in .refactor-ai;
@@ -1481,7 +1527,7 @@ ${runtimeRequirements}`;
   if (operation) {
     return `${title}
 Usage:
-  ${invocation} plan ${operation} --project <config> ${operation === "retarget-import" ? "[--file <file|directory>]" : "--file <source>"} [operation options]
+  ${invocation} plan ${operation} --project <config> ${operation === "retarget-import" ? "[--file <file|directory>]" : operation === "port-route" ? "--route <directory>" : "--file <source>"} [operation options]
 
 ${operationText(operation, invocation, language)}
 Options and defaults:
@@ -1529,6 +1575,16 @@ var operationHelp, languageDetails, requirements = `Requirements:
 var init_help = __esm(() => {
   init_languages();
   operationHelp = {
+    "port-route": {
+      description: "Port a Next App Router route to TanStack Start in one plan: move its client view, generate the Next adapter and the Start route.",
+      support: "TypeScript and JavaScript (Next App Router to TanStack Start, React)",
+      required: "--route <next route directory> --to <feature directory> --target-project <config> [--start-routes <directory>] [--config <port-route.json>] [--map <from=to> ...] [--exclude <glob> ...]",
+      details: "Reads <root>/.refactor-ai/port-route.json (or --config): Next app directory, exclusions, preload functions, Start project/routes, route-tree generator, module maps, expression translations, ports and templates; project APIs are never built in (see examples/port-route/uber-platform). Client files of the route directory move to --to as one move-file batch with the configured maps; page.tsx, layout/loading/error files, **/_hooks/**, *adapter*, files importing server-only modules and nested route directories stay in Next. The page's default export is analyzed on the original program: const x = await hook(args), await Promise.all([...]) destructuring and direct configured preload calls are traced through hook modules to the Convex function reference and arguments. Arguments translate through configured equivalents (e.g. await searchParams), route parameters of the Start route, package imports, moved modules and the page's own const declarations; anything else (Next-only modules, let/try values, page parameters, functions) becomes a typechecking TODO(port-route) placeholder plus a plan note, never a guess. The page must render exactly one component imported from a moved file; each preloaded prop used as `const { data } = usePreloaded(prop)` or `usePreloaded(prop).data` becomes a data prop (data.prop pattern) typed by the hook's type argument or data.type. The generated Next adapter exports the page's view name, keeps the preloaded props and calls the configured data snippet; page.tsx imports the adapter instead of the view. The Start route file is named from the route's segments (dynamic [x] -> $x, groups dropped, .index when nested routes exist) and renders the view with loader prefetches, loader data and configured ports/params. View props that no page attribute, port or parameter provides become TODO placeholders when required. With start.routeTree the project's TanStack router generator regenerates the ignored route tree in a scratch mirror for validation only; regenerate it after apply. All participating projects, including the Start project, are validated; new diagnostics reject the plan with hints. Catch-all, parallel and private segments, spread or children props, memo/forwardRef views and views using a preloaded prop more than once are rejected. Review TODO notes, server-only logic (auth, redirects, notFound, metadata) and route ownership lists; run application tests and E2E.",
+      examples: [
+        "plan port-route --project apps/web/tsconfig.json --target-project packages/app-features/tsconfig.json --root . --route 'apps/web/src/app/[locale]/dashboard/properties/[code]/units' --to packages/app-features/src/properties/units --checker ts7 --out /tmp/units.json",
+        "plan port-route --project apps/web/tsconfig.json --target-project packages/feature/tsconfig.json --root . --route apps/web/src/app/dashboard/reports --to packages/feature/src/reports --start-routes apps/start/src/routes --config .refactor-ai/port-route.json"
+      ]
+    },
     "move-file": {
       description: "Move modules atomically, selected declarations, or a directory with exclusions.",
       support: "TypeScript and JavaScript",
@@ -1662,12 +1718,12 @@ var init_help = __esm(() => {
 
 // src/cli-core.ts
 import { lstat as lstat4, mkdir as mkdir2, realpath as realpath4, writeFile as writeFile3 } from "node:fs/promises";
-import { basename as basename2, dirname as dirname4, isAbsolute as isAbsolute2, relative as relative3, resolve as resolve5, sep as sep3 } from "node:path";
+import { basename as basename2, dirname as dirname4, isAbsolute as isAbsolute3, relative as relative3, resolve as resolve5, sep as sep3 } from "node:path";
 function parse(args) {
   const command = args.shift() ?? "help";
   const operation = args[0] && !args[0].startsWith("--") ? args.shift() : undefined;
   const flags = {};
-  const allowed = new Set(["project", "file", "exclude", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker"]);
+  const allowed = new Set(["project", "file", "exclude", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker", "route", "start-routes", "config"]);
   const mappings = [];
   const files = [];
   const excludes = [];
@@ -1779,11 +1835,17 @@ async function runCli(args, context) {
       throw new Error("INVALID_ARGUMENT: use --file source=destination pairs without --to");
     return { file: parts[0], target: parts[1] };
   }) : undefined;
+  if (operation === "port-route" && flags.file !== undefined)
+    throw new Error("INVALID_ARGUMENT: port-route selects its Next route with --route");
+  if (operation !== "port-route" && [flags.route, flags["start-routes"], flags.config].some((value) => value !== undefined))
+    throw new Error("INVALID_ARGUMENT: --route, --start-routes and --config require port-route");
   const plan = await api.plan({
     project: required(flags, "project"),
-    file: moves ? undefined : operation === "retarget-import" ? flags.file : required(flags, "file"),
+    file: moves ? undefined : operation === "retarget-import" ? flags.file : operation === "port-route" ? required(flags, "route") : required(flags, "file"),
     moves,
     operation,
+    startRoutes: flags["start-routes"],
+    config: flags.config,
     exclude: flags.exclude?.split(`
 `),
     keep: flags.keep === "true" ? true : undefined,
@@ -1816,7 +1878,7 @@ async function runCli(args, context) {
   output = resolve5(await canonicalDirectory(dirname4(output)), basename2(output));
   const within = (directory, path) => {
     const difference = relative3(directory, path);
-    return difference !== ".." && !difference.startsWith(`..${sep3}`) && !isAbsolute2(difference);
+    return difference !== ".." && !difference.startsWith(`..${sep3}`) && !isAbsolute3(difference);
   };
   if (within(root, output) && !within(stateDirectory, output)) {
     throw new Error("INVALID_ARGUMENT: store plan outside the project or in <root>/.refactor-ai to keep snapshot fresh");
@@ -1990,13 +2052,13 @@ var init_typescript_diagnostics_cache = __esm(() => {
 
 // src/backends/typescript-paths.ts
 import { existsSync, readFileSync as readFileSync2 } from "node:fs";
-import { dirname as dirname6, isAbsolute as isAbsolute3, join, relative as relative4, sep as sep4 } from "node:path";
+import { dirname as dirname6, isAbsolute as isAbsolute4, join, relative as relative4, sep as sep4 } from "node:path";
 function portablePath(path, separator = sep4) {
   return path.split(separator).join("/");
 }
 function isInside(root, path) {
   const difference = relative4(root, path);
-  return difference !== ".." && !difference.startsWith(`..${sep4}`) && !isAbsolute3(difference);
+  return difference !== ".." && !difference.startsWith(`..${sep4}`) && !isAbsolute4(difference);
 }
 function workspaceRootHint(root, outside) {
   let current = root;
@@ -2127,6 +2189,7 @@ class VirtualFs {
   diskDirectoryExists = new Map;
   overlays = new Map;
   generated = new Map;
+  ephemeral = new Map;
   versions = new Map;
   keys = new Map;
   virtualDirectoryVersion = -1;
@@ -2230,6 +2293,9 @@ class VirtualFs {
       return generated.text;
     if (this.isHidden(path))
       return;
+    const ephemeral = this.suspended ? undefined : this.ephemeral.get(key);
+    if (ephemeral)
+      return ephemeral.text;
     const overlay = this.suspended ? undefined : this.overlays.get(key);
     if (overlay)
       return overlay.text ?? undefined;
@@ -2248,6 +2314,15 @@ class VirtualFs {
     this.overlays.set(key, { path: existing?.path ?? resolve7(path), text: text?.startsWith(BOM) ? text.slice(1) : text, bom });
     this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.version += 1;
+  }
+  writeEphemeral(path, text) {
+    const key = this.key(path);
+    this.ephemeral.set(key, { path: resolve7(path), text: text.startsWith(BOM) ? text.slice(1) : text });
+    this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
+    this.version += 1;
+  }
+  ephemeralPaths() {
+    return [...this.ephemeral.values()].map((item) => item.path).sort();
   }
   clearGenerated() {
     for (const key of this.generated.keys())
@@ -2303,6 +2378,8 @@ class VirtualFs {
       for (const overlay of this.overlays.values())
         if (overlay.text !== null)
           paths.push(overlay.path);
+      for (const item of this.ephemeral.values())
+        paths.push(item.path);
     }
     return paths;
   }
@@ -2323,8 +2400,8 @@ class VirtualFs {
       for (const file of this.virtualPaths())
         index(file, this.virtualDirectories);
       if (!this.suspended)
-        for (const overlay of this.overlays.values())
-          index(overlay.path, this.changedDirectories);
+        for (const item of [...this.overlays.values(), ...this.ephemeral.values()])
+          index(item.path, this.changedDirectories);
       this.virtualDirectoryVersion = this.version;
     }
     return this.virtualDirectories.has(this.key(path));
@@ -2384,7 +2461,7 @@ class VirtualFs {
   realpath(path) {
     path = this.readPath(path);
     const key = this.key(path);
-    if (this.generated.has(key) || !this.suspended && this.overlays.has(key))
+    if (this.generated.has(key) || !this.suspended && (this.overlays.has(key) || this.ephemeral.has(key)))
       return resolve7(path);
     try {
       return this.inputs.sys.realpath?.(path) ?? path;
@@ -2453,7 +2530,7 @@ class VirtualFs {
   nativeFileSystem() {
     const virtual = (path) => {
       const canonical = this.readPath(path), key = this.key(canonical);
-      return this.isHidden(canonical) || this.generated.has(key) || !this.suspended && this.overlays.has(key);
+      return this.isHidden(canonical) || this.generated.has(key) || !this.suspended && (this.overlays.has(key) || this.ephemeral.has(key));
     };
     return {
       readFile: (path) => {
@@ -2790,6 +2867,7 @@ class Workspace {
   affected;
   nativeChecker;
   checkerMode;
+  extraConfigs;
   vfs;
   participants = new Map;
   order = [];
@@ -2810,16 +2888,17 @@ class Workspace {
   resolutionCaches = new WeakMap;
   looseConfigs = new Map;
   extendedConfigs;
-  constructor(root, sourceConfig, targetConfig, affected = [], nativeChecker, checkerMode = "both", inputs) {
+  constructor(root, sourceConfig, targetConfig, affected = [], nativeChecker, checkerMode = "both", inputs, extraConfigs = []) {
     this.root = root;
     this.affected = affected;
     this.nativeChecker = nativeChecker;
     this.checkerMode = checkerMode;
+    this.extraConfigs = extraConfigs;
     this.vfs = new VirtualFs(root, inputs);
     this.registry = ts4.createDocumentRegistry(this.vfs.caseSensitive);
     this.sourceConfig = sourceConfig;
     this.targetConfig = targetConfig;
-    for (const config of [sourceConfig, targetConfig]) {
+    for (const config of [sourceConfig, targetConfig, ...extraConfigs]) {
       if (!isInside(root, config))
         fail("OUTSIDE_ROOT", `project config is outside ${root}: ${config}`);
     }
@@ -2909,8 +2988,9 @@ class Workspace {
   }
   loadGraph() {
     const vfs = this.vfs;
-    const affected = new Set([vfs.key(this.sourceConfig), vfs.key(this.targetConfig)]);
-    const paths = new Map([[vfs.key(this.sourceConfig), this.sourceConfig], [vfs.key(this.targetConfig), this.targetConfig]]);
+    const seeds = [this.sourceConfig, this.targetConfig, ...this.extraConfigs];
+    const affected = new Set(seeds.map((config) => vfs.key(config)));
+    const paths = new Map(seeds.map((config) => [vfs.key(config), config]));
     for (const config of this.discovered) {
       if (affected.has(vfs.key(config)) || !this.importsAffected(config, this.affected))
         continue;
@@ -3365,7 +3445,7 @@ class Workspace {
   }
   validationClosure(before, after, oldGraph, newGraph) {
     const changes = this.vfs.changes();
-    const changed = new Set(changes.map((change) => this.vfs.key(change.path)));
+    const changed = new Set([...changes.map((change) => change.path), ...this.vfs.ephemeralPaths()].map((path) => this.vfs.key(path)));
     const options = (program) => Object.fromEntries(Object.entries(program.getCompilerOptions()).filter(([key]) => key !== "configFile"));
     if (!sameValue(options(before), options(after)))
       return;
@@ -4821,10 +4901,1442 @@ var init_typescript_suppressions = __esm(() => {
   init_typescript_vfs();
 });
 
-// src/backends/typescript-fileops.ts
+// src/backends/typescript-port-route-config.ts
 import ts10 from "typescript";
-import { existsSync as existsSync4, lstatSync as lstatSync2, readFileSync as readFileSync4, readdirSync as readdirSync3 } from "node:fs";
-import { dirname as dirname13, extname as extname4, isAbsolute as isAbsolute4, relative as relative10, resolve as resolve17, sep as sep7 } from "node:path";
+import { dirname as dirname13, isAbsolute as isAbsolute5, resolve as resolve17 } from "node:path";
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function invalid(path, field) {
+  fail("INVALID_PORT_ROUTE_CONFIG", `${path}: ${field}`);
+}
+function strings2(path, field, value, fallback) {
+  if (value === undefined && fallback)
+    return fallback;
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item))
+    invalid(path, `${field} must be an array of non-empty strings`);
+  return value;
+}
+function text(path, field, value, fallback) {
+  if (value === undefined && fallback !== undefined)
+    return fallback;
+  if (typeof value !== "string" || !value)
+    invalid(path, `${field} must be a non-empty string`);
+  return value;
+}
+function stringMap(path, field, value) {
+  if (value === undefined)
+    return {};
+  if (!isRecord(value) || Object.entries(value).some(([key, item]) => !key || typeof item !== "string" || !item))
+    invalid(path, `${field} must map strings to strings`);
+  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+}
+function snippet(path, field, value) {
+  if (typeof value === "string")
+    return { value };
+  if (!isRecord(value))
+    invalid(path, `${field} must be a string or { imports?, setup?, value }`);
+  return {
+    ...value.imports !== undefined ? { imports: strings2(path, `${field}.imports`, value.imports) } : {},
+    ...value.setup !== undefined ? { setup: strings2(path, `${field}.setup`, value.setup) } : {},
+    value: text(path, `${field}.value`, value.value)
+  };
+}
+function pair(path, field, value) {
+  if (!isRecord(value))
+    invalid(path, `${field} must be { next, start }`);
+  return { next: snippet(path, `${field}.next`, value.next), start: snippet(path, `${field}.start`, value.start) };
+}
+function projectPath(root, path, field, value) {
+  if (isAbsolute5(value) || value.split(/[\\/]/).includes(".."))
+    invalid(path, `${field} must be relative to the root without '..'`);
+  const absolute = resolve17(root, value);
+  if (!isInside(root, absolute))
+    invalid(path, `${field} is outside ${root}`);
+  return absolute;
+}
+function loadPortRouteConfig(root, path, sys) {
+  const source = sys.readFile(path);
+  if (source === undefined)
+    fail("PORT_ROUTE_CONFIG_NOT_FOUND", path);
+  let raw;
+  try {
+    raw = JSON.parse(source);
+  } catch {
+    invalid(path, "not valid JSON");
+  }
+  if (!isRecord(raw) || !isRecord(raw.next) || !isRecord(raw.start) || !isRecord(raw.data) || !isRecord(raw.snippets) || !isRecord(raw.templates)) {
+    invalid(path, "next, start, data, snippets and templates objects are required");
+  }
+  const next = raw.next, start = raw.start, data = raw.data, snippets = raw.snippets, templates = raw.templates;
+  if (!isRecord(data.hook))
+    invalid(path, "data.hook must be { module, name }");
+  const routeTree = start.routeTree;
+  if (routeTree !== undefined && !isRecord(routeTree))
+    invalid(path, "start.routeTree must be an object");
+  const ports = raw.ports === undefined ? {} : raw.ports;
+  if (!isRecord(ports))
+    invalid(path, "ports must be an object");
+  const config = {
+    next: {
+      appDirectory: projectPath(root, path, "next.appDirectory", text(path, "next.appDirectory", next.appDirectory)),
+      exclude: strings2(path, "next.exclude", next.exclude, defaults.exclude),
+      serverOnlyModules: strings2(path, "next.serverOnlyModules", next.serverOnlyModules, defaults.serverOnlyModules),
+      preloadFunctions: strings2(path, "next.preloadFunctions", next.preloadFunctions),
+      adapterFile: text(path, "next.adapterFile", next.adapterFile, defaults.adapterFile),
+      imports: strings2(path, "next.imports", next.imports, [])
+    },
+    start: {
+      project: projectPath(root, path, "start.project", text(path, "start.project", start.project)),
+      routes: projectPath(root, path, "start.routes", text(path, "start.routes", start.routes)),
+      ...routeTree ? { routeTree: {
+        generator: text(path, "start.routeTree.generator", routeTree.generator),
+        configDirectory: projectPath(root, path, "start.routeTree.configDirectory", text(path, "start.routeTree.configDirectory", routeTree.configDirectory)),
+        file: projectPath(root, path, "start.routeTree.file", text(path, "start.routeTree.file", routeTree.file))
+      } } : {},
+      loaderArgs: strings2(path, "start.loaderArgs", start.loaderArgs, defaults.loaderArgs),
+      paramsObject: text(path, "start.paramsObject", start.paramsObject, "params"),
+      imports: strings2(path, "start.imports", start.imports, [])
+    },
+    map: stringMap(path, "map", raw.map),
+    translate: stringMap(path, "translate", raw.translate),
+    data: {
+      hook: { module: text(path, "data.hook.module", data.hook.module), name: text(path, "data.hook.name", data.hook.name) },
+      prop: text(path, "data.prop", data.prop),
+      type: snippet(path, "data.type", data.type),
+      typeArgument: text(path, "data.typeArgument", data.typeArgument, "{{type}}")
+    },
+    ports: Object.fromEntries(Object.entries(ports).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([name, value]) => [name, pair(path, `ports.${name}`, value)])),
+    ...raw.params !== undefined ? { params: pair(path, "params", raw.params) } : {},
+    snippets: {
+      nextHookType: snippet(path, "snippets.nextHookType", snippets.nextHookType),
+      nextDirectType: snippet(path, "snippets.nextDirectType", snippets.nextDirectType),
+      nextData: snippet(path, "snippets.nextData", snippets.nextData),
+      startQuery: snippet(path, "snippets.startQuery", snippets.startQuery),
+      startPrefetch: text(path, "snippets.startPrefetch", snippets.startPrefetch),
+      startData: snippet(path, "snippets.startData", snippets.startData),
+      startLoader: snippet(path, "snippets.startLoader", snippets.startLoader),
+      ...snippets.startRecordLoader !== undefined ? { startRecordLoader: snippet(path, "snippets.startRecordLoader", snippets.startRecordLoader) } : {},
+      ...snippets.startSearchDeps !== undefined ? { startSearchDeps: text(path, "snippets.startSearchDeps", snippets.startSearchDeps) } : {},
+      todo: text(path, "snippets.todo", snippets.todo, defaults.todo)
+    },
+    templates: { nextAdapter: text(path, "templates.nextAdapter", templates.nextAdapter), startRoute: text(path, "templates.startRoute", templates.startRoute) },
+    afterApply: strings2(path, "afterApply", raw.afterApply, [])
+  };
+  for (const [key] of Object.entries(config.ports))
+    if (!/^[A-Za-z_$][\w$]*$/.test(key))
+      invalid(path, `ports.${key} must name a prop`);
+  const template = (field, value) => {
+    const file = resolve17(dirname13(path), value);
+    if (!isInside(root, file))
+      invalid(path, `${field} is outside ${root}`);
+    const content = sys.readFile(file);
+    if (content === undefined)
+      fail("PORT_ROUTE_TEMPLATE_NOT_FOUND", `${file} (${field})`);
+    return content;
+  };
+  return { ...config, path, nextAdapterTemplate: template("templates.nextAdapter", config.templates.nextAdapter), startRouteTemplate: template("templates.startRoute", config.templates.startRoute) };
+}
+function render(template, values, origin) {
+  const lines = template.split(`
+`).flatMap((line) => {
+    const alone = /^([ \t]*)\{\{(\w+)\}\}[ \t]*(,?)$/.exec(line);
+    if (alone) {
+      const value = lookup(alone[2]);
+      if (!value)
+        return [];
+      const [first, ...rest] = value.split(`
+`);
+      return [alone[1] + first, ...rest.map((item) => item ? alone[1] + item : item)].map((item, index, all) => index === all.length - 1 ? item + alone[3] : item);
+    }
+    const indent = /^[ \t]*/.exec(line)[0];
+    return [line.replace(/\{\{(\w+)\}\}/g, (_, key) => lookup(key).replace(/\n(?=.)/g, `
+${indent}`))];
+  });
+  return lines.join(`
+`);
+  function lookup(key) {
+    if (!Object.hasOwn(values, key))
+      fail("INVALID_PORT_ROUTE_TEMPLATE", `${origin} uses unknown placeholder {{${key}}}; available: ${Object.keys(values).sort().join(", ")}`);
+    return values[key];
+  }
+}
+
+class ImportSet {
+  entries = new Map;
+  addText(declarations, origin) {
+    for (const declaration of declarations ?? []) {
+      const source = ts10.createSourceFile("import.ts", declaration, ts10.ScriptTarget.Latest, true);
+      if (!source.statements.length || source.statements.some((statement) => !ts10.isImportDeclaration(statement))) {
+        fail("INVALID_PORT_ROUTE_CONFIG", `${origin}: '${declaration}' must contain import declarations only`);
+      }
+      for (const statement of source.statements)
+        this.addDeclaration(statement);
+    }
+  }
+  addDeclaration(statement) {
+    const module = statement.moduleSpecifier.text;
+    const clause = statement.importClause;
+    if (!clause) {
+      this.entry(module).sideEffect = true;
+      return;
+    }
+    if (clause.name)
+      this.addDefault(module, clause.name.text, clause.isTypeOnly);
+    const bindings = clause.namedBindings;
+    if (bindings && ts10.isNamespaceImport(bindings))
+      this.addNamespace(module, bindings.name.text);
+    if (bindings && ts10.isNamedImports(bindings))
+      for (const element of bindings.elements) {
+        this.addNamed(module, (element.propertyName ?? element.name).text, element.name.text, clause.isTypeOnly || element.isTypeOnly);
+      }
+  }
+  addNamed(module, name, local = name, typeOnly = false) {
+    const entry = this.entry(module);
+    const existing = entry.named.get(local);
+    if (existing && existing.name !== name)
+      fail("PORT_ROUTE_IMPORT_CONFLICT", `${local} is imported as both ${existing.name} and ${name} from ${module}`);
+    this.assertLocal(local, module);
+    entry.named.set(local, { name, ...local !== name ? { alias: local } : {}, typeOnly: existing ? existing.typeOnly && typeOnly : typeOnly });
+  }
+  addDefault(module, local, typeOnly = false) {
+    const entry = this.entry(module);
+    if (entry.defaultName && entry.defaultName !== local)
+      fail("PORT_ROUTE_IMPORT_CONFLICT", `default import of ${module} named ${entry.defaultName} and ${local}`);
+    this.assertLocal(local, module);
+    entry.defaultName = local;
+    entry.typeOnly = entry.typeOnly && typeOnly;
+  }
+  addNamespace(module, local) {
+    const entry = this.entry(module);
+    this.assertLocal(local, module);
+    entry.namespace = local;
+  }
+  locals() {
+    const names = new Set;
+    for (const entry of this.entries.values()) {
+      if (entry.defaultName)
+        names.add(entry.defaultName);
+      if (entry.namespace)
+        names.add(entry.namespace);
+      for (const local of entry.named.keys())
+        names.add(local);
+    }
+    return names;
+  }
+  assertLocal(local, module) {
+    for (const [other, entry] of this.entries) {
+      if (other === module)
+        continue;
+      if (entry.defaultName === local || entry.namespace === local || entry.named.has(local)) {
+        fail("PORT_ROUTE_IMPORT_CONFLICT", `${local} would be imported from both ${other} and ${module}; rename one of the configured imports`);
+      }
+    }
+  }
+  entry(module) {
+    let entry = this.entries.get(module);
+    if (!entry) {
+      entry = { module, typeOnly: true, named: new Map, sideEffect: false };
+      this.entries.set(module, entry);
+    }
+    return entry;
+  }
+  print(quote = '"') {
+    const literal = (module) => `${quote}${module.replaceAll("\\", "\\\\").replaceAll(quote, `\\${quote}`)}${quote}`;
+    const lines = [];
+    for (const entry of [...this.entries.values()].sort((a, b) => a.module < b.module ? -1 : a.module > b.module ? 1 : 0)) {
+      const key = (item) => [item.name.toLowerCase(), item.name, item.alias ?? ""].join("\x00");
+      const named = [...entry.named.values()].sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0);
+      const allTypes = !entry.defaultName && !entry.namespace && named.length > 0 && named.every((item) => item.typeOnly);
+      const specifier = (item) => `${item.typeOnly && !allTypes ? "type " : ""}${item.name}${item.alias ? ` as ${item.alias}` : ""}`;
+      if (entry.namespace)
+        lines.push(`import ${entry.defaultName ? `${entry.defaultName}, ` : ""}* as ${entry.namespace} from ${literal(entry.module)};`);
+      const head = entry.namespace ? undefined : entry.defaultName;
+      if (head || named.length) {
+        const parts = [head, named.length ? `{ ${named.map(specifier).join(", ")} }` : undefined].filter(Boolean).join(", ");
+        lines.push(`import ${allTypes ? "type " : ""}${parts} from ${literal(entry.module)};`);
+      }
+      if (entry.sideEffect && !head && !named.length && !entry.namespace)
+        lines.push(`import ${literal(entry.module)};`);
+    }
+    return lines.join(`
+`);
+  }
+}
+function fill(value, values, origin) {
+  return value.replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    if (!Object.hasOwn(values, key))
+      fail("INVALID_PORT_ROUTE_TEMPLATE", `${origin} uses unknown placeholder {{${key}}}; available: ${Object.keys(values).sort().join(", ")}`);
+    return values[key];
+  });
+}
+var defaults;
+var init_typescript_port_route_config = __esm(() => {
+  init_typescript_vfs();
+  defaults = {
+    exclude: ["page.tsx", "page.ts", "layout.tsx", "loading.tsx", "error.tsx", "not-found.tsx", "template.tsx", "default.tsx", "route.ts", "**/_hooks/**", "*adapter*"],
+    serverOnlyModules: ["server-only"],
+    adapterFile: "{{view}}-adapter.tsx",
+    loaderArgs: ["context", "location", "params"],
+    todo: "(() => { throw new Error({{message}}); })()"
+  };
+});
+
+// src/backends/typescript-port-route-extract.ts
+import ts11 from "typescript";
+import { resolve as resolve18 } from "node:path";
+function dedent(text, source, node) {
+  const start = node.getStart(source);
+  const indent = /^[ \t]*/.exec(source.text.slice(source.text.lastIndexOf(`
+`, start - 1) + 1, start))[0];
+  return indent ? text.split(`
+`).map((line, index) => index && line.startsWith(indent) ? line.slice(indent.length) : line).join(`
+`) : text;
+}
+function unwrap(node) {
+  while (ts11.isParenthesizedExpression(node) || ts11.isAsExpression(node) || ts11.isSatisfiesExpression(node) || ts11.isNonNullExpression(node))
+    node = node.expression;
+  return node;
+}
+function wrap(text) {
+  const source = ts11.createSourceFile("expression.ts", `(${text})`, ts11.ScriptTarget.Latest, true);
+  const statement = source.statements[0];
+  const expression = statement && ts11.isExpressionStatement(statement) && ts11.isParenthesizedExpression(statement.expression) ? statement.expression.expression : undefined;
+  if (expression && (ts11.isIdentifier(expression) || ts11.isPropertyAccessExpression(expression) || ts11.isElementAccessExpression(expression) || ts11.isCallExpression(expression) || ts11.isObjectLiteralExpression(expression) || ts11.isArrayLiteralExpression(expression) || ts11.isLiteralExpression(expression) || ts11.isParenthesizedExpression(expression) || expression.kind === ts11.SyntaxKind.TrueKeyword || expression.kind === ts11.SyntaxKind.FalseKeyword || expression.kind === ts11.SyntaxKind.NullKeyword))
+    return text;
+  return `(${text})`;
+}
+
+class RouteExtractor {
+  ws;
+  options;
+  checker;
+  statements = [];
+  emitted = new Map;
+  notes = [];
+  translations;
+  constructor(ws, options) {
+    this.ws = ws;
+    this.options = options;
+    this.checker = ws.program().getTypeChecker();
+    this.translations = new Map(Object.entries(options.translate).map(([from, to]) => [normalize(from), to]));
+  }
+  extract(page) {
+    const source = this.ws.program().getSourceFile(page);
+    if (!source)
+      fail("FILE_NOT_IN_PROJECT", page);
+    const component = this.pageComponent(source);
+    const scope = { source, fn: component, page: true };
+    const preloads = this.preloads(scope);
+    const element = this.viewElement(source, component);
+    const view = this.view(element, preloads, scope);
+    return { page, statements: this.statements, preloads, view, notes: this.notes };
+  }
+  pageComponent(source) {
+    for (const statement of source.statements) {
+      if (ts11.isFunctionDeclaration(statement) && statement.body && ts11.getCombinedModifierFlags(statement) & ts11.ModifierFlags.Default)
+        return statement;
+      if (ts11.isExportAssignment(statement) && !statement.isExportEquals) {
+        const symbol = this.checker.getSymbolAtLocation(unwrap(statement.expression));
+        const declaration = symbol?.declarations?.[0];
+        if (declaration && ts11.isFunctionDeclaration(declaration) && declaration.body)
+          return declaration;
+        const fn = unwrap(statement.expression);
+        if ((ts11.isArrowFunction(fn) || ts11.isFunctionExpression(fn)) && ts11.isBlock(fn.body))
+          return fn;
+      }
+    }
+    fail("PORT_ROUTE_UNSUPPORTED_PAGE", `${source.fileName} must default-export a page function with a block body`);
+  }
+  preloads(scope) {
+    const found = [];
+    const visit = (node) => {
+      if (ts11.isVariableDeclaration(node) && node.initializer) {
+        const init = unwrap(node.initializer);
+        const awaited = ts11.isAwaitExpression(init) ? unwrap(init.expression) : init;
+        if (ts11.isIdentifier(node.name)) {
+          const preload = ts11.isCallExpression(awaited) ? this.preloadCall(awaited, scope) : undefined;
+          if (preload)
+            found.push({ ...preload, variable: node.name.text });
+        } else if (ts11.isArrayBindingPattern(node.name) && ts11.isCallExpression(awaited) && awaited.expression.getText(scope.source) === "Promise.all" && awaited.arguments[0] && ts11.isArrayLiteralExpression(unwrap(awaited.arguments[0]))) {
+          const elements = unwrap(awaited.arguments[0]).elements;
+          node.name.elements.forEach((binding, index) => {
+            const element = elements[index] && unwrap(elements[index]);
+            if (!element || !ts11.isBindingElement(binding) || !ts11.isIdentifier(binding.name) || !ts11.isCallExpression(element))
+              return;
+            const preload = this.preloadCall(element, scope);
+            if (preload)
+              found.push({ ...preload, variable: binding.name.text });
+          });
+        }
+      }
+      if (!ts11.isFunctionLike(node) || node === scope.fn)
+        ts11.forEachChild(node, visit);
+    };
+    visit(scope.fn.body);
+    const names = found.map((item) => item.variable);
+    if (new Set(names).size !== names.length)
+      fail("PORT_ROUTE_UNSUPPORTED_PAGE", `preloaded variables must be unique: ${names.join(", ")}`);
+    return found;
+  }
+  preloadCall(call, scope) {
+    if (!ts11.isIdentifier(call.expression))
+      return;
+    const symbol = this.checker.getSymbolAtLocation(call.expression);
+    if (this.isPreloadFunction(call.expression, symbol))
+      return this.directPreload(call, scope);
+    if (!symbol)
+      return;
+    const target = symbol.flags & ts11.SymbolFlags.Alias ? this.checker.getAliasedSymbol(symbol) : symbol;
+    const declaration = target.declarations?.[0];
+    const fn = declaration && (ts11.isFunctionDeclaration(declaration) ? declaration : ts11.isVariableDeclaration(declaration) && declaration.initializer && (ts11.isArrowFunction(unwrap(declaration.initializer)) || ts11.isFunctionExpression(unwrap(declaration.initializer))) ? unwrap(declaration.initializer) : undefined);
+    if (!fn || !fn.body)
+      return;
+    const hookSource = fn.getSourceFile();
+    if (hookSource.isDeclarationFile || hookSource.fileName.split(/[\\/]/).includes("node_modules"))
+      return;
+    const returned = this.returnedCall(fn);
+    if (!returned || !ts11.isIdentifier(returned.expression) || !this.isPreloadFunction(returned.expression, this.checker.getSymbolAtLocation(returned.expression)))
+      return;
+    if (!returned.arguments[0])
+      fail("PORT_ROUTE_UNSUPPORTED_PAGE", `${returned.expression.text}(...) needs a function reference argument in ${hookSource.fileName}`);
+    const name = ts11.isFunctionDeclaration(fn) && fn.name ? fn.name.text : declaration.name.getText(hookSource);
+    const hookScope = { source: hookSource, fn, args: new Map, page: false };
+    const query = this.attempt(() => this.translate(returned.arguments[0], { ...hookScope, args: undefined }));
+    if ("todo" in query)
+      fail("PORT_ROUTE_UNSUPPORTED_PAGE", `cannot translate the Convex function reference ${returned.arguments[0].getText(hookSource)} in ${hookSource.fileName}: ${query.todo}`);
+    const args = this.attempt(() => {
+      fn.parameters.forEach((parameter, index) => {
+        if (!ts11.isIdentifier(parameter.name) || parameter.dotDotDotToken)
+          throw new Untranslatable(`${name} has a destructured or rest parameter`);
+        const argument = call.arguments[index];
+        const value = argument ? this.translate(argument, scope) : parameter.initializer ? this.translate(parameter.initializer, { ...hookScope, args: undefined }) : { text: "undefined", imports: [] };
+        hookScope.args.set(this.checker.getSymbolAtLocation(parameter.name), value);
+      });
+      if (call.arguments.length > fn.parameters.length)
+        throw new Untranslatable(`${name} receives more arguments than it declares`);
+      return returned.arguments[1] ? this.translate(returned.arguments[1], hookScope) : { text: "{}", imports: [] };
+    });
+    return { query, args, hook: { name, path: resolve18(hookSource.fileName) } };
+  }
+  isPreloadFunction(callee, symbol) {
+    const imported = symbol && this.importBinding(symbol);
+    return this.options.preloadFunctions.includes(imported?.imported ?? callee.text);
+  }
+  directPreload(call, scope) {
+    const callee = call.expression.getText(scope.source);
+    if (!call.arguments[0])
+      fail("PORT_ROUTE_UNSUPPORTED_PAGE", `${callee}(...) needs a function reference argument in ${scope.source.fileName}`);
+    const query = this.attempt(() => this.translate(call.arguments[0], scope));
+    if ("todo" in query)
+      fail("PORT_ROUTE_UNSUPPORTED_PAGE", `cannot translate the Convex function reference ${call.arguments[0].getText(scope.source)}: ${query.todo}`);
+    const argument = call.arguments[1];
+    return { query, args: argument ? this.attempt(() => this.translate(argument, scope)) : { text: "{}", imports: [] } };
+  }
+  returnedCall(fn) {
+    const body = fn.body;
+    let expression;
+    if (!ts11.isBlock(body))
+      expression = body;
+    else {
+      const returns = body.statements.filter(ts11.isReturnStatement);
+      if (returns.length !== 1 || !returns[0].expression)
+        return;
+      expression = returns[0].expression;
+    }
+    let call = unwrap(expression);
+    if (ts11.isAwaitExpression(call))
+      call = unwrap(call.expression);
+    return ts11.isCallExpression(call) ? call : undefined;
+  }
+  attempt(run) {
+    const statements = this.statements.length, emitted = new Map(this.emitted);
+    try {
+      return run();
+    } catch (error) {
+      if (!(error instanceof Untranslatable))
+        throw error;
+      this.statements.length = statements;
+      this.emitted.clear();
+      for (const [key, value] of emitted)
+        this.emitted.set(key, value);
+      return { todo: error.message };
+    }
+  }
+  translate(node, scope) {
+    const imports = [];
+    const text = this.expression(node, scope, imports);
+    return { text, imports };
+  }
+  expression(node, scope, imports) {
+    const source = scope.source;
+    if (scope.page && ts11.isExpression(node)) {
+      const translated = this.translations.get(normalize(node.getText(source)));
+      if (translated !== undefined)
+        return translated;
+    }
+    if (ts11.isIdentifier(node))
+      return this.identifier(node, scope, imports);
+    if (ts11.isShorthandPropertyAssignment(node)) {
+      const symbol = this.checker.getShorthandAssignmentValueSymbol(node);
+      const value = symbol ? this.reference(node.name, symbol, scope, imports) : this.identifier(node.name, scope, imports);
+      return value === node.name.text ? node.name.text : `${node.name.text}: ${value}`;
+    }
+    if (ts11.isFunctionLike(node) || ts11.isClassLike(node) || ts11.isJsxElement(node) || ts11.isJsxSelfClosingElement(node)) {
+      throw new Untranslatable(`${node.getText(source).slice(0, 60)} contains a function, class or JSX value`);
+    }
+    const start = node.getStart(source);
+    let result = "", cursor = start;
+    const children = [];
+    ts11.forEachChild(node, (child) => {
+      children.push(child);
+    });
+    for (const child of children) {
+      if (this.skipChild(node, child))
+        continue;
+      const childStart = child.getStart(source);
+      result += source.text.slice(cursor, childStart) + this.expression(child, scope, imports);
+      cursor = child.end;
+    }
+    return result + source.text.slice(cursor, node.end);
+  }
+  skipChild(parent, child) {
+    if (ts11.isPropertyAccessExpression(parent) && child === parent.name)
+      return true;
+    if (ts11.isPropertyAssignment(parent) && child === parent.name && !ts11.isComputedPropertyName(child))
+      return true;
+    if (ts11.isTypeNode(child))
+      return true;
+    if ((ts11.isMethodDeclaration(parent) || ts11.isGetAccessor(parent) || ts11.isSetAccessor(parent)) && child === parent.name)
+      return true;
+    return false;
+  }
+  identifier(node, scope, imports) {
+    if (node.text === "undefined")
+      return node.text;
+    const symbol = this.checker.getSymbolAtLocation(node);
+    if (!symbol)
+      throw new Untranslatable(`${node.text} has no resolved declaration`);
+    return this.reference(node, symbol, scope, imports);
+  }
+  reference(node, symbol, scope, imports) {
+    const substitution = scope.args?.get(symbol);
+    if (substitution !== undefined) {
+      imports.push(...substitution.imports);
+      return wrap(substitution.text);
+    }
+    const declaration = symbol.declarations?.[0];
+    if (!declaration)
+      throw new Untranslatable(`${node.text} has no declaration`);
+    const file = resolve18(declaration.getSourceFile().fileName);
+    if (declaration.getSourceFile().isDeclarationFile && !this.importBinding(symbol))
+      return node.text;
+    const binding = this.importBinding(symbol);
+    if (binding) {
+      if (binding.target.kind === "file" && !this.options.isMoved(binding.target.path)) {
+        throw new Untranslatable(`${node.text} is imported from ${binding.target.path}, which stays in Next`);
+      }
+      imports.push(binding);
+      return node.text;
+    }
+    if (file !== resolve18(scope.source.fileName))
+      throw new Untranslatable(`${node.text} is declared outside ${scope.source.fileName}`);
+    if (ts11.isParameter(declaration) || ts11.isBindingElement(declaration) && this.parameterOf(declaration)) {
+      throw new Untranslatable(`${node.text} is a ${scope.page ? "page" : "hook"} parameter without a configured translation`);
+    }
+    const variable = ts11.isVariableDeclaration(declaration) ? declaration : ts11.isBindingElement(declaration) ? this.variableOf(declaration) : undefined;
+    if (!variable || !variable.initializer || !(variable.parent.flags & ts11.NodeFlags.Const)) {
+      throw new Untranslatable(`${node.text} is not a const value (${ts11.SyntaxKind[declaration.kind]})`);
+    }
+    const local = scope.page && this.within(variable, scope.fn);
+    if (!local) {
+      if (!ts11.isVariableDeclaration(declaration))
+        throw new Untranslatable(`${node.text}: module-level destructuring is unsupported`);
+      return wrap(this.expression(variable.initializer, { ...scope, page: false, args: scope.args }, imports));
+    }
+    return this.pageBinding(node, symbol, declaration, variable, scope);
+  }
+  pageBinding(node, symbol, declaration, variable, scope) {
+    const existing = this.emitted.get(symbol);
+    if (existing !== undefined)
+      return existing;
+    const imports = [];
+    let name = variable.name, value;
+    if (ts11.isArrayBindingPattern(variable.name)) {
+      let top = declaration;
+      while (top.parent.parent !== variable)
+        top = top.parent.parent;
+      const initializer = unwrap(variable.initializer);
+      const call = ts11.isAwaitExpression(initializer) ? unwrap(initializer.expression) : undefined;
+      const list = call && ts11.isCallExpression(call) && call.expression.getText(scope.source) === "Promise.all" && call.arguments[0] ? unwrap(call.arguments[0]) : undefined;
+      const item = list && ts11.isArrayLiteralExpression(list) ? list.elements[variable.name.elements.indexOf(top)] : undefined;
+      if (!item || ts11.isSpreadElement(item))
+        throw new Untranslatable(`${node.text}: only await Promise.all([...]) array destructuring is supported`);
+      value = this.translations.get(normalize(`await ${item.getText(scope.source)}`)) ?? `await ${this.expression(item, scope, imports)}`;
+      name = top.name;
+    } else
+      value = this.expression(variable.initializer, scope, imports);
+    if (ts11.isIdentifier(name)) {
+      this.statements.push({ text: dedent(`const ${node.text} = ${value};`, scope.source, variable), imports });
+      this.emitted.set(symbol, node.text);
+      return node.text;
+    }
+    return this.destructured(node, name, value, scope, symbol, imports);
+  }
+  destructured(node, pattern, value, scope, symbol, imports) {
+    if (!ts11.isObjectBindingPattern(pattern))
+      throw new Untranslatable(`${node.text}: nested destructuring is unsupported`);
+    const element = pattern.elements.find((item) => ts11.isIdentifier(item.name) && item.name.text === node.text);
+    if (!element || element.dotDotDotToken || element.initializer)
+      throw new Untranslatable(`${node.text}: unsupported destructuring`);
+    const property = element.propertyName ? element.propertyName.getText(scope.source) : node.text;
+    if (value === this.options.paramsObject && !this.options.params.includes(property)) {
+      throw new Untranslatable(`route parameter '${property}' is not a segment of the Start route`);
+    }
+    this.statements.push({ text: `const { ${element.getText(scope.source)} } = ${value};`, imports });
+    this.emitted.set(symbol, node.text);
+    return node.text;
+  }
+  parameterOf(element) {
+    let current = element;
+    while (ts11.isBindingElement(current) || ts11.isObjectBindingPattern(current) || ts11.isArrayBindingPattern(current))
+      current = current.parent;
+    return ts11.isParameter(current) ? current : undefined;
+  }
+  variableOf(element) {
+    let current = element;
+    while (ts11.isBindingElement(current) || ts11.isObjectBindingPattern(current) || ts11.isArrayBindingPattern(current))
+      current = current.parent;
+    return ts11.isVariableDeclaration(current) ? current : undefined;
+  }
+  within(node, container) {
+    for (let current = node;current; current = current.parent)
+      if (current === container)
+        return true;
+    return false;
+  }
+  importBinding(symbol) {
+    const declaration = symbol.declarations?.[0];
+    if (!declaration || !(ts11.isImportSpecifier(declaration) || ts11.isImportClause(declaration) || ts11.isNamespaceImport(declaration)))
+      return;
+    let statement = declaration;
+    while (!ts11.isImportDeclaration(statement))
+      statement = statement.parent;
+    const specifier = statement.moduleSpecifier;
+    const source = statement.getSourceFile();
+    const imported = ts11.isImportSpecifier(declaration) ? (declaration.propertyName ?? declaration.name).text : ts11.isImportClause(declaration) ? "default" : "*";
+    const local = ts11.isImportSpecifier(declaration) ? declaration.name.text : ts11.isImportClause(declaration) ? declaration.name.text : declaration.name.text;
+    const typeOnly = !!statement.importClause?.isTypeOnly || ts11.isImportSpecifier(declaration) && declaration.isTypeOnly;
+    const resolved = this.ws.resolveModule(specifier, source);
+    const path = resolved && resolve18(resolved.resolvedFileName);
+    const workspaceFile = path && !path.split(/[\\/]/).includes("node_modules") && !resolved.isExternalLibraryImport;
+    const owner = this.ws.ownersOf(source.fileName)[0];
+    const options = owner ? this.ws.participant(owner).parsed.options : this.ws.editOptions;
+    const alias = Object.keys(options.paths ?? {}).some((pattern) => {
+      const [prefix, suffix] = pattern.split("*");
+      return pattern.includes("*") ? specifier.text.startsWith(prefix) && specifier.text.endsWith(suffix) : pattern === specifier.text;
+    });
+    const fileTarget = workspaceFile && (specifier.text.startsWith(".") || alias);
+    return { local, imported, typeOnly, target: fileTarget ? { kind: "file", path } : { kind: "package", module: specifier.text } };
+  }
+  viewElement(source, component) {
+    const returns = [];
+    const visit = (node) => {
+      if (ts11.isReturnStatement(node) && node.expression)
+        returns.push(node);
+      if (!ts11.isFunctionLike(node) || node === component)
+        ts11.forEachChild(node, visit);
+    };
+    visit(component.body);
+    const candidates = [];
+    for (const statement of returns) {
+      const walk = (node, wrappers) => {
+        const opening = ts11.isJsxElement(node) ? node.openingElement : ts11.isJsxSelfClosingElement(node) ? node : undefined;
+        if (opening) {
+          const symbol = ts11.isIdentifier(opening.tagName) ? this.checker.getSymbolAtLocation(opening.tagName) : undefined;
+          const binding = symbol && this.importBinding(symbol);
+          if (binding?.target.kind === "file" && this.options.isMoved(binding.target.path)) {
+            candidates.push({ element: opening, full: node, wrappers });
+            return;
+          }
+          if (ts11.isJsxElement(node))
+            for (const child of node.children)
+              walk(child, [...wrappers, opening.tagName.getText(source)]);
+          return;
+        }
+        if (ts11.isJsxFragment(node)) {
+          for (const child of node.children)
+            walk(child, [...wrappers, "<>"]);
+          return;
+        }
+        ts11.forEachChild(node, (child) => walk(child, wrappers));
+      };
+      walk(statement.expression, []);
+    }
+    if (candidates.length !== 1) {
+      fail("PORT_ROUTE_VIEW_NOT_FOUND", `${source.fileName} must render exactly one component imported from a moved module (found ${candidates.length}); move the view into the route directory or split the page`);
+    }
+    const found = candidates[0];
+    if (ts11.isJsxElement(found.full) && found.full.children.some((child) => !ts11.isJsxText(child) || child.getText(source).trim())) {
+      fail("PORT_ROUTE_UNSUPPORTED_PAGE", `${found.element.tagName.getText(source)} receives children; pass them as props before porting`);
+    }
+    return found;
+  }
+  view(found, preloads, scope) {
+    const { element } = found;
+    const source = scope.source;
+    const symbol = this.checker.getSymbolAtLocation(element.tagName);
+    const binding = this.importBinding(symbol);
+    const target = this.checker.getAliasedSymbol(symbol);
+    const declaration = target.valueDeclaration ?? target.declarations?.[0];
+    const component = declaration && (ts11.isFunctionDeclaration(declaration) ? declaration : ts11.isVariableDeclaration(declaration) && declaration.initializer && (ts11.isArrowFunction(unwrap(declaration.initializer)) || ts11.isFunctionExpression(unwrap(declaration.initializer))) ? unwrap(declaration.initializer) : undefined);
+    if (!component || binding.target.kind !== "file" || resolve18(component.getSourceFile().fileName) !== binding.target.path) {
+      fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${element.tagName.getText(source)} must be a function component declared in its module (re-exports and wrappers such as memo/forwardRef are unsupported)`);
+    }
+    const attributes = [];
+    for (const attribute of element.attributes.properties) {
+      if (!ts11.isJsxAttribute(attribute))
+        fail("PORT_ROUTE_UNSUPPORTED_PAGE", `spread attributes on ${element.tagName.getText(source)} are unsupported`);
+      const name = attribute.name.getText(source);
+      const initializer = attribute.initializer;
+      const expression = !initializer ? undefined : ts11.isJsxExpression(initializer) ? initializer.expression : initializer;
+      const preload = expression && ts11.isIdentifier(unwrap(expression)) ? preloads.find((item) => item.variable === unwrap(expression).text) : undefined;
+      if (preload) {
+        attributes.push({ name, kind: "preloaded", preload });
+        continue;
+      }
+      const sourceText = !initializer ? "true" : ts11.isStringLiteral(initializer) ? initializer.getText(source) : expression?.getText(source) ?? "undefined";
+      const start = !expression || ts11.isStringLiteral(expression) ? { text: sourceText, imports: [] } : this.attempt(() => this.translate(expression, scope));
+      attributes.push({ name, kind: "value", source: sourceText, start });
+    }
+    const unused = preloads.filter((item) => !attributes.some((attribute) => attribute.preload === item));
+    for (const item of unused)
+      this.notes.push(`TODO(port-route): ${item.variable} is preloaded but not passed to ${element.tagName.getText(source)}; the Start loader prefetches it without a consumer.`);
+    const parameter = component.parameters[0];
+    const props = parameter ? this.checker.getPropertiesOfType(this.checker.getTypeAtLocation(parameter)).map((property) => ({
+      name: property.name,
+      optional: (property.flags & ts11.SymbolFlags.Optional) !== 0
+    })).sort((a, b) => a.name < b.name ? -1 : 1) : [];
+    for (const wrapper of found.wrappers)
+      this.notes.push(`TODO(port-route): the page wraps ${element.tagName.getText(source)} in <${wrapper}>; the generated adapter and Start route render the view without it.`);
+    return { tag: element.tagName.getText(source), exported: binding.imported, path: binding.target.path, component, attributes, props, wrappers: found.wrappers };
+  }
+}
+var Untranslatable, normalize = (text) => text.replace(/\s+/g, "");
+var init_typescript_port_route_extract = __esm(() => {
+  init_typescript_vfs();
+  Untranslatable = class Untranslatable extends Error {
+  };
+});
+
+// src/backends/typescript-port-route.ts
+import ts12 from "typescript";
+import { createRequire as createRequire3 } from "node:module";
+import { lstatSync as lstatSync2, readdirSync as readdirSync3, readFileSync as readFileSync4 } from "node:fs";
+import { mkdir as mkdir3, mkdtemp, readFile as readFile5, rm as rm2, writeFile as writeFile4 } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename as basename5, dirname as dirname14, extname as extname4, join as join2, relative as relative10, resolve as resolve19 } from "node:path";
+import { pathToFileURL } from "node:url";
+function pascal(value) {
+  return value.split(/[^A-Za-z0-9]+/).filter(Boolean).map((part) => part[0].toUpperCase() + part.slice(1)).join("");
+}
+function camel(value) {
+  const name = pascal(value);
+  return name ? name[0].toLowerCase() + name.slice(1) : name;
+}
+function hasPage(directory) {
+  return pageNames.some((name) => {
+    try {
+      return lstatSync2(join2(directory, name)).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+function preparePortRoute(request, sys) {
+  const root = request.root, routeDir = resolve19(request.file);
+  if (!request.config)
+    fail("INVALID_REQUEST", "port-route requires a configuration");
+  if (!request.target)
+    fail("INVALID_REQUEST", "port-route requires --to");
+  const config = loadPortRouteConfig(root, request.config, sys);
+  const page = pageNames.map((name) => join2(routeDir, name)).find((path) => sys.fileExists(path));
+  if (!page)
+    fail("PORT_ROUTE_PAGE_NOT_FOUND", `${routeDir} has no page.tsx`);
+  const appDirectory = config.next.appDirectory;
+  if (!isInside(appDirectory, routeDir))
+    fail("PORT_ROUTE_OUTSIDE_APP", `${routeDir} is not below next.appDirectory ${appDirectory}`);
+  const segments = [], params = [];
+  for (const part of portablePath(relative10(appDirectory, routeDir)).split("/").filter(Boolean)) {
+    if (/^\(.+\)$/.test(part))
+      continue;
+    if (/^\[\[?\.\.\./.test(part) || part.startsWith("@") || part.startsWith("_"))
+      fail("PORT_ROUTE_UNSUPPORTED_SEGMENT", `${part}: catch-all, parallel and private segments need a hand-written Start route`);
+    const dynamic = /^\[([A-Za-z_$][\w$]*)\]$/.exec(part);
+    if (dynamic) {
+      segments.push(`$${dynamic[1]}`);
+      params.push(dynamic[1]);
+      continue;
+    }
+    if (part.includes("[") || part.includes("."))
+      fail("PORT_ROUTE_UNSUPPORTED_SEGMENT", `${part} cannot be expressed as a flat TanStack route segment`);
+    segments.push(part);
+  }
+  const kept = [], moves = [];
+  let index = false;
+  const target = resolve19(request.target);
+  const visit = (directory) => {
+    for (const entry of readdirSync3(directory, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+      const path = join2(directory, entry.name);
+      if (entry.isSymbolicLink())
+        fail("SYMLINK_UNSUPPORTED", path);
+      if (entry.isDirectory()) {
+        if (hasPage(path) || nestedRoute(path)) {
+          index = true;
+          kept.push(path);
+          continue;
+        }
+        visit(path);
+        continue;
+      }
+      if (!entry.isFile())
+        fail("UNSUPPORTED_FILE", path);
+      const excluded = excludedByPatterns(path, routeDir, [...config.next.exclude, ...request.exclude ?? []]);
+      if (excluded || serverOnly(path)) {
+        kept.push(path);
+        continue;
+      }
+      moves.push([path, join2(target, relative10(routeDir, path))]);
+    }
+  };
+  const nestedRoute = (directory) => readdirSync3(directory, { withFileTypes: true }).some((entry) => entry.isDirectory() && (hasPage(join2(directory, entry.name)) || nestedRoute(join2(directory, entry.name))));
+  const serverOnly = (path) => {
+    if (!/\.[cm]?[jt]sx?$/.test(path))
+      return false;
+    const text = sys.readFile(path) ?? "";
+    const source = ts12.createSourceFile(path, text, ts12.ScriptTarget.Latest, false);
+    return source.statements.some((statement) => ts12.isImportDeclaration(statement) && ts12.isStringLiteral(statement.moduleSpecifier) && config.next.serverOnlyModules.includes(statement.moduleSpecifier.text));
+  };
+  visit(routeDir);
+  if (!moves.length)
+    fail("EMPTY_DIRECTORY", `${routeDir} has no client files to move after exclusions`);
+  const startRoutes = request.startRoutes ? resolve19(request.startRoutes) : config.start.routes;
+  const startConfig = configPathFor(config.start.project);
+  const fileName = segments.length ? `${segments.join(".")}${index ? ".index" : ""}.tsx` : "index.tsx";
+  const routePath = `/${segments.join("/")}`;
+  const routeId = segments.length ? `${routePath}${index ? "/" : ""}` : "/";
+  const routeName = pascal([...segments].reverse().find((segment) => !segment.startsWith("$")) ?? "index");
+  return {
+    config,
+    routeDir,
+    page,
+    segments,
+    params,
+    index,
+    startRoutes,
+    startConfig,
+    startFile: join2(startRoutes, fileName),
+    routeId,
+    routePath,
+    routeName,
+    moves,
+    map: { ...config.map, ...request.map ?? {} },
+    kept: kept.sort()
+  };
+}
+function relativeSpecifier(from, to) {
+  const path = portablePath(relative10(dirname14(from), to)).replace(/\.[cm]?[jt]sx?$/, "").replace(/\/index$/, "");
+  return path.startsWith(".") ? path : `./${path}`;
+}
+function references(source, name) {
+  let count = 0;
+  const visit = (node) => {
+    if (ts12.isImportDeclaration(node))
+      return;
+    if (ts12.isIdentifier(node) && node.text === name) {
+      const parent = node.parent;
+      const named = ts12.isPropertyAccessExpression(parent) && parent.name === node || ts12.isPropertyAssignment(parent) && parent.name === node || ts12.isPropertySignature(parent) && parent.name === node || ts12.isJsxAttribute(parent) || ts12.isBindingElement(parent) && parent.propertyName === node || ts12.isQualifiedName(parent) && parent.right === node || ts12.isMethodDeclaration(parent) && parent.name === node;
+      if (!named)
+        count += 1;
+    }
+    ts12.forEachChild(node, visit);
+  };
+  visit(source);
+  return count;
+}
+function importLocals(source) {
+  const locals = new Map;
+  for (const statement of source.statements) {
+    if (!ts12.isImportDeclaration(statement) || !ts12.isStringLiteral(statement.moduleSpecifier) || !statement.importClause)
+      continue;
+    const module = statement.moduleSpecifier.text, clause = statement.importClause;
+    if (clause.name)
+      locals.set(clause.name.text, { statement, node: clause.name, module, imported: "default" });
+    const bindings = clause.namedBindings;
+    if (bindings && ts12.isNamespaceImport(bindings))
+      locals.set(bindings.name.text, { statement, node: bindings, module, imported: "*" });
+    if (bindings && ts12.isNamedImports(bindings))
+      for (const element of bindings.elements) {
+        locals.set(element.name.text, { statement, node: element, module, imported: (element.propertyName ?? element.name).text });
+      }
+  }
+  return locals;
+}
+function removal(source, statement) {
+  const text = source.text;
+  const start = statement.getStart(source), lineStart = text.lastIndexOf(`
+`, start - 1) + 1;
+  const ownLine = !text.slice(lineStart, start).trim();
+  const from = ownLine ? lineStart : statement.getFullStart();
+  const to = ownLine && text[statement.end] === `
+` ? statement.end + 1 : statement.end;
+  return { span: { start: from, length: to - from }, newText: "" };
+}
+function updateImports(path, before, after, add) {
+  const original = ts12.createSourceFile(path, before, ts12.ScriptTarget.Latest, true);
+  let source = ts12.createSourceFile(path, after, ts12.ScriptTarget.Latest, true);
+  const removed = new Set;
+  for (const [local, binding] of importLocals(source)) {
+    if (references(original, local) > 0 && references(source, local) === 0)
+      removed.add(binding.node);
+  }
+  const edits = [];
+  for (const statement of source.statements) {
+    if (!ts12.isImportDeclaration(statement) || !statement.importClause)
+      continue;
+    const clause = statement.importClause, bindings = clause.namedBindings;
+    const elements = bindings && ts12.isNamedImports(bindings) ? bindings.elements : undefined;
+    const keptElements = elements?.filter((element) => !removed.has(element)) ?? [];
+    const keepDefault = clause.name && !removed.has(clause.name);
+    const keepNamespace = bindings && ts12.isNamespaceImport(bindings) && !removed.has(bindings);
+    if (!keepDefault && !keepNamespace && !keptElements.length) {
+      if (clause.name || bindings) {
+        edits.push(removal(source, statement));
+      }
+      continue;
+    }
+    if (elements && keptElements.length !== elements.length) {
+      edits.push({ span: { start: bindings.getStart(source), length: bindings.getWidth(source) }, newText: `{ ${keptElements.map((element) => element.getText(source)).join(", ")} }` });
+    }
+    if (clause.name && !keepDefault)
+      fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${path}: cannot remove the unused default import ${clause.name.text} alongside named imports`);
+  }
+  let text = applyTextChanges(after, edits);
+  source = ts12.createSourceFile(path, text, ts12.ScriptTarget.Latest, true);
+  const existing = importLocals(source);
+  const additions = new ImportSet;
+  const printed = ts12.createSourceFile("add.ts", add.print(), ts12.ScriptTarget.Latest, true);
+  for (const statement of printed.statements) {
+    const module = statement.moduleSpecifier.text;
+    const clause = statement.importClause, bindings = clause.namedBindings;
+    const wanted = [
+      ...clause.name ? [{ local: clause.name.text, add: () => additions.addDefault(module, clause.name.text, clause.isTypeOnly) }] : [],
+      ...bindings && ts12.isNamespaceImport(bindings) ? [{ local: bindings.name.text, add: () => additions.addNamespace(module, bindings.name.text) }] : [],
+      ...bindings && ts12.isNamedImports(bindings) ? bindings.elements.map((element) => ({
+        local: element.name.text,
+        add: () => additions.addNamed(module, (element.propertyName ?? element.name).text, element.name.text, clause.isTypeOnly || element.isTypeOnly)
+      })) : []
+    ];
+    for (const binding of wanted) {
+      const found = existing.get(binding.local);
+      if (found && found.module !== module)
+        fail("PORT_ROUTE_IMPORT_CONFLICT", `${path} already binds ${binding.local} from ${found.module}; the data prop type needs it from ${module}`);
+      if (!found)
+        binding.add();
+    }
+  }
+  const block = additions.print(text.includes("'") && !text.includes('"') ? "'" : '"');
+  if (!block)
+    return text;
+  const imports = source.statements.filter(ts12.isImportDeclaration);
+  const anchor = imports.at(-1)?.end ?? (source.statements.find((statement) => !ts12.isExpressionStatement(statement) || !ts12.isStringLiteral(statement.expression))?.getFullStart() ?? 0);
+  text = imports.length || anchor ? `${text.slice(0, anchor)}
+${block}${text.slice(anchor)}` : `${block}
+${text}`;
+  return text;
+}
+function rewriteView(ws, prep, model) {
+  const program = ws.program(), checker = program.getTypeChecker();
+  const component = model.view.component, viewPath = model.view.path;
+  const source = component.getSourceFile();
+  const preloaded = model.view.attributes.filter((attribute) => attribute.kind === "preloaded");
+  if (!preloaded.length)
+    return [];
+  const parameter = component.parameters[0];
+  if (!parameter)
+    fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${model.view.tag} declares no props parameter`);
+  const hook = hookSymbol(ws, checker, viewPath, prep.config.data.hook);
+  const resolveAlias = (symbol) => symbol && symbol.flags & ts12.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+  const edits = [];
+  const typeImports = new ImportSet;
+  const result = [];
+  const body = component.body;
+  const locals = new Set;
+  const collect = (node) => {
+    if (ts12.isIdentifier(node))
+      locals.add(node.text);
+    ts12.forEachChild(node, collect);
+  };
+  collect(component);
+  for (const attribute of preloaded) {
+    const base = attribute.name.replace(/^preloaded/i, "") || attribute.name;
+    const prop = fill(prep.config.data.prop, { Name: pascal(base) === base ? base : base[0].toUpperCase() + base.slice(1), name: camel(base) }, "data.prop");
+    if (model.view.props.some((item) => item.name === prop))
+      fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${model.view.tag} already declares ${prop}; choose another data.prop pattern`);
+    let reference, dataReference, renamed = false;
+    if (ts12.isObjectBindingPattern(parameter.name)) {
+      const element = parameter.name.elements.find((item) => (item.propertyName ?? item.name).getText(source) === attribute.name);
+      if (!element || !ts12.isIdentifier(element.name) || element.initializer || element.dotDotDotToken)
+        fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${model.view.tag} must destructure ${attribute.name} without a default`);
+      const symbol = checker.getSymbolAtLocation(element.name);
+      const uses = [];
+      const visit = (node) => {
+        if (ts12.isIdentifier(node) && node !== element.name && checker.getSymbolAtLocation(node) === symbol)
+          uses.push(node);
+        ts12.forEachChild(node, visit);
+      };
+      if (body)
+        visit(body);
+      if (uses.length !== 1)
+        fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${attribute.name} must be used exactly once, as the ${prep.config.data.hook.name} argument (found ${uses.length})`);
+      reference = uses[0];
+      if (element.propertyName) {
+        edits.push({ span: { start: element.propertyName.getStart(source), length: element.propertyName.getWidth(source) }, newText: prop });
+        dataReference = element.name.text;
+      } else {
+        renamed = true;
+        edits.push({ span: { start: element.name.getStart(source), length: element.name.getWidth(source) }, newText: prop });
+        dataReference = prop;
+      }
+    } else if (ts12.isIdentifier(parameter.name)) {
+      const symbol = checker.getSymbolAtLocation(parameter.name);
+      const uses = [];
+      const visit = (node) => {
+        if (ts12.isPropertyAccessExpression(node) && node.name.text === attribute.name && ts12.isIdentifier(node.expression) && checker.getSymbolAtLocation(node.expression) === symbol)
+          uses.push(node);
+        ts12.forEachChild(node, visit);
+      };
+      if (body)
+        visit(body);
+      if (uses.length !== 1)
+        fail("PORT_ROUTE_VIEW_UNSUPPORTED", `props.${attribute.name} must be used exactly once, as the ${prep.config.data.hook.name} argument`);
+      reference = uses[0];
+      dataReference = `${parameter.name.text}.${prop}`;
+    } else
+      fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${model.view.tag} props must be an identifier or object destructuring`);
+    const call = reference.parent;
+    if (!ts12.isCallExpression(call) || call.arguments[0] !== reference || resolveAlias(checker.getSymbolAtLocation(call.expression)) !== hook) {
+      fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${attribute.name} must be passed directly to ${prep.config.data.hook.name} from ${prep.config.data.hook.module}`);
+    }
+    const holder = call.parent;
+    const declaration = ts12.isVariableDeclaration(holder) ? holder : ts12.isPropertyAccessExpression(holder) && ts12.isVariableDeclaration(holder.parent) && holder.parent.initializer === holder ? holder.parent : undefined;
+    const holderLocal = declaration && (ts12.isIdentifier(declaration.name) ? declaration.name.text : ts12.isObjectBindingPattern(declaration.name) && declaration.name.elements.length === 1 && ts12.isIdentifier(declaration.name.elements[0].name) ? declaration.name.elements[0].name.text : undefined);
+    if (renamed && locals.has(prop) && holderLocal !== prop)
+      fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${prop} already names a binding in ${model.view.tag}`);
+    const statement = declaration?.parent.parent;
+    const collapse = renamed && holderLocal === prop && statement && ts12.isVariableStatement(statement) && statement.declarationList.declarations.length === 1;
+    if (collapse && (ts12.isIdentifier(declaration.name) ? ts12.isPropertyAccessExpression(holder) && holder.name.text === "data" : declaration.name.elements[0].propertyName?.getText(source) === "data")) {
+      edits.push(removal(source, statement));
+    } else if (ts12.isVariableDeclaration(holder) && holder.initializer === call && ts12.isObjectBindingPattern(holder.name) && holder.name.elements.length === 1 && (holder.name.elements[0].propertyName ?? holder.name.elements[0].name).getText(source) === "data" && ts12.isIdentifier(holder.name.elements[0].name) && !holder.name.elements[0].initializer) {
+      const local = holder.name.elements[0].name.text;
+      edits.push({ span: { start: holder.getStart(source), length: holder.getWidth(source) }, newText: `${local} = ${dataReference}` });
+    } else if (ts12.isPropertyAccessExpression(holder) && holder.expression === call && holder.name.text === "data") {
+      edits.push({ span: { start: holder.getStart(source), length: holder.getWidth(source) }, newText: dataReference });
+    } else
+      fail("PORT_ROUTE_VIEW_UNSUPPORTED", `use \`const { data } = ${prep.config.data.hook.name}(${attribute.name})\` or \`.data\` in ${model.view.tag} before porting`);
+    const property = checker.getTypeAtLocation(parameter).getProperty(attribute.name);
+    const member = property?.declarations?.[0];
+    if (!member || !ts12.isPropertySignature(member) || !member.type || resolve19(member.getSourceFile().fileName) !== resolve19(source.fileName)) {
+      fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${attribute.name} must be declared as a property signature in ${source.fileName}`);
+    }
+    let typeText;
+    if (call.typeArguments?.length === 1)
+      typeText = fill(prep.config.data.typeArgument, { type: call.typeArguments[0].getText(source) }, "data.typeArgument");
+    else {
+      typeImports.addText(prep.config.data.type.imports, "data.type.imports");
+      for (const item of attribute.preload.query.imports)
+        addRef(typeImports, item, () => fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${item.local} is imported from a file; data.type needs package imports`));
+      typeText = fill(prep.config.data.type.value, { query: attribute.preload.query.text }, "data.type");
+    }
+    edits.push({ span: { start: member.name.getStart(source), length: member.name.getWidth(source) }, newText: prop });
+    edits.push({ span: { start: member.type.getStart(source), length: member.type.getWidth(source) }, newText: typeText });
+    result.push({ attribute: attribute.name, prop, name: camel(base), preload: attribute.preload });
+  }
+  const before = ws.vfs.readFile(viewPath);
+  if (before !== source.text)
+    fail("PORT_ROUTE_VIEW_UNSUPPORTED", `${viewPath} changed before the view rewrite`);
+  ws.vfs.write(viewPath, updateImports(viewPath, before, applyTextChanges(before, edits), typeImports));
+  return result;
+}
+function hookSymbol(ws, checker, from, hook) {
+  const options = ws.ownersOf(from)[0] ? ws.participant(ws.ownersOf(from)[0]).parsed.options : ws.editOptions;
+  const resolved = ts12.resolveModuleName(hook.module, from, options, ws.vfs.moduleResolutionHost()).resolvedModule;
+  const file = resolved && ws.program().getSourceFile(resolved.resolvedFileName);
+  const module = file && checker.getSymbolAtLocation(file);
+  const exported = module && checker.getExportsOfModule(module).find((symbol) => symbol.name === hook.name);
+  if (!exported)
+    fail("PORT_ROUTE_HOOK_NOT_FOUND", `${hook.module} does not export ${hook.name} from ${from}`);
+  return exported.flags & ts12.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
+}
+function addRef(set, item, file) {
+  const module = item.target.kind === "package" ? item.target.module : file(item.target.path);
+  if (module === undefined)
+    return;
+  if (item.imported === "default")
+    set.addDefault(module, item.local, item.typeOnly);
+  else if (item.imported === "*")
+    set.addNamespace(module, item.local);
+  else
+    set.addNamed(module, item.imported, item.local, item.typeOnly);
+}
+
+class Builder {
+  path;
+  imports = new ImportSet;
+  setup = [];
+  todos = [];
+  constructor(path) {
+    this.path = path;
+  }
+  snippet(item, values, origin) {
+    this.imports.addText(item.imports?.map((line) => fill(line, values, origin)), origin);
+    for (const line of item.setup ?? []) {
+      const text = fill(line, values, origin);
+      if (!this.setup.includes(text))
+        this.setup.push(text);
+    }
+    return fill(item.value, values, origin);
+  }
+  todo(config, reason) {
+    this.todos.push(reason);
+    return fill(config.snippets.todo, { message: JSON.stringify(todoReason(reason)) }, "snippets.todo");
+  }
+}
+function jsx(tag, props) {
+  if (!props.length)
+    return `<${tag} />`;
+  if (props.length === 1)
+    return `<${tag} ${props[0][0]}={${props[0][1]}} />`;
+  return `<${tag}
+${props.map(([name, value]) => `  ${name}={${value}}`).join(`
+`)}
+/>`;
+}
+function generatePortRoute(ws, prep, model, dataProps, renames, notes) {
+  const moved = new Map(renames.map(([from, to]) => [ws.vfs.key(from), to]));
+  const viewTarget = moved.get(ws.vfs.key(model.view.path));
+  if (!viewTarget)
+    fail("PORT_ROUTE_VIEW_NOT_FOUND", `${model.view.path} is not among the moved files`);
+  const config = prep.config;
+  const viewModule = basename5(model.view.path, extname4(model.view.path));
+  const adapterPath = join2(prep.routeDir, fill(config.next.adapterFile, { view: viewModule, route: prep.segments.filter((item) => !item.startsWith("$")).at(-1) ?? "index" }, "next.adapterFile"));
+  if (ws.vfs.fileExists(adapterPath))
+    fail("TARGET_EXISTS", `${adapterPath}; remove the existing adapter or choose next.adapterFile`);
+  if (ws.vfs.fileExists(prep.startFile))
+    fail("TARGET_EXISTS", `${prep.startFile} (the route is already ported)`);
+  const fileSpecifier = (importer) => (path) => {
+    const target = moved.get(ws.vfs.key(path));
+    if (!target)
+      fail("PORT_ROUTE_UNSUPPORTED_PAGE", `${importer} cannot import ${path}, which stays in Next`);
+    return packageSpecifier(ws, importer, target) ?? relativeSpecifier(importer, target);
+  };
+  const props = model.view.props.map((item) => {
+    const data = dataProps.find((entry) => entry.attribute === item.name);
+    return data ? { name: data.prop, optional: item.optional } : item;
+  });
+  const adapter = nextAdapter(ws, prep, model, dataProps, props, adapterPath, viewTarget);
+  const start = startRoute(ws, prep, model, dataProps, props, viewTarget, fileSpecifier(prep.startFile));
+  for (const file of [adapter, start]) {
+    ws.vfs.write(file.path, file.text, false);
+    for (const reason of file.todos)
+      notes.push(`${todoReason(reason)} (${relative10(ws.root, file.path)})`);
+  }
+  rewritePage(ws, prep, model, viewTarget, adapterPath);
+  ws.reparse();
+  for (const [path, config] of [[adapterPath, ws.sourceConfig], [prep.startFile, prep.startConfig]]) {
+    const owners = ws.ownersOf(path);
+    if (owners.length !== 1 || !ws.vfs.samePath(owners[0], config))
+      fail("TARGET_NOT_IN_PROJECT", `${path} must belong to exactly ${config}; owners: ${owners.join(", ") || "none"}`);
+  }
+  notes.push(`Generated ${relative10(ws.root, adapterPath)} (Next adapter) and ${relative10(ws.root, prep.startFile)} (Start route ${prep.routeId}); ${relative10(ws.root, prep.page)} renders the adapter.`);
+  if (prep.kept.length)
+    notes.push(`Kept in Next: ${prep.kept.map((path) => relative10(ws.root, path)).join(", ")}.`);
+  notes.push("Server-only page logic (authentication, redirects, notFound, metadata) is not translated; confirm the Start layout and loader cover it.");
+  if (config.afterApply.length)
+    notes.push(`After apply run: ${config.afterApply.join("; ")}.`);
+  return [adapter, start];
+}
+function nextAdapter(ws, prep, model, dataProps, props, path, viewTarget) {
+  const config = prep.config, out = new Builder(path);
+  out.imports.addText(config.next.imports, "next.imports");
+  const local = viewLocal(model.view.tag);
+  const viewModule = packageSpecifier(ws, path, viewTarget) ?? relativeSpecifier(path, viewTarget);
+  if (model.view.exported === "default")
+    out.imports.addDefault(viewModule, local);
+  else
+    out.imports.addNamed(viewModule, model.view.exported, local);
+  const parameters = [], types = [], values = [];
+  for (const attribute of model.view.attributes) {
+    parameters.push(attribute.name);
+    const data = dataProps.find((item) => item.attribute === attribute.name);
+    if (data) {
+      const preload = data.preload;
+      let type;
+      if (preload.hook) {
+        out.imports.addNamed(relativeSpecifier(path, preload.hook.path), preload.hook.name, preload.hook.name, true);
+        type = out.snippet(config.snippets.nextHookType, { hook: preload.hook.name, query: preload.query.text }, "snippets.nextHookType");
+      } else {
+        for (const item of preload.query.imports)
+          addRef(out.imports, { ...item, typeOnly: true }, (file) => relativeSpecifier(path, file));
+        type = out.snippet(config.snippets.nextDirectType, { query: preload.query.text }, "snippets.nextDirectType");
+      }
+      types.push(`${attribute.name}: ${type};`);
+      const value = out.snippet(config.snippets.nextData, { name: data.name, prop: attribute.name, query: preload.query.text }, "snippets.nextData");
+      values.push([data.prop, value]);
+    } else {
+      out.imports.addNamed("react", "ComponentProps", "ComponentProps", true);
+      const optional = model.view.props.find((item) => item.name === attribute.name)?.optional ? "?" : "";
+      types.push(`${attribute.name}${optional}: ComponentProps<typeof ${local}>[${JSON.stringify(attribute.name)}];`);
+      values.push([attribute.name, attribute.name]);
+    }
+  }
+  fillPorts(out, prep, props, values, "next");
+  const exported = model.view.exported === "default" ? model.view.tag : model.view.exported;
+  const text = render(config.nextAdapterTemplate, {
+    imports: out.imports.print(),
+    name: exported,
+    export: model.view.exported === "default" ? "export default function" : "export function",
+    params: parameters.length ? `{ ${parameters.join(", ")} }` : "",
+    propsType: parameters.length ? `: {
+${types.map((line) => `  ${line}`).join(`
+`)}
+}` : "",
+    setup: out.setup.join(`
+`),
+    todos: out.todos.map((reason) => `// ${todoReason(reason)}`).join(`
+`),
+    view: jsx(local, values)
+  }, config.templates.nextAdapter);
+  return { path, text, todos: out.todos };
+}
+function fillPorts(out, prep, props, values, side) {
+  const config = prep.config;
+  for (const prop of props) {
+    if (values.some(([name]) => name === prop.name))
+      continue;
+    const port = config.ports[prop.name];
+    if (port) {
+      values.push([prop.name, out.snippet(port[side], { name: prop.name, path: prep.routePath }, `ports.${prop.name}.${side}`)]);
+      continue;
+    }
+    if (prep.params.includes(prop.name) && config.params) {
+      values.push([prop.name, out.snippet(config.params[side], { name: prop.name, path: prep.routePath }, `params.${side}`)]);
+      continue;
+    }
+    if (!prop.optional)
+      values.push([prop.name, out.todo(config, `provide required view prop '${prop.name}' (add ports.${prop.name} to port-route.json)`)]);
+  }
+}
+function startRoute(ws, prep, model, dataProps, props, viewTarget, file) {
+  const { config, startFile: path } = prep, out = new Builder(path);
+  out.imports.addText(config.start.imports, "start.imports");
+  const viewModule = packageSpecifier(ws, path, viewTarget) ?? relativeSpecifier(path, viewTarget);
+  const local = model.view.exported === "default" ? model.view.tag : model.view.exported;
+  if (model.view.exported === "default")
+    out.imports.addDefault(viewModule, local);
+  else
+    out.imports.addNamed(viewModule, model.view.exported, local);
+  const add = (translation) => {
+    for (const item of translation.imports)
+      addRef(out.imports, item, file);
+  };
+  const queries = [], statements = [], prefetches = [], returns = [];
+  const loaderTodos = [];
+  for (const statement of model.statements) {
+    add(statement);
+    statements.push(statement.text);
+  }
+  const names = new Map;
+  const used = new Set;
+  for (const preload of model.preloads) {
+    const data = dataProps.find((item) => item.preload === preload);
+    let name = data?.name ?? camel(preload.variable.replace(/^preloaded/i, "") || preload.query.text.split(".").slice(-2).join(" "));
+    while (used.has(name))
+      name = `${name}2`;
+    used.add(name);
+    names.set(preload, name);
+    add(preload.query);
+    out.imports.addText(config.snippets.startQuery.imports?.map((line) => fill(line, { name, query: preload.query.text }, "snippets.startQuery")), "snippets.startQuery");
+    queries.push(fill(config.snippets.startQuery.value, { name, query: preload.query.text }, "snippets.startQuery"));
+    let args;
+    if ("todo" in preload.args) {
+      loaderTodos.push(`translate ${preload.variable} arguments: ${preload.args.todo}`);
+      args = fill(config.snippets.todo, { message: JSON.stringify(todoReason(`translate ${preload.variable} arguments`)) }, "snippets.todo");
+    } else {
+      add(preload.args);
+      args = preload.args.text;
+    }
+    statements.push(`const ${name}Args = ${args};`);
+    prefetches.push(fill(config.snippets.startPrefetch, { name, args: `${name}Args`, query: preload.query.text }, "snippets.startPrefetch"));
+    returns.push(`${name}Args`);
+  }
+  const values = [];
+  for (const attribute of model.view.attributes) {
+    const data = dataProps.find((item) => item.attribute === attribute.name);
+    if (data) {
+      const name = names.get(data.preload);
+      values.push([data.prop, out.snippet(config.snippets.startData, { name, args: `${name}Args`, query: data.preload.query.text }, "snippets.startData")]);
+      continue;
+    }
+    const start = attribute.start;
+    const optional = model.view.props.find((item) => item.name === attribute.name)?.optional ?? false;
+    if ("todo" in start) {
+      if (optional)
+        out.todos.push(`translate optional prop '${attribute.name}={${attribute.source}}': ${start.todo}; omitted`);
+      else
+        values.push([attribute.name, out.todo(config, `translate prop '${attribute.name}={${attribute.source}}': ${start.todo}`)]);
+      continue;
+    }
+    add(start);
+    const literal = /^(?:"[^"\n]*"|'[^'\n]*'|-?\d[\d_.]*|true|false|null)$/.test(start.text);
+    if (literal)
+      values.push([attribute.name, start.text]);
+    else {
+      statements.push(`const ${attribute.name} = ${start.text};`);
+      returns.push(attribute.name);
+      values.push([attribute.name, attribute.name]);
+    }
+  }
+  for (const reason of loaderTodos)
+    out.todos.push(reason);
+  fillPorts(out, prep, props, values, "start");
+  const loaderTodo = loaderTodos.map((reason) => `// ${todoReason(reason)}`);
+  const body = [...loaderTodo, ...statements].join(`
+`);
+  const loaderValues = (args) => ({ loaderArgs: args, statements: body, prefetches: prefetches.join(`,
+`), returns: returns.join(", "), path: prep.routePath, id: prep.routeId });
+  const loaderSnippet = prep.params.length && config.snippets.startRecordLoader ? config.snippets.startRecordLoader : config.snippets.startLoader;
+  out.imports.addText(loaderSnippet.imports, "snippets.startLoader");
+  const probe = render(loaderSnippet.value, loaderValues(""), "snippets.startLoader");
+  const loaderArgs = config.start.loaderArgs.filter((name) => new RegExp(`(?<![\\w$.])${name.replace(/[$]/g, "\\$")}(?![\\w$])`).test(probe));
+  const loader = render(loaderSnippet.value, loaderValues(loaderArgs.length ? `{ ${loaderArgs.join(", ")} }` : ""), "snippets.startLoader");
+  const component = `${prep.routeName}Page`;
+  const localNames = out.imports.locals();
+  for (const name of [component, "Route", ...[...names.values()].map((name) => `${name}Query`)]) {
+    if (localNames.has(name))
+      fail("PORT_ROUTE_NAME_CONFLICT", `${name} is both generated and imported in ${path}`);
+  }
+  const setup = [...returns.length ? [`const { ${returns.join(", ")} } = Route.useLoaderData();`] : [], ...out.setup];
+  const text = render(config.startRouteTemplate, {
+    imports: out.imports.print(),
+    queries: queries.join(`
+`),
+    id: prep.routeId,
+    path: prep.routePath,
+    searchDeps: loaderArgs.includes("location") && config.snippets.startSearchDeps ? config.snippets.startSearchDeps : "",
+    loader,
+    component,
+    setup: setup.join(`
+`),
+    todos: out.todos.filter((reason) => !loaderTodos.includes(reason)).map((reason) => `// ${todoReason(reason)}`).join(`
+`),
+    view: jsx(local, values)
+  }, config.templates.startRoute);
+  return { path, text, todos: out.todos };
+}
+function rewritePage(ws, prep, model, viewTarget, adapterPath) {
+  const text = ws.vfs.readFile(prep.page);
+  const source = ts12.createSourceFile(prep.page, text, ts12.ScriptTarget.Latest, true);
+  const specifier = relativeSpecifier(prep.page, adapterPath);
+  const edits = [];
+  for (const statement of source.statements) {
+    if (!ts12.isImportDeclaration(statement) || !ts12.isStringLiteral(statement.moduleSpecifier) || !statement.importClause)
+      continue;
+    const resolved = ws.resolveModule(statement.moduleSpecifier, source);
+    if (!resolved || !ws.vfs.samePath(resolved.resolvedFileName, viewTarget))
+      continue;
+    const clause = statement.importClause, bindings = clause.namedBindings;
+    const view = model.view.exported === "default" ? clause.name : bindings && ts12.isNamedImports(bindings) ? bindings.elements.find((element) => (element.propertyName ?? element.name).text === model.view.exported) : undefined;
+    if (!view)
+      continue;
+    const quote = text[statement.moduleSpecifier.getStart(source)];
+    const others = bindings && ts12.isNamedImports(bindings) ? bindings.elements.filter((element) => element !== view) : [];
+    if (!others.length && !(model.view.exported !== "default" && clause.name)) {
+      edits.push({ span: { start: statement.moduleSpecifier.getStart(source) + 1, length: statement.moduleSpecifier.getWidth(source) - 2 }, newText: specifier });
+    } else {
+      const remaining = model.view.exported === "default" ? `{ ${others.map((item) => item.getText(source)).join(", ")} }` : [clause.name?.text, others.length ? `{ ${others.map((item) => item.getText(source)).join(", ")} }` : undefined].filter(Boolean).join(", ");
+      edits.push({
+        span: { start: statement.getStart(source), length: statement.getWidth(source) },
+        newText: `import ${remaining} from ${statement.moduleSpecifier.getText(source)};
+import ${model.view.exported === "default" ? view.getText(source) : `{ ${view.getText(source)} }`} from ${quote}${specifier}${quote};`
+      });
+    }
+  }
+  if (!edits.length)
+    fail("PORT_ROUTE_VIEW_NOT_FOUND", `${prep.page} no longer imports the moved view`);
+  ws.vfs.write(prep.page, applyTextChanges(text, edits));
+}
+async function regenerateRouteTree(ws, prep, generated, notes) {
+  const tree = prep.config.start.routeTree;
+  if (!tree) {
+    notes.push("No start.routeTree configured; the Start route validates against the existing route registration.");
+    return;
+  }
+  const routesRelative = relative10(tree.configDirectory, prep.startRoutes), treeRelative = relative10(tree.configDirectory, tree.file);
+  if ([routesRelative, treeRelative].some((path) => path.startsWith("..") || isInside(prep.startRoutes, tree.file)))
+    fail("INVALID_PORT_ROUTE_CONFIG", "start.routes and start.routeTree.file must be inside start.routeTree.configDirectory, with the tree outside the routes");
+  let entry;
+  try {
+    entry = createRequire3(join2(tree.configDirectory, "package.json")).resolve(tree.generator);
+  } catch {
+    fail("PORT_ROUTE_GENERATOR_NOT_FOUND", `${tree.generator} cannot be resolved from ${tree.configDirectory}; install dependencies (bun install)`);
+  }
+  const generator = await import(pathToFileURL(entry).href);
+  const api = generator.Generator ? generator : generator.default;
+  if (!api?.Generator || !api.getConfig)
+    fail("PORT_ROUTE_GENERATOR_UNSUPPORTED", `${tree.generator} must export Generator and getConfig (TanStack router-generator API)`);
+  const scratch = await mkdtemp(join2(tmpdir(), "refactor-ai-route-tree-"));
+  try {
+    ws.vfs.inputs.sys.readFile(join2(tree.configDirectory, "tsr.config.json"));
+    for (const source of ws.vfs.readDirectory(prep.startRoutes, undefined, undefined, ["**/*"])) {
+      const target = join2(scratch, routesRelative, relative10(prep.startRoutes, source));
+      await mkdir3(dirname14(target), { recursive: true });
+      await writeFile4(target, ws.vfs.readFile(source) ?? "");
+    }
+    const config = api.getConfig({ routesDirectory: join2(scratch, routesRelative), generatedRouteTree: join2(scratch, treeRelative), tmpDir: join2(scratch, ".tmp"), disableLogging: true }, tree.configDirectory);
+    await new api.Generator({ config, root: tree.configDirectory }).run();
+    const route = await readFile5(join2(scratch, routesRelative, relative10(prep.startRoutes, generated.path)), "utf8");
+    if (route !== generated.text)
+      fail("PORT_ROUTE_PATH_MISMATCH", `${tree.generator} rewrote ${relative10(ws.root, generated.path)}; its createFileRoute id differs from ${prep.routeId}`);
+    const text = readFileSync4(join2(scratch, treeRelative), "utf8");
+    ws.vfs.writeEphemeral(tree.file, text);
+    ws.reparse();
+    notes.push(`Validated with ${relative10(ws.root, tree.file)} regenerated by ${tree.generator}; it is not part of the plan (ignored generator output): regenerate it after apply (dev server or the project's route generation script).`);
+  } finally {
+    await rm2(scratch, { recursive: true, force: true });
+  }
+}
+var pageNames, todoReason = (text) => `TODO(port-route): ${text}`, viewLocal = (tag) => tag.endsWith("View") ? `${tag}Component` : `${tag}View`, portRouteExtractOptions = (prep, moved, key) => ({
+  preloadFunctions: prep.config.next.preloadFunctions,
+  translate: prep.config.translate,
+  params: prep.params,
+  paramsObject: prep.config.start.paramsObject,
+  isMoved: (path) => moved.has(key(path))
+});
+var init_typescript_port_route = __esm(() => {
+  init_typescript_port_route_config();
+  init_typescript_port_route_extract();
+  init_typescript_package_specifiers();
+  init_typescript_paths();
+  init_typescript_vfs();
+  init_typescript_workspace();
+  pageNames = ["page.tsx", "page.ts", "page.jsx", "page.js"];
+});
+
+// src/backends/typescript-fileops.ts
+import ts13 from "typescript";
+import { existsSync as existsSync4, lstatSync as lstatSync3, readFileSync as readFileSync5, readdirSync as readdirSync4 } from "node:fs";
+import { dirname as dirname15, extname as extname5, isAbsolute as isAbsolute6, relative as relative11, resolve as resolve20, sep as sep7 } from "node:path";
 function preferencesFor(ws) {
   let single = 0, double = 0;
   for (const path of userFiles(ws)) {
@@ -4840,14 +6352,14 @@ function preferencesFor(ws) {
   return { allowTextChangesInNewFiles: true, quotePreference: single > double ? "single" : double > single ? "double" : "auto" };
 }
 function assertAbsolute(name, value) {
-  if (!value || !isAbsolute4(value))
+  if (!value || !isAbsolute6(value))
     fail("INVALID_REQUEST", `${name} must be an absolute path`);
-  return resolve17(value);
+  return resolve20(value);
 }
 function sourceExtension(path) {
   if (/\.d(\.[^./]+)?\.[cm]?ts$/i.test(path))
     fail("UNSUPPORTED_FILE", "declaration files cannot be renamed or moved");
-  const extension = extname4(path);
+  const extension = extname5(path);
   if (![...tsExtensions, ...jsExtensions].includes(extension))
     fail("UNSUPPORTED_FILE", extension || "file has no extension");
   return extension;
@@ -4857,26 +6369,26 @@ function formatFor(text) {
 }
 function declaredTypes(sourceFile, isJs) {
   return sourceFile.statements.filter((statement) => {
-    if (ts10.isClassDeclaration(statement))
+    if (ts13.isClassDeclaration(statement))
       return statement.name !== undefined;
-    return !isJs && (ts10.isInterfaceDeclaration(statement) || ts10.isTypeAliasDeclaration(statement) || ts10.isEnumDeclaration(statement));
+    return !isJs && (ts13.isInterfaceDeclaration(statement) || ts13.isTypeAliasDeclaration(statement) || ts13.isEnumDeclaration(statement));
   });
 }
 function namespaceMembers(sourceFile) {
   const names = new Set;
   const visit = (node) => {
-    if (ts10.isModuleDeclaration(node)) {
+    if (ts13.isModuleDeclaration(node)) {
       names.add(node.name.text);
       if (node.body)
-        ts10.forEachChild(node.body, visit);
-    } else if ((ts10.isClassDeclaration(node) || ts10.isInterfaceDeclaration(node) || ts10.isTypeAliasDeclaration(node) || ts10.isEnumDeclaration(node)) && node.name) {
+        ts13.forEachChild(node.body, visit);
+    } else if ((ts13.isClassDeclaration(node) || ts13.isInterfaceDeclaration(node) || ts13.isTypeAliasDeclaration(node) || ts13.isEnumDeclaration(node)) && node.name) {
       names.add(node.name.text);
-    } else if (ts10.isModuleBlock(node)) {
-      ts10.forEachChild(node, visit);
+    } else if (ts13.isModuleBlock(node)) {
+      ts13.forEachChild(node, visit);
     }
   };
   for (const statement of sourceFile.statements)
-    if (ts10.isModuleDeclaration(statement))
+    if (ts13.isModuleDeclaration(statement))
       visit(statement);
   return names;
 }
@@ -4891,7 +6403,7 @@ function selectType(context, request) {
       fail("INVALID_RANGE", "position must be a UTF-16 offset within the file");
     }
     const statement = sourceFile.statements.find((item) => item.getStart(sourceFile) <= request.position && request.position <= item.end);
-    if (statement && ts10.isModuleDeclaration(statement))
+    if (statement && ts13.isModuleDeclaration(statement))
       fail("NAMESPACE_UNSUPPORTED", "types inside TypeScript namespaces are not supported");
     const declaration = types.find((item) => item === statement);
     if (!declaration)
@@ -4922,14 +6434,14 @@ function selectType(context, request) {
 }
 function assertCaseSafe(root, path) {
   let current = root;
-  for (const part of relative10(root, path).split(sep7)) {
+  for (const part of relative11(root, path).split(sep7)) {
     let names;
     try {
-      names = readdirSync3(current);
+      names = readdirSync4(current);
     } catch {
       return;
     }
-    const next = resolve17(current, part);
+    const next = resolve20(current, part);
     if (!names.includes(part)) {
       if (existsSync4(next)) {
         const actual = names.find((name) => name.toLowerCase() === part.toLowerCase()) ?? "an existing entry";
@@ -4949,7 +6461,7 @@ function userFiles(ws) {
 function applyEdits(context, edits, newFile) {
   const { ws } = context;
   for (const edit of [...edits].sort((a, b) => a.fileName.localeCompare(b.fileName))) {
-    const path = resolve17(edit.fileName);
+    const path = resolve20(edit.fileName);
     if (!isInside(ws.root, path))
       fail("OUTSIDE_ROOT", `TypeScript proposed a change outside ${ws.root}: ${path}`);
     if (path.split(sep7).includes("node_modules") || ws.vfs.isHidden(path))
@@ -5009,7 +6521,7 @@ function importerMap(ws, paths) {
         found.get(ws.vfs.key(resolved.resolvedFileName))?.push(ws.vfs.key(file));
     }
     for (const reference of sourceFile.referencedFiles) {
-      found.get(ws.vfs.key(resolve17(dirname13(file), reference.fileName)))?.push(ws.vfs.key(file));
+      found.get(ws.vfs.key(resolve20(dirname15(file), reference.fileName)))?.push(ws.vfs.key(file));
     }
   }
   for (const files of found.values())
@@ -5029,10 +6541,10 @@ function nodeAt(sourceFile, position) {
   }
 }
 function inModuleSyntax(node) {
-  for (let current = node;current && !ts10.isSourceFile(current); current = current.parent) {
-    if (ts10.isImportSpecifier(current) || ts10.isExportSpecifier(current) || ts10.isImportClause(current) || ts10.isNamespaceImport(current) || ts10.isImportEqualsDeclaration(current))
+  for (let current = node;current && !ts13.isSourceFile(current); current = current.parent) {
+    if (ts13.isImportSpecifier(current) || ts13.isExportSpecifier(current) || ts13.isImportClause(current) || ts13.isNamespaceImport(current) || ts13.isImportEqualsDeclaration(current))
       return true;
-    if (ts10.isStatement(current))
+    if (ts13.isStatement(current))
       return false;
   }
   return false;
@@ -5066,14 +6578,14 @@ function usesCommonJs(sourceFile) {
   const visit = (node) => {
     if (found)
       return;
-    if (ts10.isCallExpression(node) && ts10.isIdentifier(node.expression) && node.expression.text === "require")
+    if (ts13.isCallExpression(node) && ts13.isIdentifier(node.expression) && node.expression.text === "require")
       found = true;
-    else if (ts10.isPropertyAccessExpression(node) && ts10.isIdentifier(node.expression) && (node.expression.text === "module" && node.name.text === "exports" || node.expression.text === "exports"))
+    else if (ts13.isPropertyAccessExpression(node) && ts13.isIdentifier(node.expression) && (node.expression.text === "module" && node.name.text === "exports" || node.expression.text === "exports"))
       found = true;
-    else if (ts10.isExportAssignment(node) && node.isExportEquals)
+    else if (ts13.isExportAssignment(node) && node.isExportEquals)
       found = true;
     else
-      ts10.forEachChild(node, visit);
+      ts13.forEachChild(node, visit);
   };
   visit(sourceFile);
   return found;
@@ -5082,17 +6594,17 @@ function specifierLike(from, to, original, originalTarget) {
   if (!original.startsWith("./") && !original.startsWith("../")) {
     fail("REEXPORT_UNSUPPORTED", `non-relative specifier '${original}' in ${from} cannot be retargeted deterministically`);
   }
-  const written = extname4(original);
-  const targetExtension = extname4(to);
+  const written = extname5(original);
+  const targetExtension = extname5(to);
   if (![...tsExtensions, ...jsExtensions].includes(targetExtension)) {
-    const path = portablePath(relative10(dirname13(from), to));
+    const path = portablePath(relative11(dirname15(from), to));
     return path.startsWith(".") ? path : `./${path}`;
   }
   let extension = "";
   if ([...tsExtensions, ...jsExtensions].includes(written)) {
-    extension = written === extname4(originalTarget) ? targetExtension : written === ".jsx" && targetExtension === ".tsx" ? ".jsx" : jsEquivalent[targetExtension] ?? targetExtension;
+    extension = written === extname5(originalTarget) ? targetExtension : written === ".jsx" && targetExtension === ".tsx" ? ".jsx" : jsEquivalent[targetExtension] ?? targetExtension;
   }
-  const path = portablePath(relative10(dirname13(from), to.slice(0, to.length - targetExtension.length))) + extension;
+  const path = portablePath(relative11(dirname15(from), to.slice(0, to.length - targetExtension.length))) + extension;
   return path.startsWith(".") ? path : `./${path}`;
 }
 function updateReexports(context, target, name, exported, sourceDeleted) {
@@ -5107,7 +6619,7 @@ function updateReexports(context, target, name, exported, sourceDeleted) {
     const eol = eolOf(text);
     const changes = [];
     for (const statement of sourceFile.statements) {
-      if (!ts10.isExportDeclaration(statement) || !statement.moduleSpecifier || !ts10.isStringLiteral(statement.moduleSpecifier))
+      if (!ts13.isExportDeclaration(statement) || !statement.moduleSpecifier || !ts13.isStringLiteral(statement.moduleSpecifier))
         continue;
       const resolved = ws.resolveModule(statement.moduleSpecifier, sourceFile);
       if (!resolved || !ws.vfs.samePath(resolved.resolvedFileName, file))
@@ -5121,7 +6633,7 @@ function updateReexports(context, target, name, exported, sourceDeleted) {
           changes.push({ span: { start: specifierStart, length: statement.moduleSpecifier.end - specifierStart }, newText: literal });
         else if (exported)
           changes.push({ span: { start: statement.end, length: 0 }, newText: `${eol}export ${typeOnly}{ ${name} } from ${literal};` });
-      } else if (ts10.isNamespaceExport(statement.exportClause)) {
+      } else if (ts13.isNamespaceExport(statement.exportClause)) {
         if (exported)
           fail("REEXPORT_UNSUPPORTED", `${path} re-exports ${file} as namespace '${statement.exportClause.name.getText(sourceFile)}'; moving ${name} would change that namespace`);
       } else {
@@ -5159,7 +6671,7 @@ function moduleEdges(ws, files, owners) {
       const resolved = ws.resolveModule(specifier, sourceFile, options);
       if (!resolved)
         continue;
-      const target = resolve17(resolved.resolvedFileName);
+      const target = resolve20(resolved.resolvedFileName);
       if (!isInside(ws.root, target) || target.split(sep7).includes("node_modules") || ws.vfs.isHidden(target))
         continue;
       edges.push({ file, target, from, to: owners(target) });
@@ -5232,7 +6744,7 @@ function renameFile(context, request) {
     fail("INVALID_REQUEST", "rename-file keeps the file in its project; targetProject must be omitted");
   }
   const { name } = selectType(context, request);
-  const target = resolve17(dirname13(file), `${name}${extname4(file)}`);
+  const target = resolve20(dirname15(file), `${name}${extname5(file)}`);
   if (request.target !== undefined && assertAbsolute("target", request.target) !== target) {
     fail("INVALID_REQUEST", `rename-file derives its destination from the type name: ${target}`);
   }
@@ -5272,22 +6784,22 @@ function renameFile(context, request) {
 function topLevelNames(sourceFile) {
   const names = new Map;
   for (const statement of sourceFile.statements) {
-    if (ts10.isImportDeclaration(statement)) {
+    if (ts13.isImportDeclaration(statement)) {
       const clause = statement.importClause;
       if (clause?.name)
         names.set(clause.name.text, statement);
-      if (clause?.namedBindings && ts10.isNamespaceImport(clause.namedBindings))
+      if (clause?.namedBindings && ts13.isNamespaceImport(clause.namedBindings))
         names.set(clause.namedBindings.name.text, statement);
-      if (clause?.namedBindings && ts10.isNamedImports(clause.namedBindings)) {
+      if (clause?.namedBindings && ts13.isNamedImports(clause.namedBindings)) {
         for (const element of clause.namedBindings.elements)
           names.set(element.name.text, statement);
       }
-    } else if (ts10.isVariableStatement(statement)) {
+    } else if (ts13.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
-        if (ts10.isIdentifier(declaration.name))
+        if (ts13.isIdentifier(declaration.name))
           names.set(declaration.name.text, statement);
       }
-    } else if ("name" in statement && statement.name && ts10.isIdentifier(statement.name)) {
+    } else if ("name" in statement && statement.name && ts13.isIdentifier(statement.name)) {
       names.set(statement.name.text, statement);
     }
   }
@@ -5296,37 +6808,37 @@ function topLevelNames(sourceFile) {
 function assertSafeInitialization(declaration) {
   const reject = () => fail("INITIALIZATION_EFFECTS_UNSUPPORTED", "move-type cannot preserve runtime initialization order for this declaration; static effects, computed names, decorators and evaluated base classes are unsupported");
   const constant = (expression) => {
-    if (ts10.isParenthesizedExpression(expression) || ts10.isAsExpression(expression) || ts10.isTypeAssertionExpression(expression) || ts10.isSatisfiesExpression(expression))
+    if (ts13.isParenthesizedExpression(expression) || ts13.isAsExpression(expression) || ts13.isTypeAssertionExpression(expression) || ts13.isSatisfiesExpression(expression))
       return constant(expression.expression);
-    if (ts10.isPrefixUnaryExpression(expression))
-      return [ts10.SyntaxKind.PlusToken, ts10.SyntaxKind.MinusToken, ts10.SyntaxKind.ExclamationToken, ts10.SyntaxKind.TildeToken].includes(expression.operator) && constant(expression.operand);
-    return ts10.isNumericLiteral(expression) || ts10.isStringLiteral(expression) || ts10.isNoSubstitutionTemplateLiteral(expression) || ts10.isBigIntLiteral(expression) || [ts10.SyntaxKind.TrueKeyword, ts10.SyntaxKind.FalseKeyword, ts10.SyntaxKind.NullKeyword].includes(expression.kind);
+    if (ts13.isPrefixUnaryExpression(expression))
+      return [ts13.SyntaxKind.PlusToken, ts13.SyntaxKind.MinusToken, ts13.SyntaxKind.ExclamationToken, ts13.SyntaxKind.TildeToken].includes(expression.operator) && constant(expression.operand);
+    return ts13.isNumericLiteral(expression) || ts13.isStringLiteral(expression) || ts13.isNoSubstitutionTemplateLiteral(expression) || ts13.isBigIntLiteral(expression) || [ts13.SyntaxKind.TrueKeyword, ts13.SyntaxKind.FalseKeyword, ts13.SyntaxKind.NullKeyword].includes(expression.kind);
   };
-  if (ts10.isEnumDeclaration(declaration)) {
+  if (ts13.isEnumDeclaration(declaration)) {
     if (declaration.members.some((member) => member.initializer && !constant(member.initializer)))
       reject();
   }
-  if (!ts10.isClassDeclaration(declaration))
+  if (!ts13.isClassDeclaration(declaration))
     return;
-  if (ts10.getDecorators(declaration)?.length || declaration.heritageClauses?.some((clause) => clause.token === ts10.SyntaxKind.ExtendsKeyword && clause.types.some((type) => !ts10.isIdentifier(type.expression))))
+  if (ts13.getDecorators(declaration)?.length || declaration.heritageClauses?.some((clause) => clause.token === ts13.SyntaxKind.ExtendsKeyword && clause.types.some((type) => !ts13.isIdentifier(type.expression))))
     reject();
   for (const member of declaration.members) {
-    if (ts10.canHaveDecorators(member) && ts10.getDecorators(member)?.length || ts10.isClassStaticBlockDeclaration(member) || member.name && ts10.isComputedPropertyName(member.name))
+    if (ts13.canHaveDecorators(member) && ts13.getDecorators(member)?.length || ts13.isClassStaticBlockDeclaration(member) || member.name && ts13.isComputedPropertyName(member.name))
       reject();
-    if (ts10.isConstructorDeclaration(member) && member.parameters.some((parameter) => ts10.getDecorators(parameter)?.length))
+    if (ts13.isConstructorDeclaration(member) && member.parameters.some((parameter) => ts13.getDecorators(parameter)?.length))
       reject();
-    if (ts10.isPropertyDeclaration(member) && ts10.getModifiers(member)?.some((modifier) => modifier.kind === ts10.SyntaxKind.StaticKeyword) && member.initializer && !constant(member.initializer))
+    if (ts13.isPropertyDeclaration(member) && ts13.getModifiers(member)?.some((modifier) => modifier.kind === ts13.SyntaxKind.StaticKeyword) && member.initializer && !constant(member.initializer))
       reject();
   }
 }
 function importedTarget(ws, binding) {
-  const imported = ts10.isImportSpecifier(binding) ? (binding.propertyName ?? binding.name).text : ts10.isImportClause(binding) ? "default" : ts10.isNamespaceImport(binding) ? "*" : undefined;
+  const imported = ts13.isImportSpecifier(binding) ? (binding.propertyName ?? binding.name).text : ts13.isImportClause(binding) ? "default" : ts13.isNamespaceImport(binding) ? "*" : undefined;
   if (imported === undefined)
     return;
   let parent = binding;
-  while (parent.parent && !ts10.isImportDeclaration(parent))
+  while (parent.parent && !ts13.isImportDeclaration(parent))
     parent = parent.parent;
-  if (!ts10.isImportDeclaration(parent) || !ts10.isStringLiteralLike(parent.moduleSpecifier))
+  if (!ts13.isImportDeclaration(parent) || !ts13.isStringLiteralLike(parent.moduleSpecifier))
     return;
   const resolved = ws.resolveModule(parent.moduleSpecifier, parent.getSourceFile());
   return resolved ? `${ws.vfs.key(resolved.resolvedFileName)}\x00${imported}` : undefined;
@@ -5335,18 +6847,18 @@ function typeImportTargets(ws, declaration) {
   const checker = ws.program().getTypeChecker();
   const targets = new Set;
   const visit = (node) => {
-    if (ts10.isIdentifier(node))
+    if (ts13.isIdentifier(node))
       for (const binding of checker.getSymbolAtLocation(node)?.declarations ?? []) {
         const target = importedTarget(ws, binding);
         if (target)
           targets.add(target);
       }
-    if (ts10.isImportTypeNode(node) && ts10.isLiteralTypeNode(node.argument) && ts10.isStringLiteralLike(node.argument.literal)) {
+    if (ts13.isImportTypeNode(node) && ts13.isLiteralTypeNode(node.argument) && ts13.isStringLiteralLike(node.argument.literal)) {
       const resolved = ws.resolveModule(node.argument.literal, node.getSourceFile());
       if (resolved)
         targets.add(`${ws.vfs.key(resolved.resolvedFileName)}\x00import-type:${node.qualifier?.getText() ?? "*"}`);
     }
-    ts10.forEachChild(node, visit);
+    ts13.forEachChild(node, visit);
   };
   visit(declaration);
   return targets;
@@ -5362,7 +6874,7 @@ function moveType(context, request) {
   }
   if (ws.vfs.samePath(target, file))
     fail("INVALID_REQUEST", "target must differ from the source file");
-  if (!ts10.isExternalModule(sourceFile))
+  if (!ts13.isExternalModule(sourceFile))
     fail("MODULE_REQUIRED", "move-type requires an ES module source file (with import or export)");
   if (isJs && usesCommonJs(sourceFile))
     fail("COMMONJS_UNSUPPORTED", "CommonJS require/exports are not supported by move-type");
@@ -5379,7 +6891,7 @@ function moveType(context, request) {
     fail("MERGED_DECLARATION_UNSUPPORTED", `${name} merges with other declarations (namespace, interface or global augmentation)`);
   }
   const importedTargets = typeImportTargets(ws, declaration);
-  const exported = (ts10.getCombinedModifierFlags(declaration) & ts10.ModifierFlags.Export) !== 0;
+  const exported = (ts13.getCombinedModifierFlags(declaration) & ts13.ModifierFlags.Export) !== 0;
   const targetExists = ws.vfs.fileExists(target);
   if (!targetExists && ws.vfs.directoryExists(target))
     fail("TARGET_EXISTS", `${target} is a directory`);
@@ -5390,12 +6902,12 @@ function moveType(context, request) {
       fail("TARGET_NOT_IN_PROJECT", `${target} must belong to exactly ${ws.targetConfig}; owners: ${owners.join(", ") || "none"}`);
     }
     const targetSource = program.getSourceFile(target);
-    if (!ts10.isExternalModule(targetSource))
+    if (!ts13.isExternalModule(targetSource))
       fail("MODULE_REQUIRED", `${target} is not an ES module`);
     if (isJs && usesCommonJs(targetSource))
       fail("COMMONJS_UNSUPPORTED", `${target} uses CommonJS`);
     const existing = topLevelNames(targetSource).get(name);
-    const importsMoved = existing && ts10.isImportDeclaration(existing) && ts10.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource)?.resolvedFileName ?? "", file);
+    const importsMoved = existing && ts13.isImportDeclaration(existing) && ts13.isStringLiteral(existing.moduleSpecifier) && ws.vfs.samePath(ws.resolveModule(existing.moduleSpecifier, targetSource)?.resolvedFileName ?? "", file);
     if (existing && !importsMoved)
       fail("TARGET_CONFLICT", `${target} already declares ${name}`);
   }
@@ -5408,7 +6920,7 @@ function moveType(context, request) {
       beforeOwners.set(key, [...beforeOwners.get(key) ?? [], config]);
   }
   const listedBefore = (config, path) => before.get(config).includes(ws.vfs.key(path));
-  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname13(config), dirname13(ws.targetConfig)));
+  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname15(config), dirname15(ws.targetConfig)));
   const mirroring = siblings.filter((config) => listedBefore(config, file) && !listedBefore(config, target));
   const statementStart = declaration.getStart(sourceFile);
   const moduleGraph = () => {
@@ -5419,7 +6931,7 @@ function moveType(context, request) {
     }
     return graph;
   };
-  const modulesBefore = ts10.isClassDeclaration(declaration) ? moduleGraph() : undefined;
+  const modulesBefore = ts13.isClassDeclaration(declaration) ? moduleGraph() : undefined;
   const countsBefore = referenceCounts(ws, file, nameStart, { start: declaration.pos, end: declaration.end, to: target });
   const range = { pos: statementStart, end: declaration.end };
   const preferences = preferencesFor(ws);
@@ -5499,7 +7011,7 @@ function movePaths(root, file, target, exclude = []) {
     fail("OUTSIDE_ROOT", `target is outside ${root}`);
   let stat;
   try {
-    stat = lstatSync2(file);
+    stat = lstatSync3(file);
   } catch {
     fail("FILE_NOT_FOUND", file);
   }
@@ -5508,7 +7020,7 @@ function movePaths(root, file, target, exclude = []) {
   if (stat.isFile()) {
     if (exclude.length)
       fail("INVALID_REQUEST", "--exclude requires directory sources");
-    if (extname4(file) !== extname4(target))
+    if (extname5(file) !== extname5(target))
       fail("UNSUPPORTED_TARGET", "move-file must retain the file extension");
     return [[file, target]];
   }
@@ -5518,8 +7030,8 @@ function movePaths(root, file, target, exclude = []) {
     fail("INVALID_REQUEST", "source and destination directories must not overlap");
   const paths = [];
   const visit = (directory) => {
-    for (const entry of readdirSync3(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      const path = resolve17(directory, entry.name);
+    for (const entry of readdirSync4(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = resolve20(directory, entry.name);
       if (excludedByPatterns(path, file, exclude))
         continue;
       if (entry.isSymbolicLink())
@@ -5527,7 +7039,7 @@ function movePaths(root, file, target, exclude = []) {
       if (entry.isDirectory())
         visit(path);
       else if (entry.isFile())
-        paths.push([path, resolve17(target, relative10(file, path))]);
+        paths.push([path, resolve20(target, relative11(file, path))]);
       else
         fail("UNSUPPORTED_FILE", path);
     }
@@ -5550,7 +7062,7 @@ function relocationImports(ws, renames) {
       const resolved = ws.resolveModule(specifier, source, options);
       if (!resolved)
         return;
-      const target = resolve17(resolved.resolvedFileName);
+      const target = resolve20(resolved.resolvedFileName);
       if (!moved.has(ws.vfs.key(file)) && !moved.has(ws.vfs.key(target)))
         return;
       const alias = Object.keys(options.paths ?? {}).some((pattern) => {
@@ -5565,7 +7077,7 @@ function relocationImports(ws, renames) {
 function moveFile(context, request, renames) {
   const { ws, root, file } = context;
   const target = assertAbsolute("target", request.target);
-  const directory = lstatSync2(file).isDirectory();
+  const directory = lstatSync3(file).isDirectory();
   if (ws.vfs.samePath(file, target))
     fail("INVALID_REQUEST", "target must differ from the source");
   if (ws.vfs.fileExists(target) || !directory && ws.vfs.directoryExists(target))
@@ -5574,7 +7086,7 @@ function moveFile(context, request, renames) {
     if (ws.vfs.fileExists(to) || ws.vfs.directoryExists(to))
       fail("TARGET_EXISTS", to);
     assertCaseSafe(root, to);
-    const bytes = readFileSync4(from);
+    const bytes = readFileSync5(from);
     if (!Buffer.from(bytes.toString("utf8")).equals(bytes))
       fail("UNSUPPORTED_ENCODING", `${from}: move-file plans require UTF-8 text`);
   }
@@ -5598,7 +7110,7 @@ function moveFile(context, request, renames) {
   }
   const references = userFiles(ws).flatMap((path) => {
     const source = parseFile(ws, path);
-    return source?.referencedFiles.map((reference) => ({ file: path, start: reference.pos, length: reference.end - reference.pos, target: resolve17(dirname13(path), reference.fileName) })) ?? [];
+    return source?.referencedFiles.map((reference) => ({ file: path, start: reference.pos, length: reference.end - reference.pos, target: resolve20(dirname15(path), reference.fileName) })) ?? [];
   });
   const imports = relocationImports(ws, renames);
   const mapping = new Map(renames.map(([from, to]) => [ws.vfs.key(from), to]));
@@ -5624,18 +7136,18 @@ function moveFile(context, request, renames) {
     ws.vfs.write(to, text, bom);
   }
   const sameProject = ws.vfs.samePath(ws.sourceConfig, ws.targetConfig);
-  const directoryRenames = (request.moves ?? [{ file, target }]).filter((move) => !request.exclude?.length && lstatSync2(move.file).isDirectory()).map((move) => [move.file, move.target]);
+  const directoryRenames = (request.moves ?? [{ file, target }]).filter((move) => !request.exclude?.length && lstatSync3(move.file).isDirectory()).map((move) => [move.file, move.target]);
   const configRenames = [...directoryRenames, ...renames];
   const substitutions = new Map;
   if (!sameProject)
     for (const item of ws.participants.values()) {
-      if (ws.vfs.samePath(dirname13(item.configPath), dirname13(ws.targetConfig)))
+      if (ws.vfs.samePath(dirname15(item.configPath), dirname15(ws.targetConfig)))
         substitutions.set(ws.vfs.key(item.configPath), configRenames);
     }
   ws.updateConfigLists(sameProject ? configRenames : [], sameProject ? [] : configRenames.map(([from]) => from), substitutions);
   ws.reparse();
   const sourceRenames = renames.filter(([from]) => [...before.values()].some((files) => files.includes(ws.vfs.key(from))));
-  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname13(config), dirname13(ws.targetConfig)));
+  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname15(config), dirname15(ws.targetConfig)));
   for (const [, to] of sourceRenames) {
     if (!ws.fileNames(ws.targetConfig).some((path) => ws.vfs.samePath(path, to))) {
       if (!ws.addToFiles(ws.targetConfig, to))
@@ -5656,7 +7168,7 @@ function moveFile(context, request, renames) {
       fail("REFERENCES_NOT_PRESERVED", `module specifier disappeared in ${from}`);
     const owner = ws.ownersOf(from)[0];
     const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
-    const bare = mapping.has(ws.vfs.key(edge.target)) || !edge.original.startsWith(".") ? packageSpecifier(ws, from, to, ts10.getModeForUsageLocation(source, specifier, options)) : undefined;
+    const bare = mapping.has(ws.vfs.key(edge.target)) || !edge.original.startsWith(".") ? packageSpecifier(ws, from, to, ts13.getModeForUsageLocation(source, specifier, options)) : undefined;
     const style = styles.get(edge);
     const name = bare ?? specifierLike(from, to, style, edge.target);
     const start = specifier.getStart(source) + 1;
@@ -5669,7 +7181,7 @@ function moveFile(context, request, renames) {
       if (!mapping.has(ws.vfs.key(reference.file)) && !mapping.has(ws.vfs.key(reference.target)))
         continue;
       const from = relocated(reference.file), to = relocated(reference.target);
-      const path = portablePath(relative10(dirname13(from), to));
+      const path = portablePath(relative11(dirname15(from), to));
       const edits = changes.get(from) ?? [];
       edits.push({ span: { start: reference.start, length: reference.length }, newText: path.startsWith(".") ? path : `./${path}` });
       changes.set(from, edits);
@@ -5686,7 +7198,7 @@ function moveFile(context, request, renames) {
       if (anticipatePackageExport(ws, to, edge.original)) {
         const owner = ws.ownersOf(from)[0];
         const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
-        packageSpecifier(ws, from, to, ts10.getModeForUsageLocation(source, specifier, options));
+        packageSpecifier(ws, from, to, ts13.getModeForUsageLocation(source, specifier, options));
         const resolved = ws.resolveModule(specifier, source, options);
         if (!resolved || !ws.vfs.samePath(resolved.resolvedFileName, to))
           fail("REFERENCES_NOT_PRESERVED", `${edge.original} in ${from} must resolve to anticipated destination ${to}`);
@@ -5739,7 +7251,7 @@ function moveFile(context, request, renames) {
   };
   updateMocks((path, source, edits) => {
     const specifiers = moduleSpecifiers(source);
-    const inserted = edits.map((edit) => ({ start: edit.start, count: moduleSpecifiers(ts10.createSourceFile(path, edit.text, ts10.ScriptTarget.Latest, true)).length }));
+    const inserted = edits.map((edit) => ({ start: edit.start, count: moduleSpecifiers(ts13.createSourceFile(path, edit.text, ts13.ScriptTarget.Latest, true)).length }));
     for (const edge of [...imports, ...pendingImports]) {
       if (!ws.vfs.samePath(relocated(edge.file), path))
         continue;
@@ -5749,38 +7261,38 @@ function moveFile(context, request, renames) {
     }
   });
   moveSuppressions(ws, renames, context.notes);
-  context.notes.push(`Moved ${renames.length} file(s) from ${relative10(root, file)} to ${relative10(root, target)}; validated source and target project membership.`);
+  context.notes.push(`Moved ${renames.length} file(s) from ${relative11(root, file)} to ${relative11(root, target)}; validated source and target project membership.`);
 }
 function selectedStatement(source, name) {
   const matches = source.statements.filter((statement) => {
-    if (!ts10.canHaveModifiers(statement) || ts10.getModifiers(statement)?.some((modifier) => modifier.kind === ts10.SyntaxKind.DefaultKeyword) || !ts10.getModifiers(statement)?.some((modifier) => modifier.kind === ts10.SyntaxKind.ExportKeyword))
+    if (!ts13.canHaveModifiers(statement) || ts13.getModifiers(statement)?.some((modifier) => modifier.kind === ts13.SyntaxKind.DefaultKeyword) || !ts13.getModifiers(statement)?.some((modifier) => modifier.kind === ts13.SyntaxKind.ExportKeyword))
       return false;
-    if (ts10.isVariableStatement(statement))
-      return statement.declarationList.declarations.some((item) => ts10.isIdentifier(item.name) && item.name.text === name);
-    return "name" in statement && statement.name && ts10.isIdentifier(statement.name) && statement.name.text === name;
+    if (ts13.isVariableStatement(statement))
+      return statement.declarationList.declarations.some((item) => ts13.isIdentifier(item.name) && item.name.text === name);
+    return "name" in statement && statement.name && ts13.isIdentifier(statement.name) && statement.name.text === name;
   });
   if (matches.length !== 1)
     fail("UNSUPPORTED_SELECTION", `${source.fileName}: --only requires one exported declaration for '${name}' (merged declarations and re-exports are unsupported)`);
   const statement = matches[0];
-  if (ts10.isVariableStatement(statement) && statement.declarationList.declarations.length !== 1)
+  if (ts13.isVariableStatement(statement) && statement.declarationList.declarations.length !== 1)
     fail("UNSUPPORTED_SELECTION", `${name}: split multi-variable declarations before moving`);
-  if (ts10.isClassDeclaration(statement) || ts10.isEnumDeclaration(statement))
+  if (ts13.isClassDeclaration(statement) || ts13.isEnumDeclaration(statement))
     assertSafeInitialization(statement);
-  if (ts10.isVariableStatement(statement))
+  if (ts13.isVariableStatement(statement))
     fail("UNSUPPORTED_SELECTION", `${name}: runtime variable initialization requires a whole-file move`);
   return statement;
 }
 function moveSelected(context, request) {
   const { ws, file, sourceFile, root } = context;
   const target = assertAbsolute("target", request.target);
-  if (request.moves || lstatSync2(file).isDirectory())
+  if (request.moves || lstatSync3(file).isDirectory())
     fail("UNSUPPORTED_SELECTION", "--only requires one source file; batch whole files separately");
   if (!request.only?.length || new Set(request.only).size !== request.only.length)
     fail("INVALID_REQUEST", "--only requires distinct exported declaration names");
   if (ws.vfs.fileExists(target) || ws.vfs.directoryExists(target))
     fail("TARGET_EXISTS", target);
   assertCaseSafe(root, target);
-  const bytes = readFileSync4(file);
+  const bytes = readFileSync5(file);
   if (!Buffer.from(bytes.toString("utf8")).equals(bytes))
     fail("UNSUPPORTED_ENCODING", `${file}: selected moves require UTF-8 text`);
   const selected = request.only.map((name) => ({ name, statement: selectedStatement(sourceFile, name) })).sort((a, b) => a.statement.pos - b.statement.pos);
@@ -5788,8 +7300,8 @@ function moveSelected(context, request) {
   const graphBefore = projectGraph(ws, userFiles(ws), (path) => ws.ownersOf(path));
   const mappings = moveMappings(root, target, request.map, ws.vfs.inputs.sys);
   const rules = moveMapEntries(mappings);
-  const remapped = sourceFile.statements.filter(ts10.isImportDeclaration).flatMap((statement) => {
-    if (!ts10.isStringLiteralLike(statement.moduleSpecifier))
+  const remapped = sourceFile.statements.filter(ts13.isImportDeclaration).flatMap((statement) => {
+    if (!ts13.isStringLiteralLike(statement.moduleSpecifier))
       return [];
     const resolved = ws.resolveModule(statement.moduleSpecifier, sourceFile);
     return resolved ? rules.filter((rule) => rule.from === statement.moduleSpecifier.text).map((rule) => ({ target: ws.vfs.key(resolved.resolvedFileName), imported: rule.imported })) : [];
@@ -5831,7 +7343,7 @@ function moveSelected(context, request) {
       fail("TARGET_NOT_IN_PROJECT", `${target} is not matched by ${ws.targetConfig}`);
     ws.reparse();
   }
-  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname13(config), dirname13(ws.targetConfig)));
+  const siblings = ws.observers().filter((config) => ws.vfs.samePath(dirname15(config), dirname15(ws.targetConfig)));
   assertMembership(ws, before, [], empty ? [file] : [], { path: target, must: [ws.targetConfig], may: siblings });
   normalizeSelectedImports(ws, target);
   ws.reparse();
@@ -5847,19 +7359,19 @@ function moveSelected(context, request) {
           fail("REFERENCES_NOT_PRESERVED", `${name} no longer imports ${dependency.replace("\x00", " export ")}; map its source alias explicitly or move the dependency too`);
     }
   };
-  context.notes.push(`Moved selected declarations ${selected.map((item) => item.name).join(", ")} to ${relative10(root, target)}; unselected declarations stay in ${relative10(root, file)}.`);
+  context.notes.push(`Moved selected declarations ${selected.map((item) => item.name).join(", ")} to ${relative11(root, target)}; unselected declarations stay in ${relative11(root, file)}.`);
 }
 function removeSelectedSelfImports(ws, target, names) {
   const source = parseFile(ws, target);
   const edits = [];
   for (const statement of source.statements) {
-    if (!ts10.isImportDeclaration(statement) || !ts10.isStringLiteralLike(statement.moduleSpecifier))
+    if (!ts13.isImportDeclaration(statement) || !ts13.isStringLiteralLike(statement.moduleSpecifier))
       continue;
     const resolved = ws.resolveModule(statement.moduleSpecifier, source);
     if (!resolved || !ws.vfs.samePath(resolved.resolvedFileName, target))
       continue;
     const bindings = statement.importClause?.namedBindings;
-    if (statement.importClause?.name || !bindings || !ts10.isNamedImports(bindings) || bindings.elements.some((item) => item.propertyName && item.propertyName.text !== item.name.text))
+    if (statement.importClause?.name || !bindings || !ts13.isNamedImports(bindings) || bindings.elements.some((item) => item.propertyName && item.propertyName.text !== item.name.text))
       fail("UNSUPPORTED_SELECTION", "aliased self-import produced by selected move");
     const kept = bindings.elements.filter((item) => !names.has(item.name.text));
     if (!kept.length)
@@ -5880,12 +7392,12 @@ function normalizeSelectedImports(ws, target) {
       const resolved = ws.resolveModule(specifier, source);
       if (!resolved)
         continue;
-      const to = resolve17(resolved.resolvedFileName);
+      const to = resolve20(resolved.resolvedFileName);
       if (!ws.vfs.samePath(to, target) && !(ws.vfs.samePath(path, target) && packageSelfImport(ws, path, to, specifier.text)))
         continue;
       const owner = ws.ownersOf(path)[0];
       const options = owner ? ws.participant(owner).parsed.options : ws.editOptions;
-      const bare = packageSpecifier(ws, path, to, ts10.getModeForUsageLocation(source, specifier, options));
+      const bare = packageSpecifier(ws, path, to, ts13.getModeForUsageLocation(source, specifier, options));
       const name = bare ?? specifierLike(path, to, "./module", to);
       edits.push({ span: { start: specifier.getStart(source), length: specifier.getWidth(source) }, newText: JSON.stringify(name) });
     }
@@ -5911,25 +7423,27 @@ async function analyzeFileOperation(request) {
   const file = assertAbsolute("file", request.file);
   if (!isInside(root, file))
     fail("OUTSIDE_ROOT", `file is outside ${root}`);
-  const movingFiles = request.operation === "move-file" ? (request.moves ?? [{ file, target: assertAbsolute("target", request.target) }]).flatMap((move) => movePaths(root, assertAbsolute("file", move.file), assertAbsolute("target", move.target), request.exclude)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0) : undefined;
+  const inputs = new CompilerInputs(true);
+  const port = request.operation === "port-route" ? preparePortRoute(request, inputs.sys) : undefined;
+  const moveRequest = port ? { ...request, operation: "move-file", map: port.map, exclude: undefined, moves: port.moves.map(([from, to]) => ({ file: from, target: to })) } : request;
+  const movingFiles = port ? [...port.moves].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0) : request.operation === "move-file" ? (request.moves ?? [{ file, target: assertAbsolute("target", request.target) }]).flatMap((move) => movePaths(root, assertAbsolute("file", move.file), assertAbsolute("target", move.target), request.exclude)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0) : undefined;
   if (movingFiles) {
     const sources = new Set(movingFiles.map(([from]) => from)), targets = new Set(movingFiles.map(([, to]) => to));
     if (sources.size !== movingFiles.length || targets.size !== movingFiles.length || [...targets].some((to) => sources.has(to) || [...targets].some((other) => other !== to && isInside(to, other)))) {
       fail("INVALID_REQUEST", "batch sources/destinations must be unique and must not overlap");
     }
   }
-  const extension = movingFiles ? extname4(file) : sourceExtension(file);
+  const extension = movingFiles ? extname5(file) : sourceExtension(file);
   const sourceConfig = configPathFor(assertAbsolute("project", request.project));
-  const targetConfig = ["move-type", "move-file"].includes(request.operation) && request.targetProject ? configPathFor(assertAbsolute("targetProject", request.targetProject)) : sourceConfig;
+  const targetConfig = ["move-type", "move-file", "port-route"].includes(request.operation) && request.targetProject ? configPathFor(assertAbsolute("targetProject", request.targetProject)) : sourceConfig;
   const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
-  if (request.operation === "move-type" && request.target && isAbsolute4(request.target) && existsSync4(request.target))
-    affected.push(resolve17(request.target));
-  const inputs = new CompilerInputs(true);
+  if (request.operation === "move-type" && request.target && isAbsolute6(request.target) && existsSync4(request.target))
+    affected.push(resolve20(request.target));
   if (!request.only && (movingFiles || sourceConfig !== targetConfig))
-    precheckMove(root, sourceConfig, targetConfig, movingFiles ?? [], request, inputs.sys);
+    precheckMove(root, sourceConfig, targetConfig, movingFiles ?? [], moveRequest, inputs.sys);
   const checkerMode = request.checker === "both" ? "both" : "ts7";
   const nativeChecker = request.checker === "ts7" || request.checker === "both" ? await loadTs7Checker(checkerMode) : undefined;
-  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode, inputs));
+  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode, inputs, port ? [port.startConfig] : []));
   try {
     if (!movingFiles && !ws.vfs.fileExists(file))
       fail("FILE_NOT_FOUND", file);
@@ -5942,7 +7456,7 @@ async function analyzeFileOperation(request) {
         fail("OWNERSHIP_AMBIGUOUS", `${file} is included by several projects: ${owners.join(", ")}`);
     }
     ws.assertNoUnhandledProjects(selected, true, false);
-    const sourceFile = timed("workspace.program", () => ws.program().getSourceFile(selected[0] ?? file)) ?? (movingFiles ? ts10.createSourceFile(file, "", ts10.ScriptTarget.Latest) : undefined);
+    const sourceFile = timed("workspace.program", () => ws.program().getSourceFile(selected[0] ?? file)) ?? (movingFiles ? ts13.createSourceFile(file, "", ts13.ScriptTarget.Latest) : undefined);
     if (!sourceFile)
       fail("FILE_NOT_IN_PROJECT", file);
     const isJs = jsExtensions.includes(extension);
@@ -5953,7 +7467,16 @@ async function analyzeFileOperation(request) {
       renamed = renameFile(context, request).renamed;
     else if (request.operation === "move-type")
       moveType(context, request);
-    else if (movingFiles && request.only)
+    else if (port && movingFiles) {
+      const model = timed("port-route.extract", () => new RouteExtractor(ws, portRouteExtractOptions(port, new Set(movingFiles.map(([from]) => ws.vfs.key(from))), (path) => ws.vfs.key(path))).extract(port.page));
+      const dataProps = rewriteView(ws, port, model);
+      timed("workspace.move", () => moveFile(context, moveRequest, movingFiles));
+      context.verify?.();
+      context.verify = undefined;
+      const [, start] = generatePortRoute(ws, port, model, dataProps, movingFiles, context.notes);
+      await regenerateRouteTree(ws, port, start, context.notes);
+      context.notes.push(...model.notes);
+    } else if (movingFiles && request.only)
       timed("workspace.move", () => moveSelected(context, request));
     else if (movingFiles)
       timed("workspace.move", () => moveFile(context, request, movingFiles));
@@ -5979,7 +7502,7 @@ async function analyzeFileOperation(request) {
       context.notes.push("Skipped baseline diagnostics: the planned affected set has no errors.");
     const introduced = newDiagnostics2(comparable, diagnosticsAfter);
     if (introduced.length)
-      fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ") + (movingFiles ? `; affected consumers: ${[...new Set(introduced.map((item) => relative10(root, item.file)))].join(", ")}; adapt these consumers before moving, or include dependent files in the same --file source=destination batch` : "") + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : ""));
+      fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ") + (movingFiles ? `; affected consumers: ${[...new Set(introduced.map((item) => relative11(root, item.file)))].join(", ")}; adapt these consumers before moving, or include dependent files in the same --file source=destination batch` : "") + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : "") + (port ? `; port-route generated ${relative11(root, port.startFile)} and the Next adapter from ${relative11(root, port.config.path)}: fix its templates, snippets or ports for generated-file errors, or prepare the view (props, ports) before porting` : ""));
     context.verify?.();
     for (const [key, layout] of layoutsBefore) {
       const after = ws.layouts.get(key);
@@ -5988,29 +7511,29 @@ async function analyzeFileOperation(request) {
       }
     }
     for (const config of ws.importingConfigs) {
-      context.notes.push(`Included ${relative10(root, config)} because its program imports ${relative10(root, file)} without a project reference.`);
+      context.notes.push(`Included ${relative11(root, config)} because its program imports ${relative11(root, file)} without a project reference.`);
     }
     for (const config of ws.observers()) {
-      context.notes.push(`Updated and validated ${relative10(root, config)}, a variant config that also compiles the affected files.`);
+      context.notes.push(`Updated and validated ${relative11(root, config)}, a variant config that also compiles the affected files.`);
     }
     if (request.checker === "ts7")
       context.notes.push(`Validated all user sources across ${ws.participants.size} project(s) with TS7 7.0.2; TS5 graph discovery is not used to restrict native diagnostics.`);
     else if (validatedFiles !== undefined) {
       context.notes.push(`Validated ${validatedFiles} affected file(s) across ${validatedProjects} project(s): the changed files and their transitive importers in the original and planned module graphs.${validatedProjects < ws.participants.size ? ` Fully checked ${ws.participants.size - validatedProjects} other project(s).` : ""}`);
     } else if (ws.participants.size > 1) {
-      context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative10(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
+      context.notes.push(`Validated ${ws.participants.size} projects (${[...ws.participants.values()].map((item) => relative11(root, item.configPath)).join(", ")}) with in-memory declaration builds for project references.`);
     }
     if (isJs) {
       context.notes.push("JavaScript analysis is semantic only for references TypeScript can resolve; dynamic imports with computed paths and string-based references are not changed.");
     }
     if (renamed)
-      context.notes.push(`Renamed ${relative10(root, renamed[0])} to ${relative10(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
+      context.notes.push(`Renamed ${relative11(root, renamed[0])} to ${relative11(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
     timed("workspace.inputs", () => ws.vfs.assertStableMetadata());
     return {
       readSet: inputs.snapshot(),
       backend: "typescript",
-      checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5", version: ts10.version },
-      version: ts10.version,
+      checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5", version: ts13.version },
+      version: ts13.version,
       changes: ws.vfs.changes(),
       diagnosticsBefore: comparable,
       diagnosticsAfter,
@@ -6034,7 +7557,9 @@ var init_typescript_fileops = __esm(() => {
   init_typescript_suppressions();
   init_typescript_paths();
   init_snapshot();
+  init_typescript_port_route();
   fileCapabilities = [
+    { operation: "port-route", description: "Port a Next App Router route: move its client view into a feature package and generate the thin Next adapter and TanStack Start route from its preload calls." },
     { operation: "move-file", description: "Move whole TS/JS modules or directories within or between workspace packages, updating imports, exports and project file lists." },
     { operation: "inline-reexports", description: "Inline shim re-exports into workspace callers, deleting unreferenced pure shims unless kept." },
     {
@@ -6058,9 +7583,9 @@ __export(exports_typescript, {
   capabilities: () => capabilities,
   setWarmMode: () => setWarmMode
 });
-import ts11 from "typescript";
+import ts14 from "typescript";
 import { statSync as statSync4 } from "node:fs";
-import { basename as basename5, dirname as dirname14, extname as extname5, isAbsolute as isAbsolute5, resolve as resolve18 } from "node:path";
+import { basename as basename6, dirname as dirname16, extname as extname6, isAbsolute as isAbsolute7, resolve as resolve21 } from "node:path";
 function setWarmMode(enabled) {
   warmMode = enabled;
   if (!enabled) {
@@ -6073,10 +7598,10 @@ function fail2(code, reason) {
   throw new Error(`${code}: ${reason}`);
 }
 function canonical(path) {
-  return resolve18(path);
+  return resolve21(path);
 }
 function assertAbsolute2(name, value) {
-  if (!isAbsolute5(value))
+  if (!isAbsolute7(value))
     fail2("INVALID_REQUEST", `${name} must be an absolute path`);
   return canonical(value);
 }
@@ -6088,14 +7613,14 @@ function configPathFor2(project) {
     fail2("PROJECT_NOT_FOUND", project);
   }
   if (stat.isFile()) {
-    if (!["tsconfig.json", "jsconfig.json"].includes(basename5(project))) {
+    if (!["tsconfig.json", "jsconfig.json"].includes(basename6(project))) {
       fail2("UNSUPPORTED_PROJECT", "project must name tsconfig.json or jsconfig.json");
     }
     return project;
   }
   if (!stat.isDirectory())
     fail2("UNSUPPORTED_PROJECT", "project must be a config file or directory");
-  const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve18(project, name)).filter(ts11.sys.fileExists);
+  const candidates = ["tsconfig.json", "jsconfig.json"].map((name) => resolve21(project, name)).filter(ts14.sys.fileExists);
   if (candidates.length === 0)
     fail2("CONFIG_NOT_FOUND", `no tsconfig.json or jsconfig.json in ${project}`);
   if (candidates.length > 1)
@@ -6117,18 +7642,18 @@ function loadProject(request) {
     warmProjects.delete(cacheKey);
   }
   const inputs = new CompilerInputs(true);
-  const parsed = ts11.getParsedCommandLineOfConfigFile(configPath, {}, {
+  const parsed = ts14.getParsedCommandLineOfConfigFile(configPath, {}, {
     ...inputs.sys,
     onUnRecoverableConfigFileDiagnostic(diagnostic) {
-      fail2("INVALID_CONFIG", ts11.flattenDiagnosticMessageText(diagnostic.messageText, `
+      fail2("INVALID_CONFIG", ts14.flattenDiagnosticMessageText(diagnostic.messageText, `
 `));
     }
   });
   if (!parsed)
     fail2("INVALID_CONFIG", `could not parse ${configPath}`);
-  const configErrors = parsed.errors.filter((diagnostic) => diagnostic.category === ts11.DiagnosticCategory.Error);
+  const configErrors = parsed.errors.filter((diagnostic) => diagnostic.category === ts14.DiagnosticCategory.Error);
   if (configErrors.length)
-    fail2("INVALID_CONFIG", ts11.flattenDiagnosticMessageText(configErrors[0].messageText, `
+    fail2("INVALID_CONFIG", ts14.flattenDiagnosticMessageText(configErrors[0].messageText, `
 `));
   if (parsed.projectReferences?.length) {
     fail2("PROJECT_REFERENCES_UNSUPPORTED", "project references require more than one configured program");
@@ -6144,21 +7669,21 @@ function loadProject(request) {
     getScriptSnapshot(fileName) {
       const path = canonical(fileName);
       const text = overlays.get(path) ?? inputs.sys.readFile(path);
-      return text === undefined ? undefined : ts11.ScriptSnapshot.fromString(text);
+      return text === undefined ? undefined : ts14.ScriptSnapshot.fromString(text);
     },
-    getCurrentDirectory: () => dirname14(configPath),
-    getDefaultLibFileName: (options) => ts11.getDefaultLibFilePath(options),
+    getCurrentDirectory: () => dirname16(configPath),
+    getDefaultLibFileName: (options) => ts14.getDefaultLibFilePath(options),
     fileExists: inputs.sys.fileExists,
     readFile: inputs.sys.readFile,
     readDirectory: inputs.sys.readDirectory,
     directoryExists: inputs.sys.directoryExists,
     getDirectories: inputs.sys.getDirectories,
     realpath: inputs.sys.realpath,
-    useCaseSensitiveFileNames: () => ts11.sys.useCaseSensitiveFileNames,
-    getNewLine: () => ts11.sys.newLine,
+    useCaseSensitiveFileNames: () => ts14.sys.useCaseSensitiveFileNames,
+    getNewLine: () => ts14.sys.newLine,
     getProjectVersion: () => String(projectVersion)
   };
-  const service = ts11.createLanguageService(host, ts11.createDocumentRegistry());
+  const service = ts14.createLanguageService(host, ts14.createDocumentRegistry());
   const state = {
     inputs,
     configPath,
@@ -6219,14 +7744,14 @@ function diagnosticRecord(diagnostic, fallback) {
   return {
     file: diagnostic.file ? canonical(diagnostic.file.fileName) : fallback,
     code: `TS${diagnostic.code}`,
-    message: ts11.flattenDiagnosticMessageText(diagnostic.messageText, `
+    message: ts14.flattenDiagnosticMessageText(diagnostic.messageText, `
 `)
   };
 }
 function diagnostics(state, program, only) {
   const records = [];
   const add = (diagnostic) => {
-    if (diagnostic.category !== ts11.DiagnosticCategory.Error)
+    if (diagnostic.category !== ts14.DiagnosticCategory.Error)
       return;
     records.push(diagnosticRecord(diagnostic, state.configPath));
   };
@@ -6249,7 +7774,7 @@ function diagnostics(state, program, only) {
 }
 function importersByFile(state, program = state.service.getProgram()) {
   const host = state.inputs.sys;
-  const cache = ts11.createModuleResolutionCache(dirname14(state.configPath), (name) => host.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
+  const cache = ts14.createModuleResolutionCache(dirname16(state.configPath), (name) => host.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
   const importers = new Map;
   const link = (target, importer) => {
     if (!isInside(state.root, target) || target.includes("/node_modules/"))
@@ -6264,20 +7789,20 @@ function importersByFile(state, program = state.service.getProgram()) {
       continue;
     for (const specifier of moduleSpecifiers(source)) {
       const mode = program.getModeForUsageLocation(source, specifier);
-      const resolved = ts11.resolveModuleName(specifier.text, file, state.options, host, cache, undefined, mode).resolvedModule;
+      const resolved = ts14.resolveModuleName(specifier.text, file, state.options, host, cache, undefined, mode).resolvedModule;
       if (resolved)
         link(canonical(resolved.resolvedFileName), file);
     }
     for (const reference of source.referencedFiles)
-      link(canonical(resolve18(dirname14(file), reference.fileName)), file);
+      link(canonical(resolve21(dirname16(file), reference.fileName)), file);
   }
   return importers;
 }
 function hasGlobalEffect(text, path) {
-  const source = ts11.createSourceFile(path, text, ts11.ScriptTarget.Latest, false);
-  if (!ts11.isExternalModule(source))
+  const source = ts14.createSourceFile(path, text, ts14.ScriptTarget.Latest, false);
+  if (!ts14.isExternalModule(source))
     return true;
-  const visit = (node) => ts11.isModuleDeclaration(node) && (ts11.isStringLiteral(node.name) || (node.flags & ts11.NodeFlags.GlobalAugmentation) !== 0) || !!ts11.forEachChild(node, visit);
+  const visit = (node) => ts14.isModuleDeclaration(node) && (ts14.isStringLiteral(node.name) || (node.flags & ts14.NodeFlags.GlobalAugmentation) !== 0) || !!ts14.forEachChild(node, visit);
   return visit(source);
 }
 function affectedFiles(state, importers, originals) {
@@ -6307,8 +7832,8 @@ function validatePosition(text, position, label = "position") {
   return position;
 }
 function isValidIdentifier(name, target) {
-  const scanner = ts11.createScanner(target, false, ts11.LanguageVariant.Standard, name);
-  return scanner.scan() === ts11.SyntaxKind.Identifier && scanner.getTokenText() === name && scanner.scan() === ts11.SyntaxKind.EndOfFileToken;
+  const scanner = ts14.createScanner(target, false, ts14.LanguageVariant.Standard, name);
+  return scanner.scan() === ts14.SyntaxKind.Identifier && scanner.getTokenText() === name && scanner.scan() === ts14.SyntaxKind.EndOfFileToken;
 }
 function renameLocationKey(fileName, start, length) {
   return `${canonical(fileName)}\x00${start}\x00${length}`;
@@ -6375,7 +7900,7 @@ function rename2(state, file, request) {
   const position = validatePosition(text, request.position);
   if (!request.newName?.trim())
     fail2("INVALID_REQUEST", "newName is required for rename");
-  if (!isValidIdentifier(request.newName, state.options.target ?? ts11.ScriptTarget.Latest)) {
+  if (!isValidIdentifier(request.newName, state.options.target ?? ts14.ScriptTarget.Latest)) {
     fail2("INVALID_NAME", `${request.newName} is not a valid identifier`);
   }
   const info = state.service.getRenameInfo(file, position, { providePrefixAndSuffixTextForRename: true });
@@ -6408,7 +7933,7 @@ function imports(state, file, request) {
   if (request.mode !== "sort" && request.mode !== "remove-unused") {
     fail2("INVALID_REQUEST", "imports mode must be sort or remove-unused");
   }
-  const mode = request.mode === "sort" ? ts11.OrganizeImportsMode.SortAndCombine : ts11.OrganizeImportsMode.RemoveUnused;
+  const mode = request.mode === "sort" ? ts14.OrganizeImportsMode.SortAndCombine : ts14.OrganizeImportsMode.RemoveUnused;
   applyFileEdits(state, state.service.organizeImports({ type: "file", fileName: file, mode }, formatOptions, {}));
 }
 function format(state, file) {
@@ -6422,7 +7947,7 @@ function extraction(state, file, request) {
   const end = validatePosition(text, request.end, "end");
   if (end <= position)
     fail2("INVALID_RANGE", "end must be greater than position");
-  if (!request.newName?.trim() || !isValidIdentifier(request.newName, state.options.target ?? ts11.ScriptTarget.Latest)) {
+  if (!request.newName?.trim() || !isValidIdentifier(request.newName, state.options.target ?? ts14.ScriptTarget.Latest)) {
     fail2("INVALID_NAME", "newName must be a valid identifier for extraction");
   }
   const range = { pos: position, end };
@@ -6446,7 +7971,7 @@ function changedFiles(state, originals) {
 async function analyze(request) {
   if (request.checker !== undefined && !["ts5", "ts7", "both"].includes(request.checker))
     fail2("INVALID_REQUEST", "checker must be ts5, ts7 or both");
-  if (request.operation === "rename-file" || request.operation === "move-type" || request.operation === "move-file" || request.operation === "inline-reexports")
+  if (request.operation === "rename-file" || request.operation === "move-type" || request.operation === "move-file" || request.operation === "inline-reexports" || request.operation === "port-route")
     return analyzeFileOperation(request);
   if (request.operation === "sync-namespace") {
     fail2("UNSUPPORTED_OPERATION", "sync-namespace is C# only; ES modules have no namespace-to-directory convention");
@@ -6461,7 +7986,7 @@ async function analyze(request) {
     const text = request.operation === "retarget-import" ? "" : sourceText(state, file);
     if (text === undefined)
       fail2("FILE_NOT_FOUND", file);
-    const extension = extname5(file).toLowerCase();
+    const extension = extname6(file).toLowerCase();
     if (request.operation !== "retarget-import" && ![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].includes(extension)) {
       fail2("UNSUPPORTED_FILE", extension || "file has no extension");
     }
@@ -6571,8 +8096,8 @@ async function analyze(request) {
     return {
       readSet: [...state.inputs.snapshot(), ...nativeVfs?.inputs.snapshot() ?? []],
       backend: "typescript",
-      checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5", version: ts11.version },
-      version: ts11.version,
+      checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5", version: ts14.version },
+      version: ts14.version,
       changes: changedFiles(state, originals),
       diagnosticsBefore,
       diagnosticsAfter,
@@ -6612,7 +8137,7 @@ var init_typescript = __esm(() => {
     newLineCharacter: `
 `,
     convertTabsToSpaces: true,
-    indentStyle: ts11.IndentStyle.Smart,
+    indentStyle: ts14.IndentStyle.Smart,
     insertSpaceAfterCommaDelimiter: true,
     insertSpaceAfterSemicolonInForStatements: true,
     insertSpaceBeforeAndAfterBinaryOperators: true,
@@ -6620,13 +8145,13 @@ var init_typescript = __esm(() => {
     insertSpaceAfterFunctionKeywordForAnonymousFunctions: false,
     insertSpaceBeforeFunctionParenthesis: false,
     insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces: true,
-    semicolons: ts11.SemicolonPreference.Insert
+    semicolons: ts14.SemicolonPreference.Insert
   };
   warmProjects = new Map;
 });
 
 // src/backends/csharp.ts
-import { basename as basename6, dirname as dirname15, isAbsolute as isAbsolute6, join as join2, relative as relative11, resolve as resolve19, sep as sep8 } from "node:path";
+import { basename as basename7, dirname as dirname17, isAbsolute as isAbsolute8, join as join3, relative as relative12, resolve as resolve22, sep as sep8 } from "node:path";
 import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -6664,7 +8189,7 @@ function validateRequest(request) {
     ["root", request.root],
     ["file", request.file]
   ]) {
-    if (!isAbsolute6(value)) {
+    if (!isAbsolute8(value)) {
       throw new Error(`INVALID_REQUEST: ${name} must be an absolute path`);
     }
   }
@@ -6689,12 +8214,12 @@ function validateRequest(request) {
     throw new Error("INVALID_REQUEST: rootNamespace must be a dotted C# namespace");
   }
   if (request.operation === "move-type") {
-    if (!request.target || !isAbsolute6(request.target) || !request.target.endsWith(".cs")) {
+    if (!request.target || !isAbsolute8(request.target) || !request.target.endsWith(".cs")) {
       throw new Error("INVALID_REQUEST: move-type requires an absolute target .cs file path");
     }
     ensureWithinRoot(request.root, request.target, "target");
     if (request.targetProject !== undefined) {
-      if (!isAbsolute6(request.targetProject) || !request.targetProject.toLowerCase().endsWith(".csproj")) {
+      if (!isAbsolute8(request.targetProject) || !request.targetProject.toLowerCase().endsWith(".csproj")) {
         throw new Error("INVALID_REQUEST: targetProject must be an absolute .csproj path");
       }
       ensureWithinRoot(request.root, request.targetProject, "targetProject");
@@ -6711,26 +8236,26 @@ function validateResult(result, root) {
     if (typeof change.path !== "string" || change.before !== null && typeof change.before !== "string" || change.after !== null && typeof change.after !== "string" || change.before === null && change.after === null) {
       throw new Error("CSHARP_PROTOCOL_ERROR: helper returned a malformed change");
     }
-    if (!isAbsolute6(change.path)) {
+    if (!isAbsolute8(change.path)) {
       throw new Error("CSHARP_PROTOCOL_ERROR: helper returned a relative change path");
     }
     ensureWithinRoot(root, change.path, "changed file");
   }
 }
 function ensureWithinRoot(root, path, label) {
-  const difference = relative11(resolve19(root), resolve19(path));
-  if (difference === ".." || difference.startsWith(`..${sep8}`) || isAbsolute6(difference)) {
+  const difference = relative12(resolve22(root), resolve22(path));
+  if (difference === ".." || difference.startsWith(`..${sep8}`) || isAbsolute8(difference)) {
     throw new Error(`OUTSIDE_ROOT: ${label} is outside root: ${path}`);
   }
 }
 async function findOrBuildHelper(toolkitRoot) {
   const configured = toolkitRoot ?? process.env.REFACTOR_AI_HOME;
-  const directory = dirname15(fileURLToPath(import.meta.url));
-  const sourceRoot = configured ? resolve19(configured) : resolve19(directory, basename6(directory) === "backends" && basename6(dirname15(directory)) === "src" ? "../.." : "..");
+  const directory = dirname17(fileURLToPath(import.meta.url));
+  const sourceRoot = configured ? resolve22(configured) : resolve22(directory, basename7(directory) === "backends" && basename7(dirname17(directory)) === "src" ? "../.." : "..");
   const dll = helperDll(sourceRoot);
   if (await exists(dll))
     return dll;
-  const project = join2(sourceRoot, "dotnet", "RefactorHelper", "RefactorHelper.csproj");
+  const project = join3(sourceRoot, "dotnet", "RefactorHelper", "RefactorHelper.csproj");
   if (!await exists(project))
     throw new Error("CSHARP_HELPER_NOT_FOUND: the selected toolkit root has no helper; set REFACTOR_AI_HOME to the package root");
   const { stdout, stderr, exitCode, timedOut } = await runDotnet([
@@ -6749,7 +8274,7 @@ async function findOrBuildHelper(toolkitRoot) {
   return helperDll(sourceRoot);
 }
 function helperDll(root) {
-  return join2(root, "dotnet", "RefactorHelper", "bin", "Release", "net8.0", "RefactorHelper.dll");
+  return join3(root, "dotnet", "RefactorHelper", "bin", "Release", "net8.0", "RefactorHelper.dll");
 }
 function processEnv() {
   return { ...process.env, DOTNET_NOLOGO: "1", DOTNET_CLI_TELEMETRY_OPTOUT: "1" };
@@ -6831,12 +8356,12 @@ var init_csharp = __esm(() => {
 
 // src/serve.ts
 import { realpathSync as realpathSync2 } from "node:fs";
-import { resolve as resolve20 } from "node:path";
+import { resolve as resolve23 } from "node:path";
 import { createInterface } from "node:readline";
 async function serve(args, context) {
   if (args.length !== 2 || args[0] !== "--root")
     throw new Error('INVALID_ARGUMENT: serve --root <repo>; send NDJSON {id,args:["plan",...]}');
-  const root = realpathSync2(resolve20(args[1]));
+  const root = realpathSync2(resolve23(args[1]));
   process.chdir(root);
   setWarmMode(true);
   try {
@@ -6850,7 +8375,7 @@ async function serve(args, context) {
         }
         const arguments_ = [...request.args];
         const rootIndex = arguments_.indexOf("--root");
-        if (rootIndex >= 0 && realpathSync2(resolve20(arguments_[rootIndex + 1])) !== root)
+        if (rootIndex >= 0 && realpathSync2(resolve23(arguments_[rootIndex + 1])) !== root)
           throw new Error("OUTSIDE_ROOT: request root differs from server root");
         if (rootIndex < 0)
           arguments_.push("--root", root);
@@ -6879,7 +8404,7 @@ var init_serve = __esm(() => {
 // src/cli.ts
 init_cli_core();
 import { realpathSync as realpathSync3 } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL as pathToFileURL2 } from "node:url";
 
 // src/backends/load.ts
 init_languages();
@@ -6899,7 +8424,7 @@ async function main(args, context = {}) {
   }
   return runCli(args, { ...context, loadBackend });
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync3(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL2(realpathSync3(process.argv[1])).href) {
   main(process.argv.slice(2)).catch((error) => {
     console.error(JSON.stringify({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
     process.exitCode = 1;

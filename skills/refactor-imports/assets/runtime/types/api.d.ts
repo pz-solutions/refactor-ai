@@ -39,6 +39,10 @@ export interface PlanOptions {
     targetProject?: string;
     typeName?: string;
     rootNamespace?: string;
+    /** port-route: TanStack Start routes directory (defaults to the config's start.routes). */
+    startRoutes?: string;
+    /** port-route: project configuration (defaults to <root>/.refactor-ai/port-route.json). */
+    config?: string;
 }
 export interface ValidationResult {
     status: "validated" | "failed";

@@ -1,5 +1,5 @@
 import type { ReadSetEntry } from "./core/read-set.js";
-export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "move-file" | "inline-reexports" | "retarget-import";
+export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "move-file" | "inline-reexports" | "retarget-import" | "port-route";
 export interface RefactorRequest {
     /** Opt-in native diagnostics; edits always use pinned TypeScript 5.9.3. */
     checker?: "ts5" | "ts7" | "both";
@@ -38,6 +38,10 @@ export interface RefactorRequest {
     typeName?: string;
     /** Override the C# project's root namespace when its convention is not in MSBuild. */
     rootNamespace?: string;
+    /** port-route: TanStack Start routes directory; defaults to the config's start.routes. */
+    startRoutes?: string;
+    /** port-route: project configuration; defaults to <root>/.refactor-ai/port-route.json. */
+    config?: string;
 }
 export interface Diagnostic {
     file: string;

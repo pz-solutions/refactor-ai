@@ -70,9 +70,10 @@ Paths resolve against the custom script process's current working directory. Ret
 | `name` | New symbol, function or variable name, as required by the operation. |
 | `mode` | Imports mode: `"sort"` or `"remove-unused"`. TS/JS defaults to sort; C# operation APIs default to remove-unused. The aggregate API retains the CLI convention: request remove-unused explicitly for C#. |
 | `moves` | move-file only: array of `{ file, target }` pairs for one atomic analysis; omit top-level file/target. Files may depend on each other. Pair order is canonicalized. |
-| `exclude` | move-file directory sources: array of tsconfig-style globs relative to each source directory; excluded adapters remain. |
+| `exclude` | move-file directory sources and port-route: array of tsconfig-style globs relative to each source directory; excluded adapters remain. |
 | `target` | Destination file/directory path for move-type or move-file, including a new parent directory if needed. |
-| `targetProject` | Destination project configuration for a cross-project move. Valid for move-type or move-file. |
+| `targetProject` | Destination project configuration for a cross-project move. Valid for move-type, move-file or port-route (required). |
+| `startRoutes`, `config` | port-route only: TanStack Start routes directory override and the project configuration (default `<root>/.refactor-ai/port-route.json`). For port-route, `file` is the Next route directory and `target` the feature directory; `map` and `exclude` add to the configured move. |
 | `typeName` | Select a declared type when a file has several declarations. |
 | `keep` | Boolean, valid only for `inline-reexports`; retain the shim after retargeting its callers. Defaults to false. |
 | `from`, `to` | Exact source and destination module specifiers; required for retarget-import. Wildcard prefixes are rejected. |

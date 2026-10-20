@@ -43,7 +43,7 @@ async function assertReadSetFresh(inputs, compilerBase) {
 
 // src/core/plan.ts
 import { lstat as lstat2, readFile as readFile2, realpath as realpath2 } from "node:fs/promises";
-import { relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
+import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
 // node_modules/diff/libesm/diff/base.js
 class Diff {
   diff(oldStr, newStr, options = {}) {
@@ -615,8 +615,16 @@ async function gitFiles(root) {
 }
 var stateIgnoreText = `*
 !equivalents.json
+!port-route.json
+!port-route/
+!port-route/**
 !.gitignore
 `;
+var legacyIgnoreTexts = [`*
+`, `*
+!equivalents.json
+!.gitignore
+`];
 async function ignoreStateDirectory(stateDirectory) {
   const path = resolve(stateDirectory, ".gitignore");
   const stat = await lstat(path).catch((error) => {
@@ -627,8 +635,7 @@ async function ignoreStateDirectory(stateDirectory) {
   if (stat?.isSymbolicLink())
     throw new Error("SYMLINK_UNSUPPORTED: state .gitignore");
   if (stat?.isFile()) {
-    if (await readFile(path, "utf8") === `*
-`)
+    if (legacyIgnoreTexts.includes(await readFile(path, "utf8")))
       await writeFile(path, stateIgnoreText);
     return;
   }
@@ -746,7 +753,7 @@ function assertPlanShape(plan) {
 async function canonicalRequest(request) {
   const root = await realpath2(request.root);
   const result = { ...request, root, project: await realpath2(request.project), file: await realpath2(request.file) };
-  if (request.operation === "move-file") {
+  if (request.operation === "move-file" || request.operation === "port-route") {
     if (request.only)
       result.only = [...request.only].sort();
     if (request.exclude)
@@ -770,7 +777,25 @@ async function canonicalRequest(request) {
     result.target = result.moves[0].target;
   }
   await assertRegularPath(root, result.project);
-  const directory = request.operation === "move-file" && (await lstat2(result.file)).isDirectory() || request.operation === "retarget-import";
+  const directory = request.operation === "move-file" && (await lstat2(result.file)).isDirectory() || request.operation === "retarget-import" || request.operation === "port-route";
+  if (request.operation === "port-route") {
+    if (!(await lstat2(result.file)).isDirectory())
+      throw new Error(`INVALID_REQUEST: port-route requires a Next route directory: ${result.file}`);
+    if (request.config === undefined)
+      throw new Error("INVALID_REQUEST: port-route requires a configuration path");
+    result.config = await realpath2(request.config).catch((error) => {
+      if (error.code === "ENOENT")
+        throw new Error(`PORT_ROUTE_CONFIG_NOT_FOUND: ${request.config}; copy examples/port-route/uber-platform/port-route.json to <root>/.refactor-ai/ and adapt it, or pass --config`);
+      throw error;
+    });
+    const configRelative = relative2(root, result.config);
+    if (!configRelative || configRelative.startsWith("..") || isAbsolute2(configRelative) || !(await lstat2(result.config)).isFile())
+      throw new Error(`INVALID_REQUEST: port-route configuration must be a file inside ${root}: ${result.config}`);
+    if (request.startRoutes !== undefined) {
+      result.startRoutes = await realpath2(request.startRoutes);
+      await assertRegularPath(root, result.startRoutes, false, true);
+    }
+  }
   await assertRegularPath(root, result.file, false, directory);
   if (request.targetProject !== undefined) {
     result.targetProject = await realpath2(request.targetProject);
@@ -830,8 +855,16 @@ async function createPlan(request, analyze, compilerBase) {
   }
   changes.sort(byPath);
   const fileModes = {};
-  const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat2(request.file)).mode & 511 : 384;
+  const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat2(request.file)).mode & 511 : request.operation === "port-route" ? ((await lstat2(resolve2(request.file, "page.tsx")).catch(() => {
+    return;
+  }))?.mode ?? 420) & 511 : 384;
   const creationMode = async (path) => {
+    if (request.operation === "port-route" && request.target && (path === request.target || path.startsWith(request.target + sep2))) {
+      const source = resolve2(request.file, relative2(request.target, path));
+      return changes.some((change) => change.path === source && change.after === null) ? (await lstat2(source)).mode & 511 : createdMode;
+    }
+    if (request.operation === "port-route")
+      return createdMode;
     if (request.operation !== "move-file" || !request.target)
       return createdMode;
     const pair = request.moves?.find((move) => path === move.target || path.startsWith(move.target + sep2));
@@ -1113,7 +1146,7 @@ async function applyPlan(plan, compilerBase) {
 // src/languages.ts
 import { extname } from "node:path";
 var languageOperations = {
-  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import"],
+  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import", "port-route"],
   csharp: ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"]
 };
 function languageForProject(project) {
@@ -1169,11 +1202,16 @@ function createRefactorApi(context) {
           assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
           throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
-        if (["move-type", "move-file"].includes(operation) && !options.target && !options.moves?.length)
+        if (["move-type", "move-file", "port-route"].includes(operation) && !options.target && !options.moves?.length)
           throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
-        if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file"].includes(operation)) {
-          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type or move-file");
+        if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file", "port-route"].includes(operation)) {
+          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type, move-file or port-route");
         }
+        if (operation === "port-route" && (!options.targetProject || options.moves || options.only || options.mocks !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: port-route requires --route, --to and --target-project; moves, only and mocks are unsupported");
+        }
+        if ((options.startRoutes !== undefined || options.config !== undefined) && operation !== "port-route")
+          throw new Error("INVALID_ARGUMENT: startRoutes and config require port-route");
         if (options.keep !== undefined && (operation !== "inline-reexports" || typeof options.keep !== "boolean"))
           throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
         if (operation === "retarget-import" && (!options.from || !options.to))
@@ -1181,15 +1219,15 @@ function createRefactorApi(context) {
         if (operation !== "retarget-import" && [options.from, options.to].some((value) => value !== undefined)) {
           throw new Error("INVALID_ARGUMENT: from and to require retarget-import");
         }
-        if (!["retarget-import", "move-file"].includes(operation) && [options.map, options.only].some((value) => value !== undefined))
-          throw new Error("INVALID_ARGUMENT: map and only require retarget-import or move-file");
+        if (!["retarget-import", "move-file", "port-route"].includes(operation) && [options.map, options.only].some((value) => value !== undefined))
+          throw new Error("INVALID_ARGUMENT: map and only require retarget-import, move-file or port-route");
         if (operation === "move-file" && languageForProject(options.project) !== "typescript" && (options.map || options.only))
           throw new Error("INVALID_ARGUMENT: move-file mappings require TypeScript/JavaScript");
         if (options.mocks !== undefined && (!["retarget-import", "move-file"].includes(operation) || languageForProject(options.project) !== "typescript"))
           throw new Error("INVALID_ARGUMENT: mocks requires TypeScript retarget-import or move-file");
         if (options.mocks !== undefined && !["report", "add"].includes(options.mocks))
           throw new Error("INVALID_ARGUMENT: mocks report|add");
-        if (options.exclude !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || options.only || !Array.isArray(options.exclude) || options.exclude.some((pattern) => typeof pattern !== "string" || !pattern || pattern.startsWith("!") || /^(?:[A-Za-z]:|[\\/])/.test(pattern) || pattern.split(/[\\/]/).includes("..")))) {
+        if (options.exclude !== undefined && (!["move-file", "port-route"].includes(operation) || languageForProject(options.project) !== "typescript" || options.only || !Array.isArray(options.exclude) || options.exclude.some((pattern) => typeof pattern !== "string" || !pattern || pattern.startsWith("!") || /^(?:[A-Za-z]:|[\\/])/.test(pattern) || pattern.split(/[\\/]/).includes("..")))) {
           throw new Error("INVALID_ARGUMENT: exclude requires relative move-file directory globs without --only");
         }
         if (options.moves !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || !Array.isArray(options.moves) || !options.moves.length || options.file !== undefined || options.target !== undefined || options.moves.some((move) => !move || typeof move.file !== "string" || !move.file || typeof move.target !== "string" || !move.target))) {
@@ -1218,6 +1256,11 @@ function createRefactorApi(context) {
           ...options.checker !== undefined ? { checker: options.checker } : {},
           ...options.keep !== undefined ? { keep: options.keep } : {},
           ...operation === "move-file" ? { ...options.mocks ? { mocks: options.mocks } : {}, ...options.map ? { map: options.map } : {}, ...options.only ? { only: options.only } : {} } : {},
+          ...operation === "port-route" ? {
+            ...options.map ? { map: options.map } : {},
+            ...options.startRoutes !== undefined ? { startRoutes: resolve4(options.startRoutes) } : {},
+            config: resolve4(options.config ?? resolve4(root, ".refactor-ai/port-route.json"))
+          } : {},
           ...operation === "retarget-import" ? {
             from: options.from,
             to: options.to,
@@ -1348,7 +1391,7 @@ async function createInstalledRefactor(moduleUrl, operation) {
   return createRefactorApi({
     loadBackend,
     operation,
-    language: operation.startsWith("extract-") || operation === "retarget-import" ? "typescript" : operation === "sync-namespace" ? "csharp" : undefined,
+    language: operation.startsWith("extract-") || operation === "retarget-import" || operation === "port-route" ? "typescript" : operation === "sync-namespace" ? "csharp" : undefined,
     toolkitRoot: join3(skillRoot, "assets")
   });
 }
