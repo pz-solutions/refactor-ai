@@ -26,7 +26,7 @@ export interface PortRouteConfig {
     serverOnlyModules: string[];
     /** Calls whose first argument is a Convex function reference and second its arguments. */
     preloadFunctions: string[];
-    /** Adapter file name next to page.tsx; {{view}} is the view module's base name, {{route}} the last static segment. */
+    /** Adapter file name next to page.tsx; {{view}} is the view module's base name, {{route}} the final segment (view stem for dynamic routes). */
     adapterFile: string;
     /** Imports every generated adapter needs. */
     imports: string[];
@@ -77,6 +77,8 @@ export interface PortRouteConfig {
   templates: { nextAdapter: string; startRoute: string };
   /** Commands to run after apply (generated registries, route trees); reported as plan notes, never run. */
   afterApply: string[];
+  /** argv command reading source on stdin and writing formatted source to stdout; {{file}} is the intended absolute path. */
+  formatCommand?: string[];
 }
 
 const defaults = {
@@ -202,7 +204,9 @@ export function loadPortRouteConfig(root: string, path: string, sys: ts.System):
     },
     templates: { nextAdapter: text(path, "templates.nextAdapter", templates.nextAdapter), startRoute: text(path, "templates.startRoute", templates.startRoute) },
     afterApply: strings(path, "afterApply", raw.afterApply, []),
+    ...(raw.formatCommand !== undefined ? { formatCommand: strings(path, "formatCommand", raw.formatCommand) } : {}),
   };
+  if (config.formatCommand && !config.formatCommand.length) invalid(path, "formatCommand must be nonempty");
   for (const [key] of Object.entries(config.ports)) if (!/^[A-Za-z_$][\w$]*$/.test(key)) invalid(path, `ports.${key} must name a prop`);
   const template = (field: string, value: string) => {
     const file = resolve(dirname(path), value);

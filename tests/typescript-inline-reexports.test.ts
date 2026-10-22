@@ -25,6 +25,23 @@ function after(result: Pick<BackendResult, "changes">, path: string) { return re
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("inline-reexports", () => {
+  test("retro: dynamic imports bypass pure star shims without changing namespace exports", async () => {
+    const w = await workspace({ "src/shim.ts": 'export * from "./origin";', "src/origin.ts": 'export const value = 1;',
+      "src/use.ts": 'export const load = () => import("./shim");' });
+    const plan = await createPlan(w.request, analyze);
+    expect(plan.validation.status).toBe("passed");
+    expect(after(plan, w.path("src/shim.ts"))).toBeNull();
+    expect(after(plan, w.path("src/use.ts"))).toContain('import("./origin")');
+  });
+
+  test("retro: dynamic imports retain star shims when the origin has a default export", async () => {
+    const w = await workspace({ "src/shim.ts": 'export * from "./origin";', "src/origin.ts": 'export const value = 1; export default 2;',
+      "src/use.ts": 'export const load = () => import("./shim");' });
+    const plan = await createPlan(w.request, analyze);
+    expect(after(plan, w.path("src/shim.ts"))).toBeUndefined();
+    expect(plan.notes.join(" ")).toContain("default");
+  });
+
   test("retargets mock, doMock and importActual before deleting a transparent shim", async () => {
     const w = await workspace({
       "src/shim.ts": 'export { value } from "./origin";',
@@ -169,13 +186,13 @@ describe("inline-reexports", () => {
     expect(result.notes.join("\n")).toContain("--keep");
   });
 
-  test("retains side-effect imports with a note and keeps shims with dynamic/import-type references", async () => {
+  test("retains side-effect imports with a note and keeps shims with import-type references", async () => {
     const w = await workspace({ "src/shim.ts": 'export * from "./origin";\n', "src/origin.ts": 'export const a = 1;\n',
       "src/use.ts": 'import "./shim";\nimport { a } from "./shim";\nexport const load = () => import("./shim");\nexport type M = typeof import("./shim");\nexport const result = a;\n' });
     const result = await w.run();
     expect(after(result, w.path("src/shim.ts"))).toBeUndefined();
     expect(after(result, w.path("src/use.ts"))).toContain('import "./shim";');
-    expect(after(result, w.path("src/use.ts"))).toContain('import("./shim")');
+    expect(after(result, w.path("src/use.ts"))).toContain('import("./origin")');
     expect(result.notes.join("\n")).toContain("side-effect import");
   });
 

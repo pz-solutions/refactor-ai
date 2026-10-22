@@ -6,20 +6,24 @@ import { type RefactorContext } from "./refactor-context.ts";
 export { offset } from "./api.ts";
 
 import { helpRequested, renderHelp } from "./help.ts";
+import { collectJournals } from "./core/gc";
+import { logRun, updateRun } from "./run-log";
 import { ignoreStateDirectory } from "./core/snapshot.ts";
 
 function parse(args: string[]): { command: string; operation?: string; flags: Record<string, string>; } {
   const command = args.shift() ?? "help";
   const operation = args[0] && !args[0].startsWith("--") ? args.shift() : undefined;
   const flags: Record<string, string> = {};
-  const allowed = new Set(["project", "file", "exclude", "root", "at", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker", "route", "start-routes", "config"]);
+  const allowed = new Set(["project", "file", "exclude", "root", "at", "symbol", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker", "route", "start-routes", "config"]);
   const mappings: string[] = [];
   const files: string[] = [];
   const excludes: string[] = [];
   while (args.length) {
-    const key = args.shift()!;
-    if (key === "--keep" && flags.keep === undefined) { flags.keep = "true"; continue; }
-    const value = args.shift();
+    const argument = args.shift()!;
+    const equals = argument.indexOf("=");
+    const key = equals < 0 ? argument : argument.slice(0, equals);
+    if (["--keep", "--public"].includes(key) && equals < 0 && flags[key.slice(2)] === undefined) { flags[key.slice(2)] = "true"; continue; }
+    const value = equals < 0 ? args.shift() : argument.slice(equals + 1);
     if (!key.startsWith("--") || !allowed.has(key.slice(2)) || !value || value.startsWith("--") || flags[key.slice(2)] !== undefined) {
       throw new Error(`INVALID_ARGUMENT: ${key}`);
     }
@@ -59,19 +63,30 @@ async function canonicalDirectory(path: string): Promise<string> {
 
 export interface CliContext extends RefactorContext {
   invocation?: string;
+  /** Internal: an npm/skill launcher already owns the invocation record. */
+  runLog?: boolean;
   write?: (text: string) => void;
   setExitCode?: (code: number) => void;
 }
 
 export async function runCli(args: string[], context: CliContext): Promise<void> {
+  return context.runLog === false ? executeCli(args, context) : logRun(args, () => executeCli(args, context));
+}
+
+async function executeCli(args: string[], context: CliContext): Promise<void> {
   const write = context.write ?? ((text: string) => { process.stdout.write(text); });
   const log = (value: unknown) => context.write ? write(JSON.stringify(value, null, 2) + "\n") : console.log(JSON.stringify(value, null, 2));
-  const setExitCode = context.setExitCode ?? ((code: number) => { process.exitCode = code; });
+  const setExitCode = (code: number) => {
+    updateRun({ exitCode: code, ...(code ? { status: "failed", errorCode: "VALIDATION_FAILED" } : {}) });
+    (context.setExitCode ?? ((value: number) => { process.exitCode = value; }))(code);
+  };
   if (helpRequested(args)) { write(renderHelp(args, context.invocation, undefined, context.language)); return; }
   const { command, operation, flags } = parse([...args]);
+  if (command === "gc") { log(await collectJournals(await realpath(resolve(flags.root ?? process.cwd())))); updateRun({ status: "collected" }); return; }
   const api = createRefactorApi(context);
   if (["preview", "validate", "apply"].includes(command)) {
     const plan = await api.loadPlan(required(flags, "plan"));
+    updateRun({ root: plan.request.root, planId: plan.id, checker: plan.checker ?? null, status: command === "apply" ? "applied" : command === "validate" ? "validated" : "previewed" });
     if (command === "preview") { write(api.preview(plan) || "No changes.\n"); return; }
     if (command === "apply") { log(await api.apply(plan)); return; }
     log(await api.validate(plan));
@@ -85,7 +100,7 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
   if (command !== "plan") throw new Error(`INVALID_ARGUMENT: unknown command ${command}`);
   const fileArgs = flags.file?.split("\n") ?? [];
   const paired = operation === "move-file" && fileArgs.some(file => file.includes("="));
-  if (fileArgs.length > 1 && !paired) throw new Error("INVALID_ARGUMENT: repeated --file requires move-file source=destination pairs");
+  if (fileArgs.length > 1 && !paired && operation !== "inline-reexports") throw new Error("INVALID_ARGUMENT: repeated --file requires move-file source=destination pairs");
   const moves = paired ? fileArgs.map(item => {
     const parts = item.split("=");
     if (parts.length !== 2 || !parts[0] || !parts[1] || flags.to) throw new Error("INVALID_ARGUMENT: use --file source=destination pairs without --to");
@@ -94,11 +109,12 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
   if (operation === "port-route" && flags.file !== undefined) throw new Error("INVALID_ARGUMENT: port-route selects its Next route with --route");
   if (operation !== "port-route" && [flags.route, flags["start-routes"], flags.config].some(value => value !== undefined)) throw new Error("INVALID_ARGUMENT: --route, --start-routes and --config require port-route");
   const plan = await api.plan({
-    project: required(flags, "project"), file: moves ? undefined : operation === "retarget-import" ? flags.file : operation === "port-route" ? required(flags, "route") : required(flags, "file"), moves, operation: operation as Operation,
+    files: operation === "inline-reexports" && fileArgs.length > 1 ? fileArgs : undefined,
+    project: required(flags, "project"), file: moves || (operation === "inline-reexports" && fileArgs.length > 1) ? undefined : operation === "retarget-import" ? flags.file : operation === "port-route" ? required(flags, "route") : required(flags, "file"), moves, operation: operation as Operation,
     startRoutes: flags["start-routes"], config: flags.config,
     exclude: flags.exclude?.split("\n"),
     keep: flags.keep === "true" ? true : undefined,
-    root: flags.root, at: flags.at, end: flags.end, name: flags.name,
+    root: flags.root, at: flags.at, symbol: flags.symbol, public: flags.public === "true" ? true : undefined, end: flags.end, name: flags.name,
     checker: flags.checker as "ts5" | "ts7" | "both" | undefined,
     mode: flags.mode as "sort" | "remove-unused" | undefined, target: operation === "retarget-import" ? undefined : flags.to,
     from: flags.from, to: operation === "retarget-import" ? flags.to : undefined,
@@ -107,6 +123,7 @@ export async function runCli(args: string[], context: CliContext): Promise<void>
     targetProject: flags["target-project"], typeName: flags.type, rootNamespace: flags["root-namespace"],
   });
   const root = plan.request.root;
+  updateRun({ root, planId: plan.id, checker: plan.checker ?? null, status: "planned" });
   let output = resolve(flags.out ?? resolve(root, ".refactor-ai", `${plan.id}.json`));
   const stateDirectory = resolve(root, ".refactor-ai");
   const stateStat = await lstat(stateDirectory).catch(error => {

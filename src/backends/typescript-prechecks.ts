@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { mapMoveImports } from "./typescript-retarget-import";
 import type { RefactorRequest } from "../types";
 import { builtinModules } from "node:module";
-import { moduleSpecifiers, sharedOptionKeys } from "./typescript-workspace";
+import { isModuleMockCall, moduleSpecifiers, sharedOptionKeys } from "./typescript-workspace";
 import { fail } from "./typescript-vfs";
 
 export function parseConfig(config: string, sys = ts.sys): ts.ParsedCommandLine {
@@ -67,6 +67,9 @@ export function precheckMove(root: string, sourceConfig: string, targetConfig: s
     relocated.impliedNodeFormat = ts.getImpliedNodeFormatForFile(to, undefined, sys, target.options);
     const targetSpecifiers = moduleSpecifiers(relocated);
     for (const [index, specifier] of specifiers.entries()) {
+      // Registration strings name virtual mocks too; actual/mock imports still load modules.
+      if (isModuleMockCall(specifier.parent) && ts.isPropertyAccessExpression(specifier.parent.expression)
+        && ["mock", "doMock", "unmock", "doUnmock"].includes(specifier.parent.expression.name.text)) continue;
       const name = specifier.text;
       const mode = ts.getModeForUsageLocation(file, specifier, source.options);
       const original = ts.resolveModuleName(name, from, source.options, sys, undefined, undefined, mode).resolvedModule;

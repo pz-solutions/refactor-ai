@@ -1,4 +1,6 @@
 import ts from "typescript";
+import { spawnSync } from "node:child_process";
+import { mergeParamHooks } from "./typescript-port-route-setup";
 import { createRequire } from "node:module";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -374,7 +376,10 @@ export function generatePortRoute(ws: Workspace, prep: PortRoutePrep, model: Rou
   if (!viewTarget) fail("PORT_ROUTE_VIEW_NOT_FOUND", `${model.view.path} is not among the moved files`);
   const config = prep.config;
   const viewModule = basename(model.view.path, extname(model.view.path));
-  const adapterPath = join(prep.routeDir, fill(config.next.adapterFile, { view: viewModule, route: prep.segments.filter(item => !item.startsWith("$")).at(-1) ?? "index" }, "next.adapterFile"));
+  const viewStem = model.view.tag.replace(/(?:View|Client|Content)$/, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/([A-Z])([A-Z][a-z])/g, "$1-$2").toLowerCase() || viewModule;
+  const routeName = prep.segments.at(-1)?.startsWith("$") ? viewStem : prep.segments.at(-1) ?? "index";
+  const adapterPath = join(prep.routeDir, fill(config.next.adapterFile, { view: viewModule, route: routeName }, "next.adapterFile"));
   if (ws.vfs.fileExists(adapterPath)) fail("TARGET_EXISTS", `${adapterPath}; remove the existing adapter or choose next.adapterFile`);
   if (ws.vfs.fileExists(prep.startFile)) fail("TARGET_EXISTS", `${prep.startFile} (the route is already ported)`);
   const fileSpecifier = (importer: string) => (path: string) => {
@@ -389,6 +394,12 @@ export function generatePortRoute(ws: Workspace, prep: PortRoutePrep, model: Rou
   const adapter = nextAdapter(ws, prep, model, dataProps, props, adapterPath, viewTarget);
   const start = startRoute(ws, prep, model, dataProps, props, viewTarget, fileSpecifier(prep.startFile));
   for (const file of [adapter, start]) {
+    if (config.formatCommand) {
+      const [command, ...args] = config.formatCommand.map(argument => argument.replaceAll("{{file}}", file.path));
+      const formatted = spawnSync(command!, args, { cwd: ws.root, input: file.text, encoding: "utf8", timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
+      if (formatted.error || formatted.status !== 0 || !formatted.stdout?.trim()) fail("PORT_ROUTE_FORMAT_FAILED", `${file.path}: ${formatted.error?.message ?? formatted.stderr?.trim() ?? "formatter returned empty output"}`);
+      file.text = formatted.stdout;
+    }
     ws.vfs.write(file.path, file.text, false);
     for (const reason of file.todos) notes.push(`${todoReason(reason)} (${relative(ws.root, file.path)})`);
   }
@@ -444,7 +455,7 @@ function nextAdapter(ws: Workspace, prep: PortRoutePrep, model: RouteModel, data
     export: model.view.exported === "default" ? "export default function" : "export function",
     params: parameters.length ? `{ ${parameters.join(", ")} }` : "",
     propsType: parameters.length ? `: {\n${types.map(line => `  ${line}`).join("\n")}\n}` : "",
-    setup: out.setup.join("\n"),
+    setup: mergeParamHooks(out.setup).join("\n"),
     todos: out.todos.map(reason => `// ${todoReason(reason)}`).join("\n"),
     view: jsx(local, values),
   }, config.templates.nextAdapter);
@@ -509,7 +520,17 @@ function startRoute(ws: Workspace, prep: PortRoutePrep, model: RouteModel, dataP
     add(start);
     const literal = /^(?:"[^"\n]*"|'[^'\n]*'|-?\d[\d_.]*|true|false|null)$/.test(start.text);
     if (literal) values.push([attribute.name, start.text]);
-    else { statements.push(`const ${attribute.name} = ${start.text};`); returns.push(attribute.name); values.push([attribute.name, attribute.name]); }
+    else {
+      let name = start.text;
+      if (!/^[A-Za-z_$][\w$]*$/.test(name)) {
+        name = attribute.name;
+        const reserved = [...statements, ...out.setup, ...returns, ...out.imports.locals()].join("\n");
+        while (new RegExp(`\\b${name.replace(/[$]/g, "\\$")}\\b`).test(reserved)) name += "2";
+        statements.push(`const ${name} = ${start.text};`);
+      }
+      if (!returns.includes(name)) returns.push(name);
+      values.push([attribute.name, name]);
+    }
   }
   for (const reason of loaderTodos) out.todos.push(reason);
   fillPorts(out, prep, props, values, "start");
@@ -517,17 +538,19 @@ function startRoute(ws: Workspace, prep: PortRoutePrep, model: RouteModel, dataP
   const body = [...loaderTodo, ...statements].join("\n");
   const loaderValues = (args: string) => ({ loaderArgs: args, statements: body, prefetches: prefetches.join(",\n"), returns: returns.join(", "), path: prep.routePath, id: prep.routeId });
   const loaderSnippet = prep.params.length && config.snippets.startRecordLoader ? config.snippets.startRecordLoader : config.snippets.startLoader;
-  out.imports.addText(loaderSnippet.imports, "snippets.startLoader");
+  const needsLoader = !!(statements.length || prefetches.length || returns.length || loaderTodos.length);
+  if (needsLoader) out.imports.addText(loaderSnippet.imports, "snippets.startLoader");
   const probe = render(loaderSnippet.value, loaderValues(""), "snippets.startLoader");
   const loaderArgs = config.start.loaderArgs.filter(name => new RegExp(`(?<![\\w$.])${name.replace(/[$]/g, "\\$")}(?![\\w$])`).test(probe));
-  const loader = render(loaderSnippet.value, loaderValues(loaderArgs.length ? `{ ${loaderArgs.join(", ")} }` : ""), "snippets.startLoader");
-  const component = `${prep.routeName}Page`;
+  const loader = needsLoader ? render(loaderSnippet.value, loaderValues(loaderArgs.length ? `{ ${loaderArgs.join(", ")} }` : ""), "snippets.startLoader").replace(/^[ \t]*await Promise\.all\(\[\s*\]\);?[ \t]*\n/gm, "") : "";
+  const component = `${model.view.tag.replace(/(?:View|Client|Content)$/, "")}Page`;
   const localNames = out.imports.locals();
   for (const name of [component, "Route", ...[...names.values()].map(name => `${name}Query`)]) {
     if (localNames.has(name)) fail("PORT_ROUTE_NAME_CONFLICT", `${name} is both generated and imported in ${path}`);
   }
-  const setup = [...(returns.length ? [`const { ${returns.join(", ")} } = Route.useLoaderData();`] : []), ...out.setup];
-  const text = render(config.startRouteTemplate, {
+  const setup = [...(returns.length ? [`const { ${returns.join(", ")} } = Route.useLoaderData();`] : []), ...mergeParamHooks(out.setup)];
+  const template = needsLoader ? config.startRouteTemplate : config.startRouteTemplate.replace(/^[ \t]*loader:\s*\{\{loader\}\},?[ \t]*\r?\n/gm, "");
+  const text = render(template, {
     imports: out.imports.print(),
     queries: queries.join("\n"),
     id: prep.routeId,

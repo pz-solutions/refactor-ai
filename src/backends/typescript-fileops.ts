@@ -776,6 +776,26 @@ function relocationImports(ws: Workspace, renames: [string, string][]): Relocate
   return imports;
 }
 
+/** Asset URL strings are outside the semantic module graph: identify consumers needing hand edits. */
+function reportAssetReferences(ws: Workspace, renames: [string, string][], notes: string[]): void {
+  const moved = new Map(renames.map(([from, to]) => [ws.vfs.key(from), to]));
+  for (const path of userFiles(ws)) {
+    if (moved.has(ws.vfs.key(path))) continue;
+    const source = parseFile(ws, path);
+    if (!source) continue;
+    const visit = (node: ts.Node) => {
+      if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "URL"
+        && node.arguments?.length === 2 && ts.isStringLiteralLike(node.arguments[0]!)
+        && node.arguments[1]!.getText(source).replace(/\s/g, "") === "import.meta.url") {
+        const target = moved.get(ws.vfs.key(resolve(dirname(path), node.arguments[0]!.text)));
+        if (target) notes.push(`Review asset URL in ${relative(ws.root, path)}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}: new URL(${JSON.stringify(node.arguments[0]!.text)}, import.meta.url) refers to a moved file; destination ${relative(ws.root, target)}.`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+}
+
 function moveFile(context: Context, request: RefactorRequest, renames: [string, string][]): void {
   const { ws, root, file } = context;
   const target = assertAbsolute("target", request.target);
@@ -788,6 +808,7 @@ function moveFile(context: Context, request: RefactorRequest, renames: [string, 
     const bytes = readFileSync(from);
     if (!Buffer.from(bytes.toString("utf8")).equals(bytes)) fail("UNSUPPORTED_ENCODING", `${from}: move-file plans require UTF-8 text`);
   }
+  reportAssetReferences(ws, renames, context.notes);
   const before = membership(ws);
   const beforeOwners = new Map<string, string[]>();
   for (const [config, keys] of before) {
@@ -948,7 +969,10 @@ function moveFile(context: Context, request: RefactorRequest, renames: [string, 
     }
   });
   moveSuppressions(ws, renames, context.notes);
-  context.notes.push(`Moved ${renames.length} file(s) from ${relative(root, file)} to ${relative(root, target)}; validated source and target project membership.`);
+  const summary = request.moves
+    ? ` across ${request.moves.length} pair(s): ${request.moves.map(move => `${relative(root, move.file)} -> ${relative(root, move.target)}`).join(", ")}`
+    : ` from ${relative(root, file)} to ${relative(root, target)}`;
+  context.notes.push(`Moved ${renames.length} file(s)${summary}; validated source and target project membership.`);
 }
 
 /** --only names declarations exported by this file, rather than import bindings to map. */
@@ -1095,7 +1119,7 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
   // port-route moves its client files as an explicit move-file batch.
   const moveRequest: RefactorRequest = port ? { ...request, operation: "move-file", map: port.map, exclude: undefined, moves: port.moves.map(([from, to]) => ({ file: from, target: to })) } : request;
   const movingFiles = port ? [...port.moves].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0) : request.operation === "move-file" ? (request.moves ?? [{ file, target: assertAbsolute("target", request.target) }])
-    .flatMap(move => movePaths(root, assertAbsolute("file", move.file), assertAbsolute("target", move.target), request.exclude))
+    .flatMap(move => movePaths(root, assertAbsolute("file", move.file), assertAbsolute("target", move.target), request.moves && !lstatSync(move.file).isDirectory() ? [] : request.exclude))
     .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0) : undefined;
   if (movingFiles) {
     const sources = new Set(movingFiles.map(([from]) => from)), targets = new Set(movingFiles.map(([, to]) => to));
@@ -1108,7 +1132,7 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
   const targetConfig = ["move-type", "move-file", "port-route"].includes(request.operation) && request.targetProject
     ? configPathFor(assertAbsolute("targetProject", request.targetProject))
     : sourceConfig;
-  const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
+  const affected = movingFiles ? movingFiles.map(([from]) => from) : request.files ?? [file];
   if (request.operation === "move-type" && request.target && isAbsolute(request.target) && existsSync(request.target)) affected.push(resolve(request.target));
   if (!request.only && (movingFiles || sourceConfig !== targetConfig)) precheckMove(root, sourceConfig, targetConfig, movingFiles ?? [], moveRequest, inputs.sys);
   const checkerMode = request.checker === "both" ? "both" : "ts7";
@@ -1116,7 +1140,7 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
   const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode, inputs, port ? [port.startConfig] : []));
   try {
     if (!movingFiles && !ws.vfs.fileExists(file)) fail("FILE_NOT_FOUND", file);
-    const selected = movingFiles ? movingFiles.map(([from]) => from).filter(path => /\.[cm]?[jt]sx?$/.test(path)) : [file];
+    const selected = movingFiles ? movingFiles.map(([from]) => from).filter(path => /\.[cm]?[jt]sx?$/.test(path)) : request.files ?? [file];
     for (const file of selected) {
       const owners = ws.ownersOf(file);
       if (!owners.some((owner) => ws.vfs.samePath(owner, sourceConfig))) fail("FILE_NOT_IN_PROJECT", `${file} is not included by ${sourceConfig}`);
@@ -1147,8 +1171,13 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     else if (movingFiles) timed("workspace.move", () => moveFile(context, request, movingFiles));
     else if (request.operation === "inline-reexports") {
       const before = membership(ws);
-      const deleted = timed("workspace.inline", () => inlineReexports(ws, file, sourceFile, context.notes, request.keep));
-      assertMembership(ws, before, [], deleted ? [file] : []);
+      const deleted: string[] = [];
+      for (const path of request.files ?? [file]) {
+        const source = ws.program().getSourceFile(path);
+        if (!source) fail("FILE_NOT_FOUND", path);
+        if (timed("workspace.inline", () => inlineReexports(ws, path, source, context.notes, request.keep))) deleted.push(path);
+      }
+      assertMembership(ws, before, [], deleted);
     }
     else fail("UNSUPPORTED_OPERATION", String(request.operation));
 

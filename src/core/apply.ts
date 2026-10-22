@@ -1,5 +1,5 @@
 import { lstat, mkdir, open, readFile, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { assertFresh, assertPlanShape, changeKind, newDiagnostics, type ChangeKind, type Plan } from "./plan.ts";
 import { assertRegularPath, ignoreStateDirectory, missingDirectories, sha256 } from "./snapshot.ts";
@@ -86,6 +86,17 @@ async function order(plan: Plan): Promise<Step[]> {
   return steps.toSorted((a, b) => rank(a) - rank(b));
 }
 
+/** Best-effort empty source cleanup after a successful, journaled move. */
+async function pruneMoveDirectories(plan: Plan): Promise<void> {
+  if (!["move-file", "move-type", "rename-file", "port-route"].includes(plan.request.operation)) return;
+  const root = plan.request.root, projectDirectory = dirname(plan.request.project);
+  const directories = new Set<string>();
+  for (const change of plan.changes.filter(change => change.after === null)) {
+    for (let directory = dirname(change.path); directory !== root && directory !== projectDirectory && directory.startsWith(root + sep); directory = dirname(directory)) directories.add(directory);
+  }
+  for (const directory of [...directories].sort((a, b) => b.length - a.length)) await rmdir(directory).catch(() => {});
+}
+
 export async function applyPlan(plan: Plan, compilerBase?: string): Promise<{ status: "applied"; files: string[]; journal: string | null }> {
   assertPlanShape(plan);
   if (plan.validation.status !== "passed" || newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter).length) {
@@ -147,6 +158,7 @@ export async function applyPlan(plan: Plan, compilerBase?: string): Promise<{ st
     }
     journal.status = "applied";
     await saveJournal();
+    await pruneMoveDirectories(plan);
     return { status: "applied", files: written.map(s => s.change.path), journal: journalPath };
   } catch (error) {
     let recoveryNeeded = false;

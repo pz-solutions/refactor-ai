@@ -42,13 +42,13 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 
 - Fix (`perf: validate workspace file-operation closures`): resolution-only options (`paths`, `baseUrl`) may differ; unresolved aliases in the moved declaration fail as `NEW_DIAGNOSTICS`, rebinding to a different declaration as `REFERENCES_NOT_PRESERVED`.
 
-### F9. Rename keeps the old public name behind an alias — open (UX)
+### F9. Rename keeps the old public name behind an alias — fixed in Round 5 (opt-in)
 - Renaming `ProfileContent` → `ProfileView` produced `export { ProfileView as ProfileContent }` in the barrel; the agent removed the alias by hand. Useful default for libraries, wrong during a migration where all consumers are in the workspace. Proposal: `--public` (rename re-exported names too when every consumer is loaded).
 
 ### F10. TypeScript formatter ≠ repository formatter — documented (skills + README recipe)
 - Agents ran `vp check --fix` (oxfmt) after every apply; refactor-ai's edits use the TS formatter's style. Proposal: skills tell the agent to run the project's formatter on changed files after `apply`; optionally `--format-command`.
 
-### F11. Positions (`--at line:col`) are error-prone for agents — open (UX)
+### F11. Positions (`--at line:col`) are error-prone for agents — fixed in Round 5
 - Two failed renames before the right one: wrong column hit `useLocale` (`RENAME_UNAVAILABLE`). Proposal: `--symbol <name>` (top-level declaration by name, error if ambiguous) as an alternative to `--at`.
 
 ### F12. Slice agents still moved modules by hand
@@ -80,7 +80,7 @@ Each entry: what the migration needed → what refactor-ai did → outcome (fixe
 - Build the CLI (`bun run build`) before integration tests that execute `dist/`; stale `dist` produced two false failures after merging branches.
 - Throughput: `move-file` on 900-file app: ~110 s per plan (two full program checks in the multi-project path; F7's affected-closure validation is single-project only so far).
 
-### F20. `inline-reexports` keeps shims reachable through dynamic `import()` — open
+### F20. `inline-reexports` keeps shims reachable through dynamic `import()` — fixed in Round 5 (pure star shims)
 - `data-table/preferences.ts` (`export * from "@uber-platform/app-features/data-table/preferences"`) stayed because two tests do `await import("@/components/data-table/preferences")`. For a pure single-origin `export *` shim, a dynamic import of the shim is equivalent to a dynamic import of the origin; the operation could retarget it (the namespace object differs only if the origin has a default export, which `export *` drops).
 
 ### F21. `TARGET_UNRESOLVED` in a fresh worktree without `node_modules` — open (hint)
@@ -944,3 +944,71 @@ Re-running the committed preparation script preserves the prepared fixture statu
 the separate declaration-repro worktree remains clean. Generated skill runtimes,
 SDK declarations and copied API docs belong in a separate commit from sources.
 No push or apply to an active user worktree was performed.
+
+
+## Round 5 — fale 5–9
+
+2026-10-22, UP-206. Read-only evidence: w6b-code, w7-code, w8-code,
+t3-5172a09b (wave 5), w9, t3-f3e2790d logs and the expenses report in
+t3-3ddf312f. Reproduced on temporary fixtures; no apply to migration worktrees.
+
+### F58 — CLI-owned history
+
+Six handwritten log formats obscured failures and phase timings. Each CLI call now
+appends schema-1 JSONL to `<root>/.refactor-ai/runs.jsonl`, including failed calls,
+plan/checker/runner identity and wall/phase times. `REFACTOR_AI_RUN_LOG=off` opts out;
+logging failures cannot fail a command. [Schema](../run-history.md).
+
+### F59 — generated route cleanup
+
+No-work loaders and empty prefetch batches are omitted. Translated prop expressions
+reuse loader bindings instead of generating `const scope = scope`. Dynamic-route
+adapter names use the view stem; Start components use the view name. Parameter
+snippets share one hook call. Optional `formatCommand` formats generated source
+through stdin/stdout before validation, without applying it.
+
+### F60 — test mocks and dynamic module maps
+
+Mock registration strings no longer require runtime dependencies (actual imports
+still do). Whole-module maps include literal dynamic imports. Identical mapped
+mock registrations dedupe within an uninterrupted mock run in the same block;
+separate scopes, intervening code, evaluated factory expressions and different factories are retained. A changed registration resets deduplication for that module.
+
+### F61 — batching and CLI syntax
+
+`--flag=value` preserves the rest of the value, including move-pair `=`. Mixed
+file/directory move pairs apply directory exclusions only to directories. Summaries
+list every source/destination pair. Repeated `--file` for inline-reexports produces
+one plan with shared callers and final workspace validation; pair/file argument
+order does not change the plan.
+
+### F62 — assets and state cleanup
+
+Successful moves prune empty source directories while preserving excluded files.
+Loaded unmoved `new URL(..., import.meta.url)` consumers of moved assets get
+file/line/destination notes; they require hand updates. `gc --root .` collects only
+completed apply journals under the apply lock; recovery journals stay available.
+
+### F63 — earlier UX findings
+
+F9: TS/JS rename `--public` propagates unaliased public names to loaded consumers.
+F11: `--symbol Name` selects one top-level declaration with missing/ambiguous errors.
+F20: literal dynamic imports bypass pure single-origin star shims when the origin
+has no default export; other namespaces retain the shim with an explanatory note.
+Top-level help is now a compact operation index with per-operation help pointers.
+
+Remaining preparation boundaries from the wave logs: shared views outside the
+selected route, nested-route shared modules, framework-dependent views and
+server-only/public handlers still need explicit preparation. This round does not
+attempt to infer those moves or translate application behavior.
+
+Verification: `bun run typecheck`, `bun run build`, and `bun test --timeout 60000`
+passed: **354/354 tests**, 1,637 assertions across 22 files. Explicit packaging
+checks passed **11/11 npm** and **9/9 installed-skill** integration tests (Bun needs
+`./tests/*.integration.ts` paths). Toolchain: Node 24.22.0, .NET 8.0.426 at
+`/tmp/ra-dotnet8`, npm 11.19.1 selected through `npm_execpath`. The existing npm
+foreign-language fixture now gives port-route its required `--route` selection,
+rather than failing argument parsing with `--file` before reaching the language
+check. All twelve generated skill bundles match the built runners/API docs;
+`git diff --check` passes. Sources/tests/docs and regenerated bundles are separate
+commits. The pre-existing `bun.lock` change is left untouched. No push.

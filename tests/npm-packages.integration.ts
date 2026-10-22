@@ -210,7 +210,10 @@ test("language bins report their own capability and reject foreign projects", as
     const project = entry.language === "csharp" ? csharpProject : tsProject;
     const foreign = entry.language === "csharp" ? tsProject : csharpProject;
     expect(JSON.parse(npx(entry.name, ["capabilities", "--project", project])).map((item: { operation: string }) => item.operation)).toEqual([entry.operation]);
-    for (const args of [["capabilities", "--project", foreign], ["plan", "--project", foreign, "--file", "/missing-source"]]) {
+    const selection = entry.operation === "port-route"
+      ? ["--route", "/missing-source", "--to", "/missing-feature", "--target-project", foreign]
+      : ["--file", "/missing-source"];
+    for (const args of [["capabilities", "--project", foreign], ["plan", "--project", foreign, ...selection]]) {
       const rejected = run("npx", ["--yes", `file:${tarballs.get(entry.name)!}`, ...args]);
       expect(rejected.status).toBe(1);
       expect(rejected.stderr).toContain("UNSUPPORTED_LANGUAGE");

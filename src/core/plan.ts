@@ -151,6 +151,12 @@ async function canonicalRequest(request: RefactorRequest): Promise<RefactorReque
     if (request.exclude) result.exclude = [...new Set(request.exclude)].sort();
     if (request.map) result.map = Object.fromEntries(Object.entries(request.map).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
   }
+  if (request.files) {
+    if (request.operation !== "inline-reexports" || !request.files.length) throw new Error("INVALID_REQUEST: files requires inline-reexports");
+    result.files = [...new Set(await Promise.all(request.files.map(file => realpath(file))))].sort();
+    for (const file of result.files) await assertRegularPath(root, file);
+    result.file = result.files[0]!;
+  }
   if (request.moves) {
     if (request.operation !== "move-file" || !request.moves.length) throw new Error("INVALID_REQUEST: moves requires move-file pairs");
     result.moves = [];

@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { dedupeMappedMocks } from "./typescript-mock-dedupe";
 import { installationHint } from "./typescript-package-inputs";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
@@ -218,17 +219,26 @@ function transformFile(source: ts.SourceFile, request: RefactorRequest, renamed:
       : { start: node.importClause!.name!.end - start, length: 0 };
     replacements.set(node, replace(node.getText(source), [{ span, newText: (named ? "" : ", ") + namedText(texts) }]));
   }
-  return replace(source.text, [...replacements].map(([node, newText]) => ({ span: { start: node.getStart(source), length: node.getWidth(source) }, newText })));
+  const dynamic = request.only ? [] : dynamicSpecifiers(source, request.from!).map(specifier => ({
+    span: { start: specifier.getStart(source), length: specifier.getWidth(source) }, newText: JSON.stringify(request.to),
+  }));
+  return replace(source.text, [...replacements].map(([node, newText]) => ({ span: { start: node.getStart(source), length: node.getWidth(source) }, newText })).concat(dynamic));
+}
+
+function dynamicSpecifiers(source: ts.SourceFile, from: string): ts.StringLiteralLike[] {
+  return moduleSpecifiers(source).filter(specifier => specifier.text === from && ts.isCallExpression(specifier.parent)
+    && specifier.parent.expression.kind === ts.SyntaxKind.ImportKeyword);
 }
 
 export function retargetImports(context: Context, request: RefactorRequest): string[] {
   validate(request);
-  const affected = selectedFiles(context, request).filter(source => selections(source, request).length);
+  const affected = selectedFiles(context, request).filter(source => selections(source, request).length || (!request.only && dynamicSpecifiers(source, request.from!).length));
   const unresolved: string[] = [];
   const cache = ts.createModuleResolutionCache(ts.sys.getCurrentDirectory(), path => path, context.options);
   for (const source of affected) {
-    for (const { declaration, target } of selections(source, request)) {
-      const mode = ts.getModeForUsageLocation(source, declaration.moduleSpecifier! as ts.StringLiteral, context.options);
+    for (const usage of [...selections(source, request).map(selection => selection.declaration.moduleSpecifier! as ts.StringLiteral), ...(!request.only ? dynamicSpecifiers(source, request.from!) : [])]) {
+      const target = request.to!;
+      const mode = ts.getModeForUsageLocation(source, usage, context.options);
       if (!ts.resolveModuleName(target, source.fileName, context.options, context.sys ?? ts.sys, cache, undefined, mode).resolvedModule) {
         unresolved.push(`${source.fileName} (${target})`);
       }
@@ -317,7 +327,7 @@ export function mapMoveImports(source: ts.SourceFile, mappings: Record<string, s
   const current = ts.createSourceFile(source.fileName, text, ts.ScriptTarget.Latest, true);
   // Module mocks keep factory text intact. Named rules can imply a destination
   // only when all mappings for that source agree on the same module.
-  return replace(text, moduleSpecifiers(current).filter(specifier => isModuleMockCall(specifier.parent)).flatMap(specifier => {
+  const mapped = replace(text, moduleSpecifiers(current).filter(specifier => isModuleMockCall(specifier.parent)).flatMap(specifier => {
     const targets = new Set(rules.filter(rule => rule.from === specifier.text).map(rule => rule.to));
     if (!targets.size) return [];
     if (targets.size !== 1) fail("UNSUPPORTED_MOCK_MAPPING", `${source.fileName}: ${specifier.text} maps to several modules; prepare separate mocks first`);
@@ -325,4 +335,5 @@ export function mapMoveImports(source: ts.SourceFile, mappings: Record<string, s
     const name = [...targets][0]!.replaceAll("\\", "\\\\").replaceAll(quote, `\\${quote}`).replaceAll("$" + "{", quote === "`" ? "\\$" + "{" : "$" + "{");
     return [{ span: { start: specifier.getStart(current), length: specifier.getWidth(current) }, newText: quote + name + quote }];
   }));
+  return mapped === source.text ? mapped : dedupeMappedMocks(source.fileName, mapped, new Set(rules.map(rule => rule.to)));
 }

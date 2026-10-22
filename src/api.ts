@@ -11,8 +11,14 @@ export type { Capability, Diagnostic, FileChange, Operation } from "./types.ts";
 
 export interface PlanOptions {
   checker?: "ts5" | "ts7" | "both";
+  /** TypeScript rename: select a top-level declaration instead of a position. */
+  symbol?: string;
+  /** TypeScript rename: propagate unaliased public exports through loaded consumers. */
+  public?: boolean;
   project: string;
   file?: string;
+  /** Atomic inline-reexports batch, sorted before planning. */
+  files?: string[];
   /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
   moves?: { file: string; target: string }[];
   /** TS-style globs relative to each moved directory; excluded adapters remain. */
@@ -109,6 +115,9 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         if (context.operation && operation !== context.operation) throw new Error(`UNSUPPORTED: this tool only supports ${context.operation}`);
         assertLanguage(options.project);
         if (options.checker !== undefined && (!["ts5", "ts7", "both"].includes(options.checker) || languageForProject(options.project) !== "typescript")) throw new Error("INVALID_ARGUMENT: checker ts5|ts7|both requires TypeScript/JavaScript");
+        if ((options.symbol !== undefined || options.public !== undefined) && (operation !== "rename" || languageForProject(options.project) !== "typescript")) throw new Error("INVALID_ARGUMENT: symbol and public require TypeScript/JavaScript rename");
+        if (options.symbol !== undefined && (typeof options.symbol !== "string" || !options.symbol || options.at !== undefined)) throw new Error("INVALID_ARGUMENT: symbol selects one declaration instead of at");
+        if (options.public !== undefined && typeof options.public !== "boolean") throw new Error("INVALID_ARGUMENT: public must be a boolean");
         if (options.targetProject) assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode)) throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
         if (["move-type", "move-file", "port-route"].includes(operation) && !options.target && !options.moves?.length) throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
@@ -137,9 +146,10 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
           || options.moves.some(move => !move || typeof move.file !== "string" || !move.file || typeof move.target !== "string" || !move.target))) {
           throw new Error("INVALID_ARGUMENT: moves requires TypeScript move-file pairs, without file/target");
         }
-        if (!options.file && !options.moves?.length && operation !== "retarget-import") throw new Error("INVALID_ARGUMENT: file required");
+        if (options.files !== undefined && (operation !== "inline-reexports" || !Array.isArray(options.files) || !options.files.length || options.file !== undefined || options.files.some(file => typeof file !== "string" || !file))) throw new Error("INVALID_ARGUMENT: files requires an inline-reexports batch without file");
+        if (!options.file && !options.files?.length && !options.moves?.length && operation !== "retarget-import") throw new Error("INVALID_ARGUMENT: file required");
         const project = await realpath(resolve(options.project));
-        const file = await realpath(resolve(options.file ?? options.moves?.[0]?.file ?? dirname(project)));
+        const file = await realpath(resolve(options.file ?? options.files?.[0] ?? options.moves?.[0]?.file ?? dirname(project)));
         const root = await realpath(resolve(options.root ?? dirname(project)));
         const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile(file, "utf8") : "";
         const position = (point: string | number): number => {
@@ -149,6 +159,7 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         };
         const request: RefactorRequest = {
           project, root, file, operation,
+          ...(options.files ? { files: options.files.map(file => resolve(file)) } : {}),
           ...(options.moves ? { moves: options.moves.map(move => ({ file: resolve(move.file), target: resolve(move.target) })), target: resolve(options.moves[0]!.target) } : {}),
           ...(options.exclude ? { exclude: [...new Set(options.exclude)].sort() } : {}),
           ...(options.checker !== undefined ? { checker: options.checker } : {}),
@@ -161,6 +172,8 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
             ...(options.map ? { map: options.map } : {}), ...(options.only ? { only: options.only } : {}),
             ...(options.mocks !== undefined ? { mocks: options.mocks } : {}),
             ...(!options.file ? { projectScope: true } : {}) } : {}),
+          ...(options.symbol !== undefined ? { symbol: options.symbol } : {}),
+          ...(options.public !== undefined ? { public: options.public } : {}),
           ...(options.at !== undefined ? { position: position(options.at) } : {}),
           ...(options.end !== undefined ? { end: position(options.end) } : {}),
           ...(options.name !== undefined ? { newName: options.name } : {}),

@@ -331,6 +331,7 @@ function assertRenameSemantics(
   anchorBefore: ts.RenameLocation,
   grouped: ReadonlyMap<string, readonly ts.RenameLocation[]>,
   newName: string,
+  publicName = false,
 ): void {
   const expected = mappedRenameLocations(grouped, newName);
   let anchor: { fileName: string; start: number; length: number } | undefined;
@@ -349,7 +350,7 @@ function assertRenameSemantics(
   if (!anchor) fail("RENAME_CONFLICT", "could not map the renamed symbol declaration");
 
   const after = state.service.findRenameLocations(anchor.fileName, anchor.start, false, false, {
-    providePrefixAndSuffixTextForRename: true,
+    providePrefixAndSuffixTextForRename: !publicName,
   });
   const expectedCounts = new Map<string, number>();
   for (const location of expected) {
@@ -372,14 +373,28 @@ function assertRenameSemantics(
 
 function rename(state: ProjectState, file: string, request: RefactorRequest): void {
   const text = sourceText(state, file)!;
-  const position = validatePosition(text, request.position);
+  let selectedPosition = request.position;
+  if (request.symbol !== undefined) {
+    if (request.position !== undefined) fail("INVALID_REQUEST", "symbol and position are mutually exclusive");
+    const source = state.service.getProgram()!.getSourceFile(file)!;
+    const names: ts.Identifier[] = [];
+    for (const statement of source.statements) {
+      if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) if (ts.isIdentifier(declaration.name) && declaration.name.text === request.symbol) names.push(declaration.name);
+      } else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement) || ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement) || ts.isEnumDeclaration(statement))
+        && statement.name?.text === request.symbol) names.push(statement.name);
+    }
+    if (names.length !== 1) fail(names.length ? "SYMBOL_AMBIGUOUS" : "SYMBOL_NOT_FOUND", `${request.symbol}: expected one top-level declaration, found ${names.length}`);
+    selectedPosition = names[0]!.getStart(source);
+  }
+  const position = validatePosition(text, selectedPosition);
   if (!request.newName?.trim()) fail("INVALID_REQUEST", "newName is required for rename");
   if (!isValidIdentifier(request.newName, state.options.target ?? ts.ScriptTarget.Latest)) {
     fail("INVALID_NAME", `${request.newName} is not a valid identifier`);
   }
   const info = state.service.getRenameInfo(file, position, { providePrefixAndSuffixTextForRename: true });
   if (!info.canRename) fail("RENAME_UNAVAILABLE", info.localizedErrorMessage);
-  const locations = state.service.findRenameLocations(file, position, false, false, { providePrefixAndSuffixTextForRename: true });
+  const locations = state.service.findRenameLocations(file, position, false, false, { providePrefixAndSuffixTextForRename: !request.public });
   if (!locations?.length) fail("RENAME_UNAVAILABLE", "TypeScript found no semantic rename locations");
   const definitions = state.service.getDefinitionAndBoundSpan(file, position)?.definitions ?? [];
   const anchor = definitions
@@ -406,7 +421,7 @@ function rename(state: ProjectState, file: string, request: RefactorRequest): vo
       newText: `${location.prefixText ?? ""}${request.newName}${location.suffixText ?? ""}`,
     })),
   })));
-  assertRenameSemantics(state, anchor, grouped, request.newName);
+  assertRenameSemantics(state, anchor, grouped, request.newName, request.public);
 }
 
 function imports(state: ProjectState, file: string, request: RefactorRequest): void {

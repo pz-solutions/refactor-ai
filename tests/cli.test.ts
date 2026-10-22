@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { main, offset } from "../src/cli.ts";
@@ -19,6 +19,27 @@ afterEach(async () => {
 });
 
 describe("CLI", () => {
+  test("skill launcher and bundled runner share one complete run record", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "ra-launcher-history-")));
+    roots.push(root);
+    const skill = join(root, "skill"), runtime = join(skill, "assets/runtime");
+    await mkdir(join(skill, "scripts"), { recursive: true });
+    await mkdir(join(runtime, "node_modules"), { recursive: true });
+    await cp(join(import.meta.dir, "../skills/refactor-rename/scripts/refactor.mjs"), join(skill, "scripts/refactor.mjs"));
+    await cp(join(import.meta.dir, "../dist/cli.js"), join(runtime, "cli.mjs"));
+    await symlink(join(import.meta.dir, "../node_modules/typescript"), join(runtime, "node_modules/typescript"), "junction");
+    const project = join(root, "project");
+    await mkdir(project);
+    await writeFile(join(project, "tsconfig.json"), '{"files":["src.ts"]}');
+    await writeFile(join(project, "src.ts"), 'export const value = 1;');
+    const result = spawnSync("node", [join(skill, "scripts/refactor.mjs"), "plan", "rename", "--project", join(project, "tsconfig.json"), "--file", join(project, "src.ts"), "--symbol", "value", "--name", "renamed"], { cwd: root, encoding: "utf8" });
+    expect(result.status).toBe(0);
+    const records = (await readFile(join(project, ".refactor-ai/runs.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: "planned", planId: JSON.parse(result.stdout).id, checker: { name: "ts5" } });
+    expect(records[0].phases.length).toBeGreaterThan(0);
+  });
+
   test("shows command and operation help before reading any project or plan", () => {
     const cli = join(import.meta.dir, "..", "dist", "cli.js");
     const cases = [[], ["--help"], ["-h"], ["help"],
@@ -47,7 +68,7 @@ describe("CLI", () => {
       await cp(join(import.meta.dir, "..", "skills", `refactor-${operation}`, "scripts", "refactor.mjs"), launcher);
       for (const args of [["--help"], ["plan", operation, "--help"]]) {
         const result = spawnSync(node, [launcher, ...args], {
-          cwd: skill, encoding: "utf8", env: { ...process.env, PATH: "", TMPDIR: root },
+          cwd: skill, encoding: "utf8", env: { ...process.env, PATH: "", TMPDIR: root, REFACTOR_AI_RUN_LOG: "off" },
         });
         expect(result.stderr).toBe("");
         expect(result.status).toBe(0);
@@ -62,7 +83,7 @@ describe("CLI", () => {
     const root = await mkdtemp(join(tmpdir(), "refactor-ai-tools-help-"));
     roots.push(root);
     const demo = spawnSync(Bun.which("node")!, [join(import.meta.dir, "..", "dist", "demo.js"), "--help"], {
-      cwd: root, encoding: "utf8", env: { ...process.env, PATH: "", TMPDIR: root },
+      cwd: root, encoding: "utf8", env: { ...process.env, PATH: "", TMPDIR: root, REFACTOR_AI_RUN_LOG: "off" },
     });
     expect(demo.status).toBe(0);
     expect(demo.stderr).toBe("");

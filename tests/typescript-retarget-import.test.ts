@@ -328,3 +328,13 @@ test("--mocks validates values and operation scope through API and CLI", async (
   expect(invalid.status).toBe(1);
   expect(invalid.stderr).toContain("mocks report|add");
 });
+
+
+test("retro: retarget-import rewrites literal dynamic imports and validates their destination", async () => {
+  const p = await fixture({ "src/a.ts": 'export const load = async () => (await import("old-lib")).x;' });
+  const plan = await p.plan();
+  expect(plan.validation.status).toBe("passed");
+  expect(plan.changes[0]!.after).toContain('import("new-lib")');
+  expect((await p.plan({ only: ["x"] })).changes).toEqual([]);
+  await expect(p.plan({ to: "missing-lib" })).rejects.toThrow("TARGET_UNRESOLVED");
+});

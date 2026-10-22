@@ -199,9 +199,24 @@ Field-tested on a Next.js → TanStack Start migration of a ~900-file Bun monore
 Stop dev servers and let generators settle before planning. Use `--checker ts7` when the repository typechecks with TS7. For compatible workspace migrations, combine preparation and relocation in one `move-file --map @/lib/hooks=@scope/shared/hooks --map next-intl=use-intl` plan (`--only` extracts selected exported declarations from one source file; use `--map source#Old=destination#New` for renamed imported exports). `.refactor-ai/equivalents.json` supplies defaults when the destination declares the equivalent; explicit maps win. For export renames or runtime adapters, prepare first:
 
 1. **Retarget framework imports** in the files you will move: `retarget-import --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider --file <dir> --mocks add`, and app aliases that re-export shared code (`--from @/lib/formatters --to @scope/shared/formatters`).
-2. **Inline shims** that only re-export the target package: `inline-reexports --file <shim>`. Dynamic `import()` of a shim keeps it alive; retarget those by hand.
+2. **Inline shims** that only re-export the target package: `inline-reexports --file <shim>`. A dynamic `import()` can bypass a pure single-origin `export *` shim when the origin has no default export.
 3. **Move** the module or directory: `move-file --file <dir> --to packages/<pkg>/src/<dir> --target-project packages/<pkg>/tsconfig.json`. Importers get the package's `exports` subpath (entries are added, index modules publish the directory), `vi.mock` paths follow, same-package imports become relative, ESLint bulk-suppression entries move with their files.
 4. If the move fails with `NEW_DIAGNOSTICS`, read the first errors: an unresolved `@/…` alias means a dependency still lives in the app (retarget or move it first); `Cannot find module 'x'` means the destination package must declare `x` (add it with the app's version and install).
+
+For TS/JS rename, `--symbol Name` selects a unique top-level declaration instead
+of `--at`; missing and ambiguous names fail explicitly. Add `--public` to rename
+unaliased public re-exports and their loaded consumers instead of retaining the old
+name behind an alias. Explicit aliases and consumers outside the loaded project
+still need review. The default rename behavior is unchanged.
+
+CLI history is appended locally to `<root>/.refactor-ai/runs.jsonl`, including
+failed commands and help. Disable it with `REFACTOR_AI_RUN_LOG=off` (also keeps help
+free of filesystem writes). See [run history schema](docs/run-history.md). The
+importable API does not log. `node dist/cli.js gc --root .` removes completed apply
+journals while preserving rolled-back/recovery journals and respecting the apply
+lock. Successful moves also remove empty source directories; excluded files stay.
+Loaded consumers using `new URL("...", import.meta.url)` for moved assets are listed
+in plan notes for hand updates.
 
 ## Recipe: porting a Next route to TanStack Start (`port-route`)
 
@@ -214,7 +229,16 @@ node dist/cli.js plan port-route --project apps/web/tsconfig.json \
   --to packages/app-features/src/properties/units --checker ts7 --out /tmp/units.json
 ```
 
-It moves the route's client files (keeping `page.tsx`, `_hooks/**`, adapters, server-only files and nested routes in Next), rewrites each `usePreloaded(preloadedX)` prop of the rendered view into an `initialX` data prop, generates the Next adapter that keeps the server preloads, makes `page.tsx` render it, and generates `apps/web-start/src/routes/<flat.route>.tsx` whose loader prefetches the same Convex queries with arguments translated from the page (route params, configured equivalents such as `await searchParams`, package imports and pure page consts). Untranslatable values become `TODO(port-route)` placeholders plus plan notes. All three projects are validated, with the ignored TanStack route tree regenerated in memory. Everything project-specific lives in `.refactor-ai/port-route.json`; see [examples/port-route/uber-platform](examples/port-route/uber-platform) and `plan port-route --help`.
+It moves the route's client files (keeping `page.tsx`, `_hooks/**`, adapters, server-only files and nested routes in Next), rewrites each `usePreloaded(preloadedX)` prop of the rendered view into an `initialX` data prop, generates the Next adapter that keeps the server preloads, makes `page.tsx` render it, and generates `apps/web-start/src/routes/<flat.route>.tsx` whose loader prefetches the same Convex queries with arguments translated from the page (route params, configured equivalents such as `await searchParams`, package imports and pure page consts). Untranslatable values become `TODO(port-route)` placeholders plus plan notes. All three projects are validated, with the ignored TanStack route tree regenerated in memory. Pages without loader work omit the loader; empty prefetch batches are omitted. Parameter hooks share one call, and dynamic-route adapters/components derive names from the view. Everything project-specific lives in `.refactor-ai/port-route.json`; see [examples/port-route/uber-platform](examples/port-route/uber-platform) and `plan port-route --help`.
+
+Optional `formatCommand` in `port-route.json` is an argv array, for example
+`["bun", "x", "oxfmt", "--stdin-filepath", "{{file}}"]`. It runs from the plan root,
+reads each generated adapter/Start route on stdin and must write only formatted
+source to stdout. `{{file}}` is the intended absolute output path. Formatting runs
+before compiler validation and stays in the plan; planning writes no generated
+source files. Nonzero exit, empty output or a 30-second timeout fails planning as
+`PORT_ROUTE_FORMAT_FAILED`. Use an installed/pinned project formatter. Commands in
+`afterApply` remain advisory notes.
 
 Always pass the workspace root as `--root`, run the project's formatter and linter on changed files after `apply` (the engine uses the TypeScript formatter), and run the application tests. Lint rules that depend on per-package configuration (for example shadcn's `components.json`) do not move with the code; compare the destination package's lint setup.
 
@@ -320,8 +344,8 @@ by origin. Relative chains resolve through the checker; bare/package specifiers
 retain the public entry used by the shim. Quotes, aliases, type modifiers and
 relative extension conventions are preserved. Pure, unreferenced re-export shims
 are deleted (schemaVersion 2), with literal config file lists updated; `--keep`
-retains them. Mixed modules retain all original re-exports. Side-effect imports
-stay unchanged with a note; dynamic/import-type references also prevent deletion.
+retains them. Repeat `--file` to inline several shims in one plan (API: `files: [...]`), sharing one workspace and final validation. Mixed modules retain all original re-exports. Side-effect imports
+stay unchanged with a note; import-type references prevent deletion. Dynamic imports bypass pure single-origin star shims with no default export; other dynamic references retain the shim with a note.
 Namespace imports require a pure single-origin `export *` shim whose origin has
 no default export. Import/export attributes are unsupported. Compiler validation
 does not verify module initialization effects, directives such as `"use client"`,

@@ -90,7 +90,7 @@ const base: Record<string, string> = {
   "apps/start/tsconfig.json": config(),
   "apps/start/src/router.ts": [
     "export function createFileRoute(_id: string) {",
-    "  return (options: { loader: (input: any) => unknown; component: () => unknown }) => ({ options, useLoaderData: (): any => ({}), useParams: (): any => ({}) });",
+    "  return (options: { loader?: (input: any) => unknown; component: () => unknown }) => ({ options, useLoaderData: (): any => ({}), useParams: (): any => ({}) });",
     "}",
     "",
   ].join("\n"),
@@ -158,6 +158,62 @@ function request(w: Awaited<ReturnType<typeof workspace>>, extra: object = {}) {
 const after = (plan: { changes: { path: string; after: string | null }[] }, path: string) => plan.changes.find(change => change.path === path)?.after;
 
 describe("port-route", () => {
+  test("retro: parameter snippets share one hook call and generated files use a configured formatter", async () => {
+    const nested = `${route}/[unitCode]`;
+    const configured = JSON.parse(base[".refactor-ai/port-route.json"]!);
+    configured.params.next = { setup: ["const { {{name}} } = useParams<{ {{name}}: string }>();"], imports: ['import { useParams } from "next/navigation";'], value: "{{name}}" };
+    configured.formatCommand = [process.execPath, "-e", 'process.stdout.write("// formatted " + process.argv[1].split("/").at(-1) + "\\n" + require("node:fs").readFileSync(0, "utf8"))', "{{file}}"];
+    const w = await workspace({
+      ".refactor-ai/port-route.json": JSON.stringify(configured),
+      "node_modules/next/package.json": '{"name":"next","exports":{"./navigation":"./navigation.d.ts"}}',
+      "node_modules/next/navigation.d.ts": 'export function useParams<T>(): T;',
+      [`${nested}/page.tsx`]: 'import { UnitView } from "./unit-view"; export default function Page() { return <UnitView />; }',
+      [`${nested}/unit-view.tsx`]: 'export function UnitView({ code, unitCode }: { code: string; unitCode: string }) { return <div>{code}{unitCode}</div>; }',
+    });
+    const api = createRefactorApi({ loadBackend });
+    const plan = await api.plan(request(w, { file: w.path(nested) }));
+    expect(plan.validation.status).toBe("passed");
+    const adapter = after(plan, w.path(`${nested}/unit-adapter.tsx`))!;
+    const start = after(plan, w.path("apps/start/src/routes/items.$code.$unitCode.tsx"))!;
+    expect(adapter.match(/useParams</g)).toHaveLength(1);
+    expect(adapter).toContain("const { code, unitCode }");
+    expect(adapter).toContain("code: string; unitCode: string;");
+    expect(start.match(/Route.useParams\(\)/g)).toHaveLength(1);
+    expect(adapter).toStartWith("// formatted unit-adapter.tsx\n");
+    expect(start).toStartWith("// formatted items.$code.$unitCode.tsx\n");
+    await expect(readFile(w.path(`${nested}/unit-adapter.tsx`))).rejects.toThrow();
+    expect((await api.plan(request(w, { file: w.path(nested) }))).id).toBe(plan.id);
+    configured.formatCommand = [process.execPath, "-e", "process.exit(1)"];
+    await writeFile(w.path(".refactor-ai/port-route.json"), JSON.stringify(configured));
+    await expect(api.plan(request(w, { file: w.path(nested) }))).rejects.toThrow("PORT_ROUTE_FORMAT_FAILED");
+  });
+
+  test("retro: no-preload pages omit loaders and use the view name for dynamic routes", async () => {
+    const w = await workspace({
+      [`${route}/page.tsx`]: 'import { ItemView } from "./item-view"; export default function Page() { return <ItemView title="Item" />; }',
+      [`${route}/item-view.tsx`]: 'export function ItemView({ title, code }: { title: string; code: string }) { return <div>{title}{code}</div>; }',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan(request(w));
+    expect(plan.validation.status).toBe("passed");
+    const start = after(plan, w.path("apps/start/src/routes/items.$code.index.tsx"))!;
+    expect(start).not.toContain("loader:");
+    expect(start).not.toContain("Promise.all([])");
+    expect(start).toContain("function ItemPage()");
+    expect(after(plan, w.path(`${route}/item-adapter.tsx`))).toBeString();
+  });
+
+  test("retro: translated props reuse existing loader bindings", async () => {
+    const w = await workspace({
+      [`${route}/page.tsx`]: 'import { ItemView } from "./item-view"; export default function Page() { const scope = "items"; return <ItemView scope={scope} />; }',
+      [`${route}/item-view.tsx`]: 'export function ItemView({ scope }: { scope: string }) { return <div>{scope}</div>; }',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan(request(w));
+    expect(plan.validation.status).toBe("passed");
+    const start = after(plan, w.path("apps/start/src/routes/items.$code.index.tsx"))!;
+    expect(start.match(/const scope\s*=/g)).toHaveLength(1);
+    expect(start).not.toContain("Promise.all([])");
+  });
+
   test("moves the view, generates adapter and Start route, rewires the page and applies", async () => {
     const w = await workspace();
     const api = createRefactorApi({ loadBackend });
@@ -174,8 +230,8 @@ describe("port-route", () => {
     expect(view).not.toContain("Preloaded");
     expect(view).toContain('import type { FunctionReturnType } from "@scope/data";');
     expect(after(plan, w.path(`${route}/item-view.tsx`))).toBeNull();
-    expect(after(plan, w.path(`${route}/page.tsx`))).toContain('import { ItemView } from "./items-adapter";');
-    const adapter = after(plan, w.path(`${route}/items-adapter.tsx`))!;
+    expect(after(plan, w.path(`${route}/page.tsx`))).toContain('import { ItemView } from "./item-adapter";');
+    const adapter = after(plan, w.path(`${route}/item-adapter.tsx`))!;
     expect(adapter).toBe([
       '"use client";',
       "",

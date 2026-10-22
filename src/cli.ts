@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { logRun } from "./run-log";
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { runCli, type CliContext } from "./cli-core.ts";
@@ -9,7 +10,8 @@ export { offset } from "./cli-core.ts";
 export async function main(args: string[], context: Omit<CliContext, "loadBackend"> = {}): Promise<void> {
   if (args[0] === "serve" && !args.includes("--help")) {
     const { serve } = await import("./serve.ts");
-    return serve(args.slice(1), { ...context, loadBackend });
+    const run = () => serve(args.slice(1), { ...context, runLog: undefined, loadBackend });
+    return context.runLog === false ? run() : logRun(args, run);
   }
   return runCli(args, { ...context, loadBackend });
 }

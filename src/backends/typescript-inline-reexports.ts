@@ -257,6 +257,17 @@ function rewrite(origins: Origins, shim: ts.SourceFile, source: ts.SourceFile, n
     changes.push({ span: { start, length: statement.end - start }, newText: output });
   }
   for (const specifier of moduleSpecifiers(source)) {
+    if (ts.isCallExpression(specifier.parent) && specifier.parent.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const resolved = origins.ws.resolveModule(specifier, source);
+      if (!resolved || !origins.ws.vfs.samePath(resolved.resolvedFileName, shim.fileName)) continue;
+      const star = singleStar(shim);
+      if (!star || !star.moduleSpecifier || !ts.isStringLiteralLike(star.moduleSpecifier)) {
+        notes.push(`Kept dynamic import of ${shim.fileName}: only pure single-origin export * shims support namespace retargeting.`);
+      } else if (origins.exports(origins.module(shim, star.moduleSpecifier)).some(item => item.name === "default")) {
+        notes.push(`Kept dynamic import of ${shim.fileName}: origin exports default, which export * excludes.`);
+      } else changes.push(retargetNamespace(origins, shim, source, specifier));
+      continue;
+    }
     if (!isModuleMockCall(specifier.parent)) continue;
     const resolved = origins.ws.resolveModule(specifier, source);
     if (!resolved || !origins.ws.vfs.samePath(resolved.resolvedFileName, shim.fileName)) continue;

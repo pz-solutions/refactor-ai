@@ -54,6 +54,72 @@ const changed = (result: { changes: Awaited<ReturnType<typeof analyze>>["changes
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 describe("move-file", () => {
+  test("retro: a mapped dynamic import passes cross-package dependency checks", async () => {
+    const w = await packages({
+      "apps/web/package.json": '{"name":"@scope/web","dependencies":{"@scope/feature":"workspace:*","old-lib":"1.0.0"}}',
+      "packages/feature/package.json": '{"name":"@scope/feature","dependencies":{"new-lib":"1.0.0"},"exports":{"./existing":"./src/existing.ts"}}',
+      "node_modules/old-lib/package.json": '{"name":"old-lib","types":"index.d.ts"}',
+      "node_modules/old-lib/index.d.ts": 'export declare const value: number;',
+      "node_modules/new-lib/package.json": '{"name":"new-lib","types":"index.d.ts"}',
+      "node_modules/new-lib/index.d.ts": 'export declare const value: number;',
+      "apps/web/src/component.ts": 'export const component = async () => (await import("old-lib")).value;',
+    });
+    const plan = await createPlan(packageRequest(w, { map: { "old-lib": "new-lib" } }), analyze);
+    expect(plan.validation.status).toBe("passed");
+    expect(changed(plan, w.path("packages/feature/src/ui/component.ts"))).toContain('import("new-lib")');
+  });
+
+  test("retro: mapped mock dedupe retains different factories, scopes and intervening code", () => {
+    const text = 'vi.doMock("old", () => 1); vi.doMock("new", () => 2); function test() { vi.doMock("new", () => 1); } vi.doMock("new", () => 1); run(); vi.doMock("new", () => 1);';
+    const mapped = mapMoveImports(ts.createSourceFile("test.ts", text, ts.ScriptTarget.Latest, true), { old: "new" });
+    expect(mapped.match(/vi.doMock/g)).toHaveLength(5);
+    expect(mapped).not.toContain('"old"');
+    const evaluated = 'vi.doMock("old", makeFactory()); vi.doMock("new", makeFactory());';
+    expect(mapMoveImports(ts.createSourceFile("test.ts", evaluated, ts.ScriptTarget.Latest, true), { old: "new" }).match(/vi.doMock/g)).toHaveLength(2);
+    const reset = 'vi.doMock("old", () => 1); vi.doMock("new", () => 2); vi.doMock("new", () => 1);';
+    expect(mapMoveImports(ts.createSourceFile("test.ts", reset, ts.ScriptTarget.Latest, true), { old: "new" }).match(/vi.doMock/g)).toHaveLength(3);
+
+  });
+
+  test("retro: maps dynamic imports and deduplicates mapped mocks in the same block", () => {
+    const source = ts.createSourceFile("test.ts", 'vi.doMock("next-intl", () => ({ value: 1 })); vi.doMock("use-intl", () => ({ value: 1 })); export const load = () => import("next-intl");', ts.ScriptTarget.Latest, true);
+    const mapped = mapMoveImports(source, { "next-intl": "use-intl" });
+    expect(mapped).not.toContain('"next-intl"');
+    expect(mapped.match(/vi.doMock/g)).toHaveLength(1);
+    expect(mapped).toContain('import("use-intl")');
+  });
+
+  test("retro: mock registrations alone do not require a destination dependency", async () => {
+    const w = await packages({
+      "apps/web/package.json": '{"name":"@scope/web","dependencies":{"@scope/feature":"workspace:*","sonner":"1.0.0"}}',
+      "apps/web/src/component.ts": 'declare const vi: any; vi.doMock("sonner"); export const component = () => 42;',
+    });
+    const plan = await createPlan(packageRequest(w), analyze);
+    expect(plan.validation.status).toBe("passed");
+  });
+
+  test("retro: mixed file/directory batches honor exclusions, report asset URLs and summarize every pair", async () => {
+    const w = await workspace({
+      "tsconfig.json": config(), "src/component.ts": 'export const component = 1;',
+      "src/lib/value.ts": 'export const value = 1;', "src/lib/keep.ts": 'export const keep = 1;',
+      "src/lib/__fixtures__/key.pem": 'fixture',
+      "src/use.test.ts": 'export const fixture = new URL("./lib/__fixtures__/key.pem", import.meta.url);',
+    });
+    const api = createRefactorApi({ loadBackend });
+    const plan = await api.plan({ project: w.path("tsconfig.json"), root: w.root, operation: "move-file", moves: [
+      { file: w.path("src/component.ts"), target: w.path("src/ui/component.ts") },
+      { file: w.path("src/lib"), target: w.path("src/ui/lib") },
+    ], exclude: ["keep.ts"] });
+    expect(plan.validation.status).toBe("passed");
+    expect(plan.changes.some(change => change.path === w.path("src/lib/keep.ts"))).toBe(false);
+    expect(plan.notes.join("\n")).toContain("import.meta.url");
+    expect(plan.notes.join("\n")).toContain("src/component.ts -> src/ui/component.ts");
+    expect(plan.notes.join("\n")).toContain("src/lib -> src/ui/lib");
+    await api.apply(plan);
+    expect(existsSync(w.path("src/lib/__fixtures__"))).toBe(false);
+    expect(existsSync(w.path("src/lib/keep.ts"))).toBe(true);
+  });
+
   test("batch moves are order independent, preserve interdependent imports and modes", async () => {
     const w = await packages({
       "apps/web/src/helper.ts": 'export const helper = () => 42;',
