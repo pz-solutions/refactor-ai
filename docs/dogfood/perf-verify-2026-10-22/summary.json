@@ -1,0 +1,840 @@
+{
+  "suites": [
+    {
+      "suite": "uber",
+      "commit": "b586fc5c9ac640ba4fae20107fd3e2ee60556346",
+      "node": "v24.22.0",
+      "baselineHash": "d9928466054d02cfc22157ac763c7013fca61f1f15ad5e595f1feec9aab5f507",
+      "currentHash": "3b9086e64aff7efa61e51e4a4cf8a9f8b224a99bbf216b5b813ad982f169eda3",
+      "mode": "cold Node processes unless serve; cache off; OS cache retained; variant order rotates per run; no apply",
+      "cold": [
+        {
+          "scenario": "cross-package",
+          "variant": "base-full",
+          "n": 3,
+          "medianS": 23.32,
+          "rangeS": "23.19\u201323.45",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8570,
+            "workspace.external-projects": 382,
+            "workspace.inputs": 717,
+            "workspace.load": 4649,
+            "workspace.move": 2052,
+            "workspace.prepare": 0,
+            "workspace.program": 2849,
+            "workspace.validate": 10853
+          }
+        },
+        {
+          "scenario": "cross-package",
+          "variant": "bindings",
+          "n": 3,
+          "medianS": 8.37,
+          "rangeS": "8.31\u20138.39",
+          "phaseMediansMs": {
+            "workspace.bindings": 14,
+            "workspace.bindings-prepare": 1,
+            "workspace.external-projects": 104,
+            "workspace.load": 1505,
+            "workspace.move": 1662,
+            "workspace.program": 3532
+          }
+        },
+        {
+          "scenario": "cross-package",
+          "variant": "full",
+          "n": 3,
+          "medianS": 22.09,
+          "rangeS": "22.03\u201322.18",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8627,
+            "workspace.external-projects": 381,
+            "workspace.load": 4570,
+            "workspace.move": 1679,
+            "workspace.prepare": 0,
+            "workspace.program": 2856,
+            "workspace.validate": 10900
+          }
+        },
+        {
+          "scenario": "in-package",
+          "variant": "base-full",
+          "n": 3,
+          "medianS": 24.83,
+          "rangeS": "24.55\u201325.48",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8800,
+            "workspace.external-projects": 398,
+            "workspace.inputs": 909,
+            "workspace.load": 6491,
+            "workspace.move": 2525,
+            "workspace.prepare": 0,
+            "workspace.program": 2567,
+            "workspace.validate": 9884
+          }
+        },
+        {
+          "scenario": "in-package",
+          "variant": "bindings",
+          "n": 3,
+          "medianS": 9.49,
+          "rangeS": "9.45\u20139.57",
+          "phaseMediansMs": {
+            "workspace.bindings": 142,
+            "workspace.bindings-prepare": 1,
+            "workspace.external-projects": 111,
+            "workspace.load": 2048,
+            "workspace.move": 2068,
+            "workspace.program": 3445
+          }
+        },
+        {
+          "scenario": "in-package",
+          "variant": "full",
+          "n": 3,
+          "medianS": 23.3,
+          "rangeS": "23.10\u201323.40",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8911,
+            "workspace.external-projects": 383,
+            "workspace.load": 6427,
+            "workspace.move": 2054,
+            "workspace.prepare": 0,
+            "workspace.program": 2592,
+            "workspace.validate": 9964
+          }
+        },
+        {
+          "scenario": "serve-cold-1",
+          "variant": "bindings",
+          "n": 3,
+          "medianS": 9.49,
+          "rangeS": "9.48\u20139.54",
+          "phaseMediansMs": {
+            "workspace.bindings": 139,
+            "workspace.bindings-prepare": 1,
+            "workspace.external-projects": 111,
+            "workspace.load": 2049,
+            "workspace.move": 2061,
+            "workspace.program": 3478
+          }
+        },
+        {
+          "scenario": "serve-cold-1",
+          "variant": "full",
+          "n": 3,
+          "medianS": 23.19,
+          "rangeS": "22.94\u201323.23",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8765,
+            "workspace.external-projects": 377,
+            "workspace.load": 6443,
+            "workspace.move": 2058,
+            "workspace.prepare": 0,
+            "workspace.program": 2531,
+            "workspace.validate": 9828
+          }
+        },
+        {
+          "scenario": "serve-cold-2",
+          "variant": "bindings",
+          "n": 3,
+          "medianS": 8.99,
+          "rangeS": "8.98\u20139.00",
+          "phaseMediansMs": {
+            "workspace.bindings": 19,
+            "workspace.bindings-prepare": 1,
+            "workspace.external-projects": 111,
+            "workspace.load": 2064,
+            "workspace.move": 1877,
+            "workspace.program": 3412
+          }
+        },
+        {
+          "scenario": "serve-cold-2",
+          "variant": "full",
+          "n": 3,
+          "medianS": 22.79,
+          "rangeS": "22.66\u201322.97",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8786,
+            "workspace.external-projects": 381,
+            "workspace.load": 6342,
+            "workspace.move": 2000,
+            "workspace.prepare": 0,
+            "workspace.program": 2668,
+            "workspace.validate": 9658
+          }
+        },
+        {
+          "scenario": "serve-cold-3",
+          "variant": "bindings",
+          "n": 3,
+          "medianS": 9.07,
+          "rangeS": "9.05\u20139.11",
+          "phaseMediansMs": {
+            "workspace.bindings": 85,
+            "workspace.bindings-prepare": 1,
+            "workspace.external-projects": 110,
+            "workspace.load": 2062,
+            "workspace.move": 1845,
+            "workspace.program": 3401
+          }
+        },
+        {
+          "scenario": "serve-cold-3",
+          "variant": "full",
+          "n": 3,
+          "medianS": 22.75,
+          "rangeS": "22.68\u201322.82",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8779,
+            "workspace.external-projects": 384,
+            "workspace.load": 6289,
+            "workspace.move": 1985,
+            "workspace.prepare": 0,
+            "workspace.program": 2682,
+            "workspace.validate": 9668
+          }
+        },
+        {
+          "scenario": "serve-cold-4",
+          "variant": "bindings",
+          "n": 3,
+          "medianS": 9.16,
+          "rangeS": "9.11\u20139.20",
+          "phaseMediansMs": {
+            "workspace.bindings": 81,
+            "workspace.bindings-prepare": 1,
+            "workspace.external-projects": 105,
+            "workspace.load": 2063,
+            "workspace.move": 1758,
+            "workspace.program": 3511
+          }
+        },
+        {
+          "scenario": "serve-cold-4",
+          "variant": "full",
+          "n": 3,
+          "medianS": 22.99,
+          "rangeS": "22.88\u201323.06",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8705,
+            "workspace.external-projects": 379,
+            "workspace.load": 6478,
+            "workspace.move": 2009,
+            "workspace.prepare": 0,
+            "workspace.program": 2535,
+            "workspace.validate": 9598
+          }
+        },
+        {
+          "scenario": "serve-cold-5",
+          "variant": "bindings",
+          "n": 3,
+          "medianS": 9.14,
+          "rangeS": "9.02\u20139.75",
+          "phaseMediansMs": {
+            "workspace.bindings": 24,
+            "workspace.bindings-prepare": 1,
+            "workspace.external-projects": 111,
+            "workspace.load": 2046,
+            "workspace.move": 1926,
+            "workspace.program": 3437
+          }
+        },
+        {
+          "scenario": "serve-cold-5",
+          "variant": "full",
+          "n": 3,
+          "medianS": 22.99,
+          "rangeS": "22.78\u201322.99",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8825,
+            "workspace.external-projects": 378,
+            "workspace.load": 6533,
+            "workspace.move": 1987,
+            "workspace.prepare": 0,
+            "workspace.program": 2539,
+            "workspace.validate": 9710
+          }
+        }
+      ],
+      "identity": [
+        {
+          "scenario": "cross-package",
+          "run": 1,
+          "fullIdEqualsBaseline": true,
+          "editsEqual": true,
+          "variants": [
+            "base-full",
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "base-full": 66324,
+            "full": 66324,
+            "bindings": 63095
+          }
+        },
+        {
+          "scenario": "cross-package",
+          "run": 2,
+          "fullIdEqualsBaseline": true,
+          "editsEqual": true,
+          "variants": [
+            "base-full",
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "full": 66324,
+            "bindings": 63095,
+            "base-full": 66324
+          }
+        },
+        {
+          "scenario": "cross-package",
+          "run": 3,
+          "fullIdEqualsBaseline": true,
+          "editsEqual": true,
+          "variants": [
+            "base-full",
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63095,
+            "base-full": 66324,
+            "full": 66324
+          }
+        },
+        {
+          "scenario": "in-package",
+          "run": 1,
+          "fullIdEqualsBaseline": true,
+          "editsEqual": true,
+          "variants": [
+            "base-full",
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "base-full": 66547,
+            "full": 66547,
+            "bindings": 63340
+          }
+        },
+        {
+          "scenario": "in-package",
+          "run": 2,
+          "fullIdEqualsBaseline": true,
+          "editsEqual": true,
+          "variants": [
+            "base-full",
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "full": 66547,
+            "bindings": 63340,
+            "base-full": 66547
+          }
+        },
+        {
+          "scenario": "in-package",
+          "run": 3,
+          "fullIdEqualsBaseline": true,
+          "editsEqual": true,
+          "variants": [
+            "base-full",
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63340,
+            "base-full": 66547,
+            "full": 66547
+          }
+        },
+        {
+          "scenario": "serve-cold-1",
+          "run": 1,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63340,
+            "full": 66547
+          }
+        },
+        {
+          "scenario": "serve-cold-1",
+          "run": 2,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "full": 66547,
+            "bindings": 63340
+          }
+        },
+        {
+          "scenario": "serve-cold-1",
+          "run": 3,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63340,
+            "full": 66547
+          }
+        },
+        {
+          "scenario": "serve-cold-2",
+          "run": 1,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63340,
+            "full": 66547
+          }
+        },
+        {
+          "scenario": "serve-cold-2",
+          "run": 2,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "full": 66547,
+            "bindings": 63340
+          }
+        },
+        {
+          "scenario": "serve-cold-2",
+          "run": 3,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63340,
+            "full": 66547
+          }
+        },
+        {
+          "scenario": "serve-cold-3",
+          "run": 1,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63340,
+            "full": 66547
+          }
+        },
+        {
+          "scenario": "serve-cold-3",
+          "run": 2,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "full": 66547,
+            "bindings": 63340
+          }
+        },
+        {
+          "scenario": "serve-cold-3",
+          "run": 3,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63340,
+            "full": 66547
+          }
+        },
+        {
+          "scenario": "serve-cold-4",
+          "run": 1,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63346,
+            "full": 66552
+          }
+        },
+        {
+          "scenario": "serve-cold-4",
+          "run": 2,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "full": 66552,
+            "bindings": 63346
+          }
+        },
+        {
+          "scenario": "serve-cold-4",
+          "run": 3,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63346,
+            "full": 66552
+          }
+        },
+        {
+          "scenario": "serve-cold-5",
+          "run": 1,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63340,
+            "full": 66547
+          }
+        },
+        {
+          "scenario": "serve-cold-5",
+          "run": 2,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "full": 66547,
+            "bindings": 63340
+          }
+        },
+        {
+          "scenario": "serve-cold-5",
+          "run": 3,
+          "fullIdEqualsBaseline": null,
+          "editsEqual": true,
+          "variants": [
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 63340,
+            "full": 66547
+          }
+        }
+      ],
+      "rejected": [],
+      "loadAverage1m": {
+        "min": 0.83,
+        "max": 3.29
+      },
+      "serve": [
+        {
+          "variant": "bindings",
+          "mode": "cold",
+          "plan1MedianS": 9.49,
+          "plan1RangeS": "9.48\u20139.54",
+          "plans2to5MedianS": 9.09,
+          "plans2to5RangeS": "8.98\u20139.75",
+          "n2to5": 12,
+          "perPlanMedianS": {
+            "1": 9.49,
+            "2": 8.99,
+            "3": 9.07,
+            "4": 9.16,
+            "5": 9.14
+          }
+        },
+        {
+          "variant": "bindings",
+          "mode": "serve",
+          "plan1MedianS": 9.23,
+          "plan1RangeS": "9.21\u20139.30",
+          "plans2to5MedianS": 4.33,
+          "plans2to5RangeS": "4.25\u20134.45",
+          "n2to5": 12,
+          "perPlanMedianS": {
+            "1": 9.23,
+            "2": 4.26,
+            "3": 4.29,
+            "4": 4.43,
+            "5": 4.39
+          }
+        },
+        {
+          "variant": "full",
+          "mode": "cold",
+          "plan1MedianS": 23.19,
+          "plan1RangeS": "22.94\u201323.23",
+          "plans2to5MedianS": 22.85,
+          "plans2to5RangeS": "22.66\u201323.06",
+          "n2to5": 12,
+          "perPlanMedianS": {
+            "1": 23.19,
+            "2": 22.79,
+            "3": 22.75,
+            "4": 22.99,
+            "5": 22.99
+          }
+        },
+        {
+          "variant": "full",
+          "mode": "serve",
+          "plan1MedianS": 22.76,
+          "plan1RangeS": "22.67\u201322.88",
+          "plans2to5MedianS": 15.56,
+          "plans2to5RangeS": "15.26\u201315.77",
+          "n2to5": 12,
+          "perPlanMedianS": {
+            "1": 22.76,
+            "2": 15.56,
+            "3": 15.56,
+            "4": 15.71,
+            "5": 15.48
+          }
+        }
+      ],
+      "serveIdsEqualCold": true,
+      "serveIdPairs": 30,
+      "servePhaseMediansMs": {
+        "bindings/cold/first": {
+          "workspace.bindings": 139,
+          "workspace.bindings-prepare": 1,
+          "workspace.external-projects": 111,
+          "workspace.load": 2049,
+          "workspace.move": 2061,
+          "workspace.program": 3478
+        },
+        "bindings/cold/warm": {
+          "workspace.bindings": 52.5,
+          "workspace.bindings-prepare": 1.0,
+          "workspace.external-projects": 110.0,
+          "workspace.load": 2058.5,
+          "workspace.move": 1859.5,
+          "workspace.program": 3433.0
+        },
+        "bindings/serve/first": {
+          "workspace.bindings": 142,
+          "workspace.bindings-prepare": 1,
+          "workspace.external-projects": 110,
+          "workspace.load": 2058,
+          "workspace.move": 2041,
+          "workspace.program": 3434
+        },
+        "bindings/serve/warm": {
+          "workspace.bindings": 8.5,
+          "workspace.bindings-prepare": 1.0,
+          "workspace.external-projects": 105.5,
+          "workspace.load": 673.0,
+          "workspace.move": 1172.5,
+          "workspace.program": 1183.0
+        },
+        "full/cold/first": {
+          "diagnostics.ts7": 8765,
+          "workspace.external-projects": 377,
+          "workspace.load": 6443,
+          "workspace.move": 2058,
+          "workspace.prepare": 0,
+          "workspace.program": 2531,
+          "workspace.validate": 9828
+        },
+        "full/cold/warm": {
+          "diagnostics.ts7": 8782.5,
+          "workspace.external-projects": 380.0,
+          "workspace.load": 6451.5,
+          "workspace.move": 1989.5,
+          "workspace.prepare": 0.0,
+          "workspace.program": 2552.5,
+          "workspace.validate": 9663.0
+        },
+        "full/serve/first": {
+          "diagnostics.ts7": 8706,
+          "workspace.external-projects": 383,
+          "workspace.load": 6329,
+          "workspace.move": 2114,
+          "workspace.prepare": 0,
+          "workspace.program": 2561,
+          "workspace.validate": 9724
+        },
+        "full/serve/warm": {
+          "diagnostics.ts7": 8839.0,
+          "workspace.external-projects": 395.0,
+          "workspace.load": 2374.0,
+          "workspace.move": 1179.5,
+          "workspace.prepare": 0.0,
+          "workspace.program": 389.0,
+          "workspace.validate": 9665.5
+        }
+      },
+      "serveRejected": [],
+      "targetNote": "uber-platform t3-2595fe92: HEAD b586fc5c at start; another agent committed 0e499840 (refactor-ai pin) at 12:51 during the series. Every scenario/variant produced one plan ID across all runs and git status stayed clean, so no recorded compiler input changed."
+    },
+    {
+      "suite": "r4",
+      "commit": "9f66b9dc4c2177cf7141b67984849d89a11688f2",
+      "node": "v24.22.0",
+      "baselineHash": "d9928466054d02cfc22157ac763c7013fca61f1f15ad5e595f1feec9aab5f507",
+      "currentHash": "3b9086e64aff7efa61e51e4a4cf8a9f8b224a99bbf216b5b813ad982f169eda3",
+      "mode": "cold Node processes unless serve; cache off; OS cache retained; variant order rotates per run; no apply",
+      "cold": [
+        {
+          "scenario": "events-batch",
+          "variant": "base-full",
+          "n": 3,
+          "medianS": 17.46,
+          "rangeS": "17.37\u201317.49",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 5212,
+            "workspace.external-projects": 498,
+            "workspace.inputs": 537,
+            "workspace.load": 4009,
+            "workspace.move": 1473,
+            "workspace.prepare": 0,
+            "workspace.program": 2401,
+            "workspace.validate": 6969
+          }
+        },
+        {
+          "scenario": "events-batch",
+          "variant": "bindings",
+          "n": 3,
+          "medianS": 6.47,
+          "rangeS": "6.46\u20136.52",
+          "phaseMediansMs": {
+            "workspace.bindings": 88,
+            "workspace.bindings-prepare": 1,
+            "workspace.external-projects": 130,
+            "workspace.load": 1086,
+            "workspace.move": 961,
+            "workspace.program": 3002
+          }
+        },
+        {
+          "scenario": "events-batch",
+          "variant": "full",
+          "n": 3,
+          "medianS": 16.48,
+          "rangeS": "16.47\u201316.53",
+          "phaseMediansMs": {
+            "diagnostics.ts7": 5183,
+            "workspace.external-projects": 502,
+            "workspace.load": 3982,
+            "workspace.move": 1125,
+            "workspace.prepare": 0,
+            "workspace.program": 2429,
+            "workspace.validate": 6906
+          }
+        }
+      ],
+      "identity": [
+        {
+          "scenario": "events-batch",
+          "run": 1,
+          "fullIdEqualsBaseline": true,
+          "editsEqual": true,
+          "variants": [
+            "base-full",
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "base-full": 51349,
+            "full": 51349,
+            "bindings": 43095
+          }
+        },
+        {
+          "scenario": "events-batch",
+          "run": 2,
+          "fullIdEqualsBaseline": true,
+          "editsEqual": true,
+          "variants": [
+            "base-full",
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "full": 51349,
+            "bindings": 43095,
+            "base-full": 51349
+          }
+        },
+        {
+          "scenario": "events-batch",
+          "run": 3,
+          "fullIdEqualsBaseline": true,
+          "editsEqual": true,
+          "variants": [
+            "base-full",
+            "bindings",
+            "full"
+          ],
+          "readCounts": {
+            "bindings": 43095,
+            "base-full": 51349,
+            "full": 51349
+          }
+        }
+      ],
+      "rejected": [],
+      "loadAverage1m": {
+        "min": 1.2,
+        "max": 1.51
+      },
+      "serve": [],
+      "serveIdsEqualCold": null,
+      "serveIdPairs": 0,
+      "servePhaseMediansMs": {},
+      "serveRejected": [],
+      "targetNote": "/tmp/ra-target: local clone at 9f66b9dc, bun install, prepared by scripts/prepare-r4-events.py; batch plans never applied; fixture status unchanged."
+    }
+  ],
+  "measuredCliSha256": "3b9086e64aff7efa61e51e4a4cf8a9f8b224a99bbf216b5b813ad982f169eda3",
+  "finalCliNote": "The final CLI (6508d071\u2026) adds bindings-failure hints and move-type/--only origin attribution after the series; it reproduces the measured in/cross-package plan IDs for full and bindings.",
+  "raw": "Full plans, stderr phase traces and report.json: /tmp/ra-verify/bench-uber and /tmp/ra-verify/bench-r4 (not committed)."
+}

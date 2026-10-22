@@ -944,3 +944,129 @@ Re-running the committed preparation script preserves the prepared fixture statu
 the separate declaration-repro worktree remains clean. Generated skill runtimes,
 SDK declarations and copied API docs belong in a separate commit from sources.
 No push or apply to an active user worktree was performed.
+
+## Round five — verification modes and warm workspace serve (2026-10-22, UP-207)
+
+Retro data: successful wave 4–9 plans had a 31 s median; 12 of 21 rejections
+arrived after 8–43 s of full validation, and agents re-ran `check-types` anyway.
+
+### F58 — `--verify bindings` separates editing from program diagnostics
+
+`plan --verify full|bindings` (API `verify`). `full` stays the default and is
+unchanged: full plans carry no `verify` field, and the new CLI reproduces the
+r4 CLI's full plan IDs byte-for-byte in every paired run below. `bindings`
+(TS/JS) still runs every precheck (graph discovery and membership, ownership,
+dependency/alias prechecks, access/cycle/output-layout checks, case/encoding),
+the operation's reference preservation (rename binding identity, moved import
+edges and importer multisets, moved-type references/imports, inline re-export
+resolution) and read-set freshness. It adds a checker-free check of each changed
+file: syntax errors, and import/export bindings — every specifier resolves with
+the owning project's options or an ambient `declare module`, and every named
+import/re-export names a syntactic export of the resolved module (following
+`export *`). Problems already in the original file are not attributed; for
+`move-type`/`--only` a new target is compared with its source file.
+
+It deliberately does **not** report type errors (tests: a mapped module whose
+`a` became a string passes bindings and fails full with TS2322), declaration/
+options/global diagnostics, or effects on unchanged files. Unprovable exports
+(`export =`, CommonJS, scripts) are accepted; augmentation-only exports are
+reported (use full). Project references fail `VERIFY_UNSUPPORTED`. Plans record
+`request.verify: "bindings"`, no diagnostics and no `checker`; `validate`/`apply`
+return `verify` and apply adds a typecheck reminder. A `none` mode was not added:
+every operation's edits are semantic, and the binding check costs 0.01–0.15 s.
+
+### F59 — committable repository defaults
+
+`<root>/.refactor-ai/config.json`, e.g. `{"verify":"bindings","checker":"ts7"}`,
+applies to TS plans; explicit options win, the configured checker applies only to
+full verification, explicit `--checker` with bindings is rejected, unknown keys
+fail `INVALID_REPO_CONFIG`. The generated state `.gitignore` keeps it tracked.
+
+### F60 — where bindings time goes (cold)
+
+Profiling the bindings formatter move (14.8 s first cut) showed graph discovery
+(6.5 s) dominated: discovery programs parsed ~28 M chars of dependency `.d.ts`
+per config. In bindings mode they only decide user-file reachability and are
+never checked, so dependency/library declarations are empty stubs (a dependency
+declaration cannot reach a user file except via a workspace-package symlink,
+which canonicalization keeps inside root). Same project graph and edits; load
+6.4 → 2.0 s. The backend's end-of-analysis read-set replay duplicated
+`createPlan`'s later replay of the same entries and was removed (both modes,
+0.7–0.9 s); `relativeStyle` reuses cached syntax parses. Remaining cold bindings
+phases (in-package medians): editing LanguageService program 3.4 s (parse incl.
+dependency declarations, resolution, checker init/binding), move edits 2.1 s,
+discovery 2.0 s, external-project check 0.1 s, binding check 0.14 s; ~1.7 s is
+process start, read-set replay (63 k reads) and plan serialization.
+
+### F61 — warm `serve` for workspace operations
+
+Workspace plans in `serve` share parsed documents across plans. Script versions
+are now content identities and the shared DocumentRegistry is pinned, so a
+retained parse is reused only for identical text. Each plan still re-reads and
+records every compiler input (fresh `CompilerInputs`), so warm read sets — and
+plan IDs — equal cold ones: 30/30 warm/cold pairs below are identical. Tests
+replay new importers, a new importing config, a same-length text change and a
+config exclude between warm plans, comparing each with a fresh CLI process, in
+both modes. Mutation check: per-plan version counters with the shared registry
+(naive sharing) fail both tests. Resolution (~1.5 s per warm plan) is not
+cached across plans, to keep read sets exact.
+
+### Final round-five measurements
+
+Seconds, median (min–max), 3 runs each, cold Node v24.22.0 processes unless
+serve, cache off, OS cache retained, variant order rotated per run, no apply.
+Load average (1 min) 0.83–3.29 (uber) and 1.20–1.51 (R4). All 87 plans
+passed; no rejected plan is counted. Edit hashes match across all variants.
+
+| Scenario | r4 full (932b444, ts7) | full (ts7) | bindings |
+| --- | ---: | ---: | ---: |
+| In-package formatter move (129 files) | 24.83 (24.55–25.48) | 23.30 (23.10–23.40) | **9.49** (9.45–9.57) |
+| Cross-package `workos-request-origin` | 23.32 (23.19–23.45) | 22.09 (22.03–22.18) | **8.37** (8.31–8.39) |
+| R4 events 13-file batch (/tmp fixture) | 17.46 (17.37–17.49) | 16.48 (16.47–16.53) | **6.47** (6.46–6.52) |
+
+Five distinct `packages/app-features/src/shared` moves per session (formatters,
+business-clock, effective-date, search-params, token-scope), three sessions,
+each paired with the same five plans in cold processes:
+
+| Mode | Plan 1 | Plans 2–5 (n=12) |
+| --- | ---: | ---: |
+| bindings, cold | 9.49 | 9.09 (8.98–9.75) |
+| bindings, serve | 9.23 | **4.33** (4.25–4.45) |
+| full ts7, cold | 23.19 | 22.85 (22.66–23.06) |
+| full ts7, serve | 22.76 | 15.56 (15.26–15.77) |
+
+Targets (UP-207): move-file bindings ≤ 10 s cold — met (9.49 / 8.37 s); ≤ 5 s in
+serve — met (4.33 s). Warm bindings phases: discovery 0.67, editing program 1.18,
+move 1.17, binding check 0.01 s, plus ~1.2 s replay/serialization. Full warm
+saves discovery and parsing (−7.3 s) but keeps 9.7 s of TS7 validation.
+Bindings plans record 5–16 % fewer reads (stubbed discovery declarations).
+
+The uber target (`t3-2595fe92`) started at b586fc5c; another agent committed
+0e499840 (refactor-ai pin) at 12:51 during the series. Each scenario/variant
+still produced a single plan ID across all runs and status stayed clean, so no
+recorded input changed. The R4 fixture is a local clone at 9f66b9dc under /tmp,
+prepared by `prepare-r4-events.py`; batches are never applied.
+
+```sh
+export PATH=/usr/local/bin:$PATH
+node scripts/bench-verify.mjs /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92 \
+  /tmp/ra-verify/baseline-cli.mjs /tmp/ra-verify/new-cli.mjs /tmp/ra-verify/bench-uber uber 3
+node scripts/bench-verify.mjs /tmp/ra-target /tmp/ra-verify/baseline-cli.mjs \
+  /tmp/ra-verify/new-cli.mjs /tmp/ra-verify/bench-r4 r4 3
+```
+
+Compact evidence: [summary.json](perf-verify-2026-10-22/summary.json); full plans
+and phase traces stay under `/tmp/ra-verify`. The measured CLI is 3b9086e6…; the
+final CLI adds bindings-failure hints and move-type/`--only` origin attribution
+and reproduces the measured in/cross-package plan IDs in both modes.
+
+Not done: F24 (`--include-project`). Importing configs of moved files are already
+discovered automatically; configs importing other rewritten files still fail
+`UNHANDLED_PROJECT_GRAPH` in both modes, and admitting them needs participant
+changes beyond this round.
+
+Verification: `bun run typecheck`, `bun run build` and the complete
+`bun run test --timeout 60000` pass: **349/349 tests**, 1,640 assertions, 23
+files, 229.20 s, with user-local .NET 8.0.426 at `/tmp/ra-dotnet8` and npm
+11.19.1 via `npm_execpath`. New: `tests/verify-modes.test.ts` (11) and
+`tests/serve-workspace.test.ts` (3). No push; no apply to uber-platform.
