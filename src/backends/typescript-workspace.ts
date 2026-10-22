@@ -170,6 +170,46 @@ function attachSourceParents(source: ts.SourceFile): void {
   }
 }
 
+/** Parses retained across sequential plans of one `serve` process; every entry is keyed by content. */
+interface SharedDocuments {
+  registry: ts.DocumentRegistry;
+  parented: WeakSet<ts.SourceFile>;
+  sourceFiles: Map<string, Map<string, ts.SourceFile>>;
+  stubs: Map<string, ts.SourceFile>;
+}
+
+let warmDocuments: Map<boolean, SharedDocuments> | undefined;
+
+/**
+ * Warm serve: workspace plans share parsed documents. Script versions are content
+ * identities, so a shared registry entry is reused only for identical text; each plan
+ * still reads (and records) every compiler input itself, so read sets stay exact.
+ */
+export function setWorkspaceWarmMode(enabled: boolean): void {
+  warmDocuments = enabled ? new Map() : undefined;
+}
+
+function sharedDocuments(caseSensitive: boolean): SharedDocuments | undefined {
+  if (!warmDocuments) return undefined;
+  let shared = warmDocuments.get(caseSensitive);
+  if (!shared) {
+    const base = ts.createDocumentRegistry(caseSensitive);
+    // Documents stay pinned for later plans; versions (content identities) decide reuse.
+    const registry: ts.DocumentRegistry = {
+      acquireDocument: base.acquireDocument.bind(base),
+      acquireDocumentWithKey: base.acquireDocumentWithKey.bind(base),
+      updateDocument: base.updateDocument.bind(base),
+      updateDocumentWithKey: base.updateDocumentWithKey.bind(base),
+      getKeyForCompilationSettings: base.getKeyForCompilationSettings.bind(base),
+      reportStats: base.reportStats.bind(base),
+      releaseDocument: () => {},
+      releaseDocumentWithKey: () => {},
+    };
+    warmDocuments.set(caseSensitive, shared = { registry, parented: new WeakSet(), sourceFiles: new Map(), stubs: new Map() });
+  }
+  return shared;
+}
+
 export class Workspace {
   readonly vfs: VirtualFs;
   readonly participants = new Map<string, Participant>();
@@ -180,14 +220,15 @@ export class Workspace {
   readonly service: ts.LanguageService;
   private readonly registry: ts.DocumentRegistry;
   private readonly registeredDocuments: { path: string; options: ts.CompilerOptions; kind: ts.ScriptKind; format: ts.ResolutionMode }[] = [];
-  private readonly parentedSources = new WeakSet<ts.SourceFile>();
+  private readonly parentedSources: WeakSet<ts.SourceFile>;
+  private readonly shared: boolean;
   private readonly discovered: string[];
   /** Configs that joined the graph only because their programs import an affected file. */
   readonly importingConfigs: string[] = [];
   /** Per-config computed output root from the last diagnostics() run (emitting projects without rootDir only). */
   layouts = new Map<string, string>();
   private owners = new Map<string, string[]>();
-  private readonly sourceFiles = new Map<string, Map<string, ts.SourceFile>>();
+  private readonly sourceFiles: Map<string, Map<string, ts.SourceFile>>;
   private readonly discoveryPrograms = new Map<string, ts.Program>();
   private resolutionVersion = -1;
   private resolutionCaches = new WeakMap<ts.CompilerOptions, ts.ModuleResolutionCache>();
@@ -196,9 +237,18 @@ export class Workspace {
 
   /** `affected` are the files whose module shape the operation changes (renamed, moved from or into). */
   /** `extraConfigs` join the graph as owning participants (e.g. a project receiving generated files). */
-  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = [], private readonly nativeChecker?: NativeChecker, private readonly checkerMode: "ts7" | "both" = "both", inputs?: CompilerInputs, private readonly extraConfigs: string[] = []) {
+  /**
+   * `lightDiscovery` (--verify bindings): discovery programs only decide whether a config reaches an
+   * affected user file; they are never checked, so dependency/library declarations are empty stubs.
+   */
+  constructor(readonly root: string, sourceConfig: string, targetConfig: string, private readonly affected: string[] = [], private readonly nativeChecker?: NativeChecker, private readonly checkerMode: "ts7" | "both" = "both", inputs?: CompilerInputs, private readonly extraConfigs: string[] = [], private readonly lightDiscovery = false) {
     this.vfs = new VirtualFs(root, inputs);
-    this.registry = ts.createDocumentRegistry(this.vfs.caseSensitive);
+    const shared = sharedDocuments(this.vfs.caseSensitive);
+    this.shared = !!shared;
+    this.registry = shared?.registry ?? ts.createDocumentRegistry(this.vfs.caseSensitive);
+    this.parentedSources = shared?.parented ?? new WeakSet();
+    this.sourceFiles = shared?.sourceFiles ?? new Map();
+    this.stubs = shared?.stubs ?? new Map();
     this.sourceConfig = sourceConfig;
     this.targetConfig = targetConfig;
     for (const config of [sourceConfig, targetConfig, ...extraConfigs]) {
@@ -247,7 +297,7 @@ export class Workspace {
     this.service.dispose();
     for (const item of this.registeredDocuments) this.registry.releaseDocument(item.path, item.options, item.kind, item.format);
     this.registeredDocuments.length = 0;
-    this.sourceFiles.clear();
+    if (!this.shared) { this.sourceFiles.clear(); this.stubs.clear(); }
     this.discoveryPrograms.clear();
   }
 
@@ -531,11 +581,11 @@ export class Workspace {
       rootNames: parsed.fileNames,
       options: parsed.options,
       projectReferences: parsed.projectReferences,
-      host: this.compilerHost(config, parsed.options),
+      host: this.compilerHost(config, parsed.options, this.lightDiscovery),
     });
     const wanted = new Set(paths.map((path) => this.vfs.key(path)));
     const imports = program.getSourceFiles().some((sourceFile) => wanted.has(this.vfs.key(sourceFile.fileName)));
-    if (imports && this.vfs.version === 0) this.discoveryPrograms.set(this.vfs.key(config), program);
+    if (imports && this.vfs.version === 0 && !this.lightDiscovery) this.discoveryPrograms.set(this.vfs.key(config), program);
     return imports;
   }
 
@@ -589,15 +639,30 @@ export class Workspace {
       this.parentedSources.add(file);
     }
     if (!syntaxOnly) this.registeredDocuments.push({ path: fileName, options, kind, format: file.impliedNodeFormat });
+    // Original and planned texts alternate within a plan; older texts are dropped.
+    if (versions.size >= 2) versions.delete(versions.keys().next().value!);
     versions.set(text, file);
     this.sourceFiles.set(key, versions);
     return file;
   }
 
-  private compilerHost(configPath: string, options: ts.CompilerOptions): ts.CompilerHost {
+  private readonly stubs: Map<string, ts.SourceFile>;
+
+  private externalStub(fileName: string, settings: ts.ScriptTarget | ts.CreateSourceFileOptions): ts.SourceFile {
+    const detail = typeof settings === "object" ? `${settings.languageVersion}|${settings.impliedNodeFormat}` : String(settings);
+    const key = `${this.vfs.key(fileName)}|${detail}`;
+    let stub = this.stubs.get(key);
+    if (!stub) this.stubs.set(key, stub = ts.createSourceFile(fileName, "", settings, false, scriptKindFor(fileName)));
+    return stub;
+  }
+
+  private compilerHost(configPath: string, options: ts.CompilerOptions, stubExternal = false): ts.CompilerHost {
     const vfs = this.vfs;
     return {
-      getSourceFile: (fileName, settings) => this.sourceFile(fileName, settings, options),
+      // A dependency declaration cannot import a user file except through a workspace
+      // package symlink, which canonicalization keeps inside root; stubs keep reachability.
+      getSourceFile: (fileName, settings) => stubExternal && vfs.isExternal(fileName) && vfs.fileExists(fileName)
+        ? this.externalStub(fileName, settings) : this.sourceFile(fileName, settings, options),
       getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
       writeFile: () => {},
       getCurrentDirectory: () => dirname(configPath),
@@ -696,13 +761,7 @@ export class Workspace {
 
   private prepareNativeValidation(skipCleanBaseline: boolean): () => { before: Diagnostic[]; after: Diagnostic[] } {
     const original = new Map([...this.participants].map(([key, item]) => [key, item.parsed]));
-    for (const [key, item] of this.participants) {
-      const options = item.parsed.options;
-      if (options.noEmit || options.rootDir || options.composite || (!options.outDir && !options.declarationDir)) continue;
-      const program = ts.createProgram({ rootNames: item.parsed.fileNames, options, host: this.compilerHost(item.configPath, options) });
-      const layout = this.computedOutputRoot(item, program);
-      if (layout !== undefined) this.layouts.set(key, layout);
-    }
+    for (const [key, layout] of this.outputLayouts()) this.layouts.set(key, layout);
     return () => {
       const after = this.diagnostics();
       if (skipCleanBaseline && !after.length) return { before: [], after };
@@ -875,6 +934,19 @@ export class Workspace {
     return [...merged.values()]
       .flatMap(({ record, count }) => Array.from({ length: count }, () => record))
       .sort((a, b) => a.file.localeCompare(b.file) || a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
+  }
+
+  /** Output roots of the current view from plain Programs (no checker), for --verify bindings. */
+  outputLayouts(): Map<string, string> {
+    const layouts = new Map<string, string>();
+    for (const [key, item] of this.participants) {
+      const options = item.parsed.options;
+      if (options.noEmit || options.rootDir || options.composite || (!options.outDir && !options.declarationDir)) continue;
+      const program = ts.createProgram({ rootNames: item.parsed.fileNames, options, host: this.compilerHost(item.configPath, options) });
+      const layout = this.computedOutputRoot(item, program);
+      if (layout !== undefined) layouts.set(key, layout);
+    }
+    return layouts;
   }
 
   /**

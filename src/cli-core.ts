@@ -14,7 +14,7 @@ function parse(args: string[]): { command: string; operation?: string; flags: Re
   const command = args.shift() ?? "help";
   const operation = args[0] && !args[0].startsWith("--") ? args.shift() : undefined;
   const flags: Record<string, string> = {};
-  const allowed = new Set(["project", "file", "exclude", "root", "at", "symbol", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker", "route", "start-routes", "config"]);
+  const allowed = new Set(["project", "file", "exclude", "root", "at", "symbol", "end", "name", "mode", "out", "plan", "to", "target-project", "type", "root-namespace", "from", "map", "only", "mocks", "checker", "verify", "route", "start-routes", "config"]);
   const mappings: string[] = [];
   const files: string[] = [];
   const excludes: string[] = [];
@@ -116,6 +116,7 @@ async function executeCli(args: string[], context: CliContext): Promise<void> {
     keep: flags.keep === "true" ? true : undefined,
     root: flags.root, at: flags.at, symbol: flags.symbol, public: flags.public === "true" ? true : undefined, end: flags.end, name: flags.name,
     checker: flags.checker as "ts5" | "ts7" | "both" | undefined,
+    verify: flags.verify as "full" | "bindings" | undefined,
     mode: flags.mode as "sort" | "remove-unused" | undefined, target: operation === "retarget-import" ? undefined : flags.to,
     from: flags.from, to: operation === "retarget-import" ? flags.to : undefined,
     map: flags.map === undefined ? undefined : parseMap(flags.map), only: flags.only?.split(","),
@@ -150,7 +151,7 @@ async function executeCli(args: string[], context: CliContext): Promise<void> {
   await writeFile(output, JSON.stringify(plan, null, 2) + "\n");
   log({
     status: "planned", plan: output, id: plan.id, backend: plan.backend,
-    files: plan.changes.map(c => c.path), validation: plan.validation, notes: plan.notes
+    files: plan.changes.map(c => c.path), validation: plan.validation, verify: plan.request.verify ?? "full", notes: plan.notes
   });
   if (plan.validation.status !== "passed") setExitCode(1);
 }

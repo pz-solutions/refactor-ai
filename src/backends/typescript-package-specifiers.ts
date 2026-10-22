@@ -151,9 +151,8 @@ export function relativeStyle(ws: Workspace, target: string, fallback: string, c
   let sample = "./module";
   for (const file of ws.unionFiles()) {
     if (!isInside(pkg.directory, file) || packageFor(ws, file)?.path !== pkg.path) continue;
-    const text = ws.vfs.readFile(file);
-    if (text === undefined) continue;
-    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const source = ws.syntaxFile(file);
+    if (!source) continue;
     for (const specifier of moduleSpecifiers(source)) {
       if (!/^\.\.?\//.test(specifier.text)) continue;
       if (/\.[cm]?[jt]sx?$/.test(specifier.text)) { explicit += 1; sample = specifier.text; }

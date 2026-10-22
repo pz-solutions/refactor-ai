@@ -276,7 +276,46 @@ request per stdin line, for example
 Responses carry `id`, `status`, and `output` or `error`. Requests run sequentially;
 EOF closes the server. Up to four single-project TypeScript LanguageServices stay
 warm. Content hashes, compiler filesystem queries and directory membership are
-rechecked before reuse. Workspace file operations still load fresh workspaces.
+rechecked before reuse. Workspace file operations (`move-file`, `port-route`,
+`inline-reexports`, `rename-file`, `move-type`) build a fresh workspace per plan but
+share parsed documents across plans: script versions are content identities, so a
+retained parse is only reused for byte-identical text, and every plan re-reads and
+records all of its compiler inputs, so warm and cold plans have identical read sets
+and plan IDs.
+
+### Verification modes (`--verify`)
+
+`--verify full` (default; API `verify: "full"`) is the behavior described below:
+program diagnostics of the planned affected set, compared with the original.
+`--verify bindings` (TypeScript/JavaScript) skips program diagnostics, for agents
+that run the repository's own typecheck afterwards anyway. A bindings plan still
+runs every operation precheck (project graph discovery and membership, ownership,
+dependency/alias prechecks, access and cycle checks, output layout, case and
+encoding checks), the operation's reference preservation (rename binding identity,
+moved import edges and importer sets, moved-type references and imports, inline
+re-export resolution) and snapshot/read-set freshness. It adds a cheap check of
+every changed file: syntax errors and import/export bindings — each module
+specifier must resolve with the owning project's options (or match an ambient
+`declare module`), and each named import/re-export must name an export of that
+module (computed syntactically, following `export *`). Problems that already
+existed in the original file are not attributed to the plan.
+
+Bindings mode deliberately does **not** report type errors (assignability,
+overloads, missing properties, implicit any, a retargeted export with the same name
+but another type), declaration/options/global diagnostics, or effects on unchanged
+files. Named bindings of modules whose exports cannot be proven syntactically
+(`export =`, CommonJS, scripts, unresolved `export *`) are accepted; an export only
+added by a module augmentation is reported (use `--verify full`). Project-reference
+graphs need in-memory declaration builds and fail with `VERIFY_UNSUPPORTED`.
+Bindings plans record `request.verify: "bindings"`, carry no diagnostics or
+`checker`, and `apply`/`validate` report `verify` plus a reminder to typecheck.
+Full plans are unchanged (no `verify` field). `--checker` selects the diagnostics
+checker and is rejected with `--verify bindings`.
+
+Commit `<root>/.refactor-ai/config.json` for repository defaults, e.g.
+`{"verify":"bindings","checker":"ts7"}`. Explicit options win; the configured
+checker applies when verification is full (`--verify full`). Only `verify` and
+`checker` are accepted; the file applies to TypeScript plans.
 
 Validation checks the planned affected set first. When it has no errors, the
 original error baseline is unnecessary and `diagnosticsBefore` is empty; notes

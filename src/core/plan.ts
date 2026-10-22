@@ -101,6 +101,10 @@ export function assertPlanShape(plan: Plan): void {
   }
   if (plan.id !== planId(plan)) throw new Error("INVALID_PLAN: plan integrity check failed");
   if (plan.snapshot.hash !== sha256(JSON.stringify(plan.snapshot.files))) throw new Error("INVALID_PLAN: invalid snapshot");
+  // Bindings plans never carry program diagnostics; absent means full verification.
+  if (plan.request.verify !== undefined && (plan.request.verify !== "bindings" || plan.diagnosticsBefore.length || plan.diagnosticsAfter.length)) {
+    throw new Error("INVALID_PLAN: invalid verification mode");
+  }
   if (plan.schemaVersion === 3) assertReadSetShape(plan.readSet!);
   else if (plan.readSet !== undefined) throw new Error("INVALID_PLAN: read set requires schema 3");
   const added = newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter);

@@ -24,7 +24,7 @@ export class CompilerInputs {
         const key = JSON.stringify([method, args]);
         if (this.values.has(key)) return this.values.get(key);
         const value = (original as Function)(...args);
-        this.inputs.set(key, { method, args: structuredClone(args), digest: hash(value) });
+        this.inputs.set(key, { method, args: args.map(arg => Array.isArray(arg) ? [...arg] : arg), digest: hash(value) });
         this.values.set(key, value);
         return value;
       };

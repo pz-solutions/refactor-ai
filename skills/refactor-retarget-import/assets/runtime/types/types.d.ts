@@ -7,6 +7,12 @@ export interface RefactorRequest {
     symbol?: string;
     /** TypeScript rename: propagate unaliased public exports through loaded consumers. */
     public?: boolean;
+    /**
+     * Absent: full verification (program diagnostics). "bindings": edits,
+     * prechecks, reference preservation and changed files' syntax and
+     * import/export bindings, without program diagnostics (TypeScript only).
+     */
+    verify?: "bindings";
     project: string;
     root: string;
     file: string;
