@@ -1203,7 +1203,18 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     if (bindings) {
       context.verify?.();
       context.verify = undefined;
-      const checked = timed("workspace.bindings", () => bindings(new Map([...renameMap].map(([from, to]) => [ws.vfs.key(to), from]))));
+      // Selected declarations and moved types carry their source file's imports into the target.
+      const origins = new Map([...renameMap].map(([from, to]) => [ws.vfs.key(to), from]));
+      if ((request.only || request.operation === "move-type") && request.target && ws.vfs.diskText(request.target) === null) origins.set(ws.vfs.key(request.target), file);
+      const checked = timed("workspace.bindings", () => {
+        try { return bindings(origins); }
+        catch (error) {
+          if (!(error instanceof Error) || !error.message.startsWith("BINDINGS_NOT_PRESERVED")) throw error;
+          throw new Error(error.message
+            + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : "")
+            + (port ? `; port-route generated ${relative(root, port.startFile)} and the Next adapter from ${relative(root, port.config.path)}: fix its templates, snippets or ports` : ""));
+        }
+      });
       context.notes.push(`Verified bindings only (--verify bindings): edit prechecks, project membership, reference preservation, syntax and import/export bindings of ${checked} changed file(s); program diagnostics were not computed. Run the project typecheck after apply.`);
     } else {
       if (request.operation !== "move-type" && ![...ws.participants.values()].some(item => item.references.length)) {

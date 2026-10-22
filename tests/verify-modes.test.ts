@@ -87,6 +87,15 @@ describe("--verify bindings", () => {
     expect(plan.changes.find(change => change.path === w.path("src/use.ts"))?.after).toContain('"./ui/component"');
   }, 30_000);
 
+  test("attributes imports copied by --only to the source file's original bindings", async () => {
+    const w = await workspace({
+      ...base,
+      "src/types.ts": 'import { gone } from "./old";\nexport type Kept = number;\nexport interface Moved { value: typeof gone }\n',
+    });
+    const plan = await w.move({ file: w.path("src/types.ts"), target: w.path("src/model.ts"), only: ["Moved"], verify: "bindings" });
+    expect(plan.changes.find(change => change.path === w.path("src/model.ts"))?.after).toContain("gone");
+  }, 30_000);
+
   test("deliberately does not report type errors, which full verification rejects", async () => {
     const w = await workspace({ ...base, "src/new.ts": 'export const a = "text";\n' });
     await expect(w.move({ map: { "./old": "./new" } })).rejects.toThrow(/^NEW_DIAGNOSTICS: TS2322 /);
