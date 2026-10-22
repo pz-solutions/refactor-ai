@@ -3,9 +3,15 @@ export type Operation = "rename" | "imports" | "format" | "extract-function" | "
 export interface RefactorRequest {
     /** Opt-in native diagnostics; edits always use pinned TypeScript 5.9.3. */
     checker?: "ts5" | "ts7" | "both";
+    /** TypeScript rename: select a top-level declaration instead of a position. */
+    symbol?: string;
+    /** TypeScript rename: propagate unaliased public exports through loaded consumers. */
+    public?: boolean;
     project: string;
     root: string;
     file: string;
+    /** Atomic inline-reexports batch, sorted before planning. */
+    files?: string[];
     /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
     moves?: {
         file: string;

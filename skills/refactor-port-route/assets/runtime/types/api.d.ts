@@ -5,8 +5,14 @@ export type { Plan } from "./core/plan.js";
 export type { Capability, Diagnostic, FileChange, Operation } from "./types.js";
 export interface PlanOptions {
     checker?: "ts5" | "ts7" | "both";
+    /** TypeScript rename: select a top-level declaration instead of a position. */
+    symbol?: string;
+    /** TypeScript rename: propagate unaliased public exports through loaded consumers. */
+    public?: boolean;
     project: string;
     file?: string;
+    /** Atomic inline-reexports batch, sorted before planning. */
+    files?: string[];
     /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
     moves?: {
         file: string;

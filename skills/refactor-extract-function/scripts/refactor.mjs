@@ -1,5 +1,167 @@
+// src/run-log.ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat as lstat2, mkdir, open, readFile as readFile2, realpath as realpath2 } from "node:fs/promises";
+import { dirname as dirname2, resolve as resolve2 } from "node:path";
+// package.json
+var package_default = {
+  name: "refactor-ai",
+  version: "0.1.4",
+  private: true,
+  repository: {
+    type: "git",
+    url: "git+https://github.com/pz-solutions/refactor-ai.git"
+  },
+  type: "module",
+  scripts: {
+    refactor: "node dist/cli.js",
+    bench: "bun scripts/bench.ts",
+    "bench:warm": "bun scripts/bench-warm.ts",
+    "bench:checkers": "bun scripts/bench-checkers.ts",
+    build: "bun build src/cli.ts --target node --format esm --outfile dist/cli.js --external typescript --external typescript7 && bun build src/api-entry.ts --target node --format esm --outfile dist/api.mjs --external typescript --external typescript7 && bun build scripts/demo.ts --target node --format esm --outfile dist/demo.js --external typescript --external typescript7 && bun build scripts/npm-release.ts --target node --format esm --outfile dist/npm-release.mjs && bun build scripts/version.ts --target node --format esm --outfile dist/version.mjs && bun scripts/package-skills.ts",
+    "package:skills": "bun scripts/package-skills.ts --build",
+    "package:npm": "bun scripts/package-npm.ts",
+    "release:npm": "node dist/npm-release.mjs",
+    "test:npm": "bun test ./tests/npm-packages.integration.ts",
+    "build:csharp": "dotnet build dotnet/RefactorHelper/RefactorHelper.csproj -c Release --nologo -p:RestoreLockedMode=true",
+    typecheck: "tsc --noEmit",
+    test: "bun test",
+    "test:skills": "bun run build && bun test ./tests/skills-install.integration.ts",
+    demo: "node dist/demo.js",
+    "version:packages": "node dist/version.mjs"
+  },
+  engines: {
+    node: ">=22"
+  },
+  dependencies: {
+    diff: "8.0.2",
+    typescript: "5.9.3"
+  },
+  devDependencies: {
+    "@types/bun": "1.3.0",
+    "@types/semver": "7.8.0",
+    semver: "7.8.5",
+    typescript7: "npm:typescript@7.0.2"
+  },
+  peerDependencies: {
+    typescript7: "npm:typescript@7.0.2"
+  },
+  peerDependenciesMeta: {
+    typescript7: {
+      optional: true
+    }
+  }
+};
+
+// src/core/snapshot.ts
+import { execFile } from "node:child_process";
+import { lstat, readdir, readFile, readlink, realpath, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+var excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
+var run = promisify(execFile);
+var stateIgnoreText = `*
+!equivalents.json
+!port-route.json
+!port-route/
+!port-route/**
+!.gitignore
+`;
+var legacyIgnoreTexts = [`*
+`, `*
+!equivalents.json
+!.gitignore
+`];
+async function ignoreStateDirectory(stateDirectory) {
+  const path = resolve(stateDirectory, ".gitignore");
+  const stat = await lstat(path).catch((error) => {
+    if (error.code === "ENOENT")
+      return;
+    throw error;
+  });
+  if (stat?.isSymbolicLink())
+    throw new Error("SYMLINK_UNSUPPORTED: state .gitignore");
+  if (stat?.isFile()) {
+    if (legacyIgnoreTexts.includes(await readFile(path, "utf8")))
+      await writeFile(path, stateIgnoreText);
+    return;
+  }
+  try {
+    await writeFile(path, stateIgnoreText, { flag: "wx", mode: 420 });
+  } catch (error) {
+    if (error.code !== "EEXIST")
+      throw error;
+  }
+}
+
+// src/run-log.ts
+var storageKey = Symbol.for("refactor-ai.run-log.v1");
+var runtime = globalThis;
+var active = runtime[storageKey] ??= new AsyncLocalStorage;
+function flag(args, name) {
+  const index = args.indexOf(`--${name}`);
+  return index >= 0 ? args[index + 1] : args.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+}
+var identity;
+async function append(run) {
+  const root = await realpath2(run.root);
+  const directory = resolve2(root, ".refactor-ai");
+  await mkdir(directory, { recursive: true, mode: 448 });
+  if ((await lstat2(directory)).isSymbolicLink())
+    return;
+  await ignoreStateDirectory(directory);
+  identity ??= readFile2(new URL(import.meta.url)).then((bytes) => ({ version: package_default.version, sha256: createHash("sha256").update(bytes).digest("hex") }), () => ({ version: package_default.version, sha256: null }));
+  run.cli = await identity;
+  run.root = root;
+  const handle = await open(resolve2(directory, "runs.jsonl"), constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | constants.O_NOFOLLOW, 384);
+  try {
+    await handle.writeFile(JSON.stringify(run) + `
+`);
+  } finally {
+    await handle.close();
+  }
+}
+async function logRun(args, execute) {
+  if (process.env.REFACTOR_AI_RUN_LOG === "off")
+    return execute();
+  const start = performance.now(), cwd = process.cwd();
+  const project = flag(args, "project");
+  const command = !args.length || ["help", "--help", "-h"].includes(args[0]) ? "help" : args[0];
+  const run = {
+    schemaVersion: 1,
+    startedAt: new Date().toISOString(),
+    command,
+    op: command === "plan" ? args[1] ?? "plan" : command,
+    argv: [...args],
+    cwd,
+    root: resolve2(flag(args, "root") ?? (project ? dirname2(resolve2(project)) : cwd)),
+    wallMs: 0,
+    phases: [],
+    status: "ok",
+    exitCode: 0,
+    errorCode: null,
+    planId: null,
+    cli: { version: package_default.version, sha256: null },
+    checker: null
+  };
+  return active.run(run, async () => {
+    try {
+      return await execute();
+    } catch (error) {
+      run.status = "failed";
+      run.exitCode = 1;
+      run.errorCode = /^(?:Error: )?([A-Z][A-Z0-9_]+):/.exec(String(error))?.[1] ?? "UNKNOWN_ERROR";
+      throw error;
+    } finally {
+      run.wallMs = Math.round(performance.now() - start);
+      await append(run).catch(() => {});
+    }
+  });
+}
+
 // scripts/skill-launcher.ts
-import { join as join3, resolve as resolve2, dirname as dirname2 } from "node:path";
+import { join as join3, resolve as resolve4, dirname as dirname4 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/languages.ts
@@ -24,7 +186,7 @@ var operationHelp = {
     description: "Move modules atomically, selected declarations, or a directory with exclusions.",
     support: "TypeScript and JavaScript",
     required: "--to <destination> OR repeated --file <source=destination> [--exclude <glob> ...] [--target-project <config>] [--root <directory>]",
-    details: "--file accepts a file or directory with --to, or repeated source=destination pairs without --to. A batch loads the workspace once and validates the final graph; mutually importing batch files may move together in any argument order. Directory moves preserve relative layout. Repeat --exclude with tsconfig-style globs relative to each source directory to keep server files/adapters; e.g. page.tsx and **/_hooks/**. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Repeat --map source=destination to retarget moved files’ own imports/re-exports and vi.mock/doMock/importActual literals. Add --map source#Old=destination#New for named exports, preserving local/public names with aliases. Mock factory text stays unchanged: review runtime compatibility. External consumer mocks are reported; --mocks add clones standalone registrations for the mapped module. --only selects exported declarations from one source file and moves only their required imports; unselected declarations stay in the source. Types, functions and safe classes/enums are supported; variable initialization, merged declarations and re-exports require preparation. The r3 mapping-only --only behavior is now available through retarget-import --only before moving. Module maps are simultaneous and scoped to moved files. Root .refactor-ai/equivalents.json supplies default module maps only when the destination declares the alternative; explicit maps win. Compiler checks do not prove runtime compatibility. Aliases between moved files become relative imports; unresolved source-project aliases fail MOVE_IMPORT_UNRESOLVED before program loading; missing destination packages fail MISSING_DEPENDENCY with source versions and install hints. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
+    details: "--file accepts a file or directory with --to, or repeated source=destination pairs without --to. A batch loads the workspace once and validates the final graph; mutually importing batch files may move together in any argument order. Directory moves preserve relative layout. Repeat --exclude with tsconfig-style globs relative to each source directory to keep server files/adapters; e.g. page.tsx and **/_hooks/**. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Repeat --map source=destination to retarget moved files’ own imports/re-exports and literal dynamic imports and vi.mock/doMock/importActual calls. Add --map source#Old=destination#New for named exports, preserving local/public names with aliases. Mock factory text stays unchanged: review runtime compatibility. External consumer mocks are reported; --mocks add clones standalone registrations for the mapped module. --only selects exported declarations from one source file and moves only their required imports; unselected declarations stay in the source. Types, functions and safe classes/enums are supported; variable initialization, merged declarations and re-exports require preparation. The r3 mapping-only --only behavior is now available through retarget-import --only before moving. Module maps are simultaneous and scoped to moved files. Root .refactor-ai/equivalents.json supplies default module maps only when the destination declares the alternative; explicit maps win. Compiler checks do not prove runtime compatibility. Aliases between moved files become relative imports; unresolved source-project aliases fail MOVE_IMPORT_UNRESOLVED before program loading; missing destination packages fail MISSING_DEPENDENCY with source versions and install hints. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
     examples: [
       "plan move-file --project ./tsconfig.json --file ./src/components/button.tsx --to ./src/ui/button.tsx",
       "plan move-file --project ./tsconfig.json --file ./src/a.ts=./src/ui/a.ts --file ./src/b.ts=./src/ui/b.ts",
@@ -36,7 +198,7 @@ var operationHelp = {
     description: "Retarget imports and re-exports to an API-compatible module.",
     support: "TypeScript and JavaScript",
     required: "--from <specifier> --to <specifier> [--map Old=New ...] [--only Name,Name] [--mocks report|add] [--file <file|directory>]",
-    details: "Exact specifiers only; wildcards are rejected. Omit --file for the loaded project. --only selects pre-map export names and splits declarations. Unaliased mapped imports rename local references semantically, including JSX; explicit aliases stay unchanged. Re-export mappings rename the imported export. Compatible named destination imports merge and identical bindings dedupe; type-only modifiers, quotes, directives and comments are retained. Default, namespace, star exports and side-effect imports retarget only without --only; compiler diagnostics validate their compatibility. Targets must resolve from every affected file (TARGET_UNRESOLVED). Missing exports fail NEW_DIAGNOSTICS. No matches succeed with a note. --mocks report (default) lists loaded test files mocking the source while transitively importing retargeted files, including callers outside --file. --mocks add copies each standalone vi/vitest/jest mock/doMock registration for the destination with the same factory text, unless that file already mocks the destination. Expression-valued calls fail UNSUPPORTED_MOCK_CALL in add mode. Project references are unsupported. Verify runtime behavior separately.",
+    details: "Exact specifiers only; wildcards are rejected. Omit --file for the loaded project. --only selects pre-map export names and splits declarations. Unaliased mapped imports rename local references semantically, including JSX; explicit aliases stay unchanged. Re-export mappings rename the imported export. Compatible named destination imports merge and identical bindings dedupe; type-only modifiers, quotes, directives and comments are retained. Default, namespace, star exports, literal dynamic imports and side-effect imports retarget only without --only; compiler diagnostics validate their compatibility. Targets must resolve from every affected file (TARGET_UNRESOLVED). Missing exports fail NEW_DIAGNOSTICS. No matches succeed with a note. --mocks report (default) lists loaded test files mocking the source while transitively importing retargeted files, including callers outside --file. --mocks add copies each standalone vi/vitest/jest mock/doMock registration for the destination with the same factory text, unless that file already mocks the destination. Expression-valued calls fail UNSUPPORTED_MOCK_CALL in add mode. Project references are unsupported. Verify runtime behavior separately.",
     examples: [
       "plan retarget-import --project apps/web/tsconfig.json --root . --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider",
       "plan retarget-import --project ./tsconfig.json --from old-lib --to new-lib --only Widget,Options --file ./src/features"
@@ -45,8 +207,8 @@ var operationHelp = {
   rename: {
     description: "Rename a symbol and its semantic references.",
     support: "TypeScript, JavaScript and C#",
-    required: "--at <line:column> --name <identifier>",
-    details: "Comments and string literals are excluded. Use a .sln and a common --root for C# callers across projects. External consumers and dynamic references are outside the loaded scope.",
+    required: "--at <line:column> --name <identifier> (TS/JS: --symbol <name> instead of --at; optional --public)",
+    details: "TS/JS --symbol selects one top-level declaration (missing or ambiguous names fail); --public propagates unaliased public names through loaded consumers instead of keeping the old export name. Comments and string literals are excluded. Use a .sln and a common --root for C# callers across projects. External consumers and dynamic references are outside the loaded scope.",
     examples: [
       "plan rename --project examples/typescript/tsconfig.json --file examples/typescript/math.ts --at 1:17 --name sum",
       "plan rename --project examples/javascript/jsconfig.json --file examples/javascript/math.js --at 2:17 --name sum",
@@ -95,8 +257,8 @@ var operationHelp = {
   "inline-reexports": {
     description: "Import re-exported bindings directly from their origin modules.",
     support: "TypeScript and JavaScript",
-    required: "[--keep]",
-    details: "Follows compiler-resolved aliases and relative export * chains, stopping at bare/package entries. Splits mixed imports by origin, retaining type modifiers, aliases, quotes and extension conventions. Mixed modules retain all re-exports. Unreferenced pure shims are deleted and config file lists updated unless --keep is supplied. Side-effect imports stay with a note. Namespace imports require a pure single-origin export * shim with no default export at the origin. Dynamic imports and import types remain references and prevent deletion. New compiler errors are rejected; run application tests for initialization behavior and external consumers.",
+    required: "[--file <shim> ...] [--keep]",
+    details: "Follows compiler-resolved aliases and relative export * chains, stopping at bare/package entries. Splits mixed imports by origin, retaining type modifiers, aliases, quotes and extension conventions. Mixed modules retain all re-exports. Unreferenced pure shims are deleted and config file lists updated unless --keep is supplied. Side-effect imports stay with a note. Namespace imports require a pure single-origin export * shim with no default export at the origin. Literal dynamic imports also retarget pure single-origin star shims with no default export; other dynamic references and import types prevent deletion. Repeat --file to inline several shims with shared callers in one plan. New compiler errors are rejected; run application tests for initialization behavior and external consumers.",
     examples: [
       "plan inline-reexports --project ./tsconfig.json --file ./src/shim.ts",
       "plan inline-reexports --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/shim.ts --keep"
@@ -143,6 +305,7 @@ var languageDetails = {
     "move-type": { details: "Select a top-level type explicitly when several exist. Other declarations stay in the source; an empty source may be deleted. Missing destination directories are created during apply. Use a --root covering source, destination and callers, and --target-project for a cross-project move. Sources must use ES modules; compatible module resolution and valid composite project references are required. Effectful static initializers, static blocks, decorators, computed members, evaluated bases and nonconstant enum initializers are rejected (INITIALIZATION_EFFECTS_UNSUPPORTED). Simple identifier bases are supported if no new module cycle is introduced. Compiler checks do not prove whole-program behavior equivalence; run application tests." }
   },
   csharp: {
+    rename: { required: "--at <line:column> --name <identifier>", details: "Comments and string literals are excluded. Use a .sln and a common --root for callers across projects. External consumers and dynamic references are outside the loaded scope." },
     imports: { description: "Remove unused C# using directives identified by Roslyn.", required: "[--mode remove-unused]", details: "The C# package defaults to remove-unused; sorting is unsupported. Uses Roslyn's built-in compiler diagnostics." },
     format: { description: "Format a C# file with the Roslyn Formatter API.", details: "Uses Roslyn document options. An already formatted file produces a plan with no changes." },
     "rename-file": { details: "The only top-level type is selected automatically; select explicitly when several exist. Renames the whole file and keeps its extension and other declarations. Explicit Compile entries are updated. Existing targets and unsupported case-only renames are rejected." },
@@ -165,14 +328,16 @@ function optionsText(language) {
   return `  --project <config>       Required for capabilities and plan; ${project}.
 ${language !== "csharp" ? `                           Named TS configurations are supported by file/type operations.
 ` : ""}  --file <source>          Required for plan except retarget-import; a file, or a directory for move-file/retarget-import.
-                           move-file also accepts repeated --file source=destination pairs.
+                           move-file accepts repeated --file source=destination pairs; inline-reexports accepts repeated files.
   --keep                   Retain the shim for inline-reexports.
 ${language !== "csharp" ? `  --checker <ts5|ts7|both> TS5 default; ts7 uses installed Go 7.0.2 diagnostics.
                            both audits TS5+TS7, rejecting any disagreement.
 ` : ""}  --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
   --at <line:column>       Symbol/type position or extraction start, 1-based UTF-16.
-  --end <line:column>      Extraction end, exclusive, 1-based UTF-16.
+${language !== "csharp" ? `  --symbol <name>          TS/JS rename: top-level declaration instead of --at.
+  --public                 TS/JS rename: propagate unaliased public export names.
+` : ""}  --end <line:column>      Extraction end, exclusive, 1-based UTF-16.
   --name <identifier>      Required new name for rename and extraction.
   --mode <mode>            imports: ${language === "csharp" ? "remove-unused (default); sorting is unsupported" : "sort (default) or remove-unused"}.
   --type <identifier>      Declared type for rename-file or move-type; select when
@@ -254,7 +419,7 @@ function renderHelp(args, invocation = "node dist/cli.js", runtimeRequirements =
   const topics = args[0] === "help" ? args.slice(1) : args;
   const command = topics[0]?.startsWith("-") ? undefined : topics[0];
   const operation = topics[1]?.startsWith("-") ? undefined : topics[1];
-  const known = ["capabilities", "plan", "preview", "validate", "apply", "serve"];
+  const known = ["capabilities", "plan", "preview", "validate", "apply", "serve", "gc"];
   if (command && !known.includes(command))
     throw new Error(`INVALID_ARGUMENT: unknown help command ${command}`);
   if (operation && (command !== "plan" || !Object.hasOwn(operationHelp, operation))) {
@@ -287,6 +452,16 @@ ${examples(invocation, [`${command} --plan ./.refactor-ai/saved-plan.json`, `${c
 
 ${workflow(invocation)}`;
   }
+  if (command === "gc")
+    return `${title}
+gc: Remove completed apply journals; retain failed and interrupted transactions.
+
+Usage:
+  ${invocation} gc [--root <repo>]
+
+Examples:
+  ${invocation} gc --root .
+`;
   if (command === "serve") {
     return `${title}
 serve (author CLI): Keep TypeScript single-project programs warm between sequential plan requests.
@@ -339,6 +514,18 @@ ${context}
 ${workflow(invocation)}
 ${runtimeRequirements}`;
   }
+  if (!command)
+    return `${title}
+Commands: capabilities, plan, preview, validate, apply, serve, gc, help.
+
+Operations:
+${(language ? languageOperations[language] : Object.keys(operationHelp)).map((key) => `  ${key}`).join(`
+`)}
+
+Examples:
+  ${invocation} plan <operation> --help
+  ${invocation} <command> --help
+`;
   const commands = command === "plan" ? `Usage:
   ${invocation} plan <operation> --project <config> --file <source> [options]
 ` : `Commands:
@@ -367,19 +554,19 @@ ${runtimeRequirements}`;
 
 // src/runtime/skill.ts
 import { existsSync as existsSync2, readFileSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir as mkdir2, rm } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { join as join2 } from "node:path";
 
 // src/runtime/npm.ts
 import { existsSync, realpathSync } from "node:fs";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname as dirname3, join, resolve as resolve3 } from "node:path";
 function npmCli() {
-  const executableDirectory = dirname(process.execPath);
+  const executableDirectory = dirname3(process.execPath);
   const candidates = [
     process.env.npm_execpath,
     join(executableDirectory, "node_modules", "npm", "bin", "npm-cli.js"),
-    resolve(executableDirectory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    resolve3(executableDirectory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
     ...(process.env.PATH ?? "").split(delimiter).map((directory) => join(directory, process.platform === "win32" ? "npm.cmd" : "npm"))
   ];
   for (const candidate of candidates) {
@@ -388,7 +575,7 @@ function npmCli() {
     try {
       let path = realpathSync(candidate);
       if (path.endsWith(".cmd"))
-        path = join(dirname(path), "node_modules", "npm", "bin", "npm-cli.js");
+        path = join(dirname3(path), "node_modules", "npm", "bin", "npm-cli.js");
       if (path.endsWith("npm-cli.js") && existsSync(path))
         return path;
     } catch {}
@@ -411,7 +598,7 @@ async function ensureSkillRuntime(skillRoot, quiet = false) {
     return;
   const lock = join2(runtime, ".setup.lock");
   try {
-    await mkdir(lock);
+    await mkdir2(lock);
   } catch (error) {
     if (error.code === "EEXIST")
       throw new Error(`SKILL_SETUP_BUSY: another setup is running; after an interrupted setup inspect ${lock}`);
@@ -440,18 +627,20 @@ ${result.stderr || result.stdout}` : ""}`);
 }
 
 // scripts/skill-launcher.ts
-var skillRoot = resolve2(dirname2(fileURLToPath(import.meta.url)), "..");
-var runtime = join3(skillRoot, "assets", "runtime");
+var skillRoot = resolve4(dirname4(fileURLToPath(import.meta.url)), "..");
+var runtime2 = join3(skillRoot, "assets", "runtime");
 try {
-  if (Number(process.versions.node.split(".")[0]) < 22)
-    throw new Error("UNSUPPORTED_RUNTIME: Node.js 22+ is required");
-  if (helpRequested(process.argv.slice(2))) {
-    process.stdout.write(renderHelp(process.argv.slice(2), 'node "<skill-root>/scripts/refactor.mjs"'));
-    process.exit(0);
-  }
-  await ensureSkillRuntime(skillRoot);
-  const { main } = await import(pathToFileURL(join3(runtime, "cli.mjs")).href);
-  await main(process.argv.slice(2), { toolkitRoot: join3(skillRoot, "assets") });
+  await logRun(process.argv.slice(2), async () => {
+    if (Number(process.versions.node.split(".")[0]) < 22)
+      throw new Error("UNSUPPORTED_RUNTIME: Node.js 22+ is required");
+    if (helpRequested(process.argv.slice(2))) {
+      process.stdout.write(renderHelp(process.argv.slice(2), 'node "<skill-root>/scripts/refactor.mjs"'));
+      return;
+    }
+    await ensureSkillRuntime(skillRoot);
+    const { main } = await import(pathToFileURL(join3(runtime2, "cli.mjs")).href);
+    await main(process.argv.slice(2), { runLog: false, toolkitRoot: join3(skillRoot, "assets") });
+  });
 } catch (error) {
   console.error(JSON.stringify({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
   process.exitCode = 1;

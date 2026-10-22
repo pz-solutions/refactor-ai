@@ -8,7 +8,7 @@ import { dirname as dirname3, resolve as resolve4 } from "node:path";
 
 // src/core/apply.ts
 import { lstat as lstat3, mkdir, open, readFile as readFile3, rename, rm, rmdir, stat, unlink, writeFile as writeFile2 } from "node:fs/promises";
-import { dirname as dirname2, resolve as resolve3 } from "node:path";
+import { dirname as dirname2, resolve as resolve3, sep as sep3 } from "node:path";
 import { randomUUID } from "node:crypto";
 
 // src/core/read-set.ts
@@ -761,6 +761,14 @@ async function canonicalRequest(request) {
     if (request.map)
       result.map = Object.fromEntries(Object.entries(request.map).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
   }
+  if (request.files) {
+    if (request.operation !== "inline-reexports" || !request.files.length)
+      throw new Error("INVALID_REQUEST: files requires inline-reexports");
+    result.files = [...new Set(await Promise.all(request.files.map((file) => realpath2(file))))].sort();
+    for (const file of result.files)
+      await assertRegularPath(root, file);
+    result.file = result.files[0];
+  }
   if (request.moves) {
     if (request.operation !== "move-file" || !request.moves.length)
       throw new Error("INVALID_REQUEST: moves requires move-file pairs");
@@ -1031,6 +1039,18 @@ async function order(plan) {
   const rank = (step) => step.kind === "create" ? aliases.has(step.change) ? 3 : 0 : step.kind === "edit" ? 1 : 2;
   return steps.toSorted((a, b) => rank(a) - rank(b));
 }
+async function pruneMoveDirectories(plan) {
+  if (!["move-file", "move-type", "rename-file", "port-route"].includes(plan.request.operation))
+    return;
+  const root = plan.request.root, projectDirectory = dirname2(plan.request.project);
+  const directories = new Set;
+  for (const change of plan.changes.filter((change) => change.after === null)) {
+    for (let directory = dirname2(change.path);directory !== root && directory !== projectDirectory && directory.startsWith(root + sep3); directory = dirname2(directory))
+      directories.add(directory);
+  }
+  for (const directory of [...directories].sort((a, b) => b.length - a.length))
+    await rmdir(directory).catch(() => {});
+}
 async function applyPlan(plan, compilerBase) {
   assertPlanShape(plan);
   if (plan.validation.status !== "passed" || newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter).length) {
@@ -1104,6 +1124,7 @@ async function applyPlan(plan, compilerBase) {
     }
     journal.status = "applied";
     await saveJournal();
+    await pruneMoveDirectories(plan);
     return { status: "applied", files: written.map((s) => s.change.path), journal: journalPath };
   } catch (error) {
     let recoveryNeeded = false;
@@ -1198,6 +1219,12 @@ function createRefactorApi(context) {
         assertLanguage(options.project);
         if (options.checker !== undefined && (!["ts5", "ts7", "both"].includes(options.checker) || languageForProject(options.project) !== "typescript"))
           throw new Error("INVALID_ARGUMENT: checker ts5|ts7|both requires TypeScript/JavaScript");
+        if ((options.symbol !== undefined || options.public !== undefined) && (operation !== "rename" || languageForProject(options.project) !== "typescript"))
+          throw new Error("INVALID_ARGUMENT: symbol and public require TypeScript/JavaScript rename");
+        if (options.symbol !== undefined && (typeof options.symbol !== "string" || !options.symbol || options.at !== undefined))
+          throw new Error("INVALID_ARGUMENT: symbol selects one declaration instead of at");
+        if (options.public !== undefined && typeof options.public !== "boolean")
+          throw new Error("INVALID_ARGUMENT: public must be a boolean");
         if (options.targetProject)
           assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
@@ -1233,10 +1260,12 @@ function createRefactorApi(context) {
         if (options.moves !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || !Array.isArray(options.moves) || !options.moves.length || options.file !== undefined || options.target !== undefined || options.moves.some((move) => !move || typeof move.file !== "string" || !move.file || typeof move.target !== "string" || !move.target))) {
           throw new Error("INVALID_ARGUMENT: moves requires TypeScript move-file pairs, without file/target");
         }
-        if (!options.file && !options.moves?.length && operation !== "retarget-import")
+        if (options.files !== undefined && (operation !== "inline-reexports" || !Array.isArray(options.files) || !options.files.length || options.file !== undefined || options.files.some((file) => typeof file !== "string" || !file)))
+          throw new Error("INVALID_ARGUMENT: files requires an inline-reexports batch without file");
+        if (!options.file && !options.files?.length && !options.moves?.length && operation !== "retarget-import")
           throw new Error("INVALID_ARGUMENT: file required");
         const project = await realpath3(resolve4(options.project));
-        const file = await realpath3(resolve4(options.file ?? options.moves?.[0]?.file ?? dirname3(project)));
+        const file = await realpath3(resolve4(options.file ?? options.files?.[0] ?? options.moves?.[0]?.file ?? dirname3(project)));
         const root = await realpath3(resolve4(options.root ?? dirname3(project)));
         const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile4(file, "utf8") : "";
         const position = (point) => {
@@ -1251,6 +1280,7 @@ function createRefactorApi(context) {
           root,
           file,
           operation,
+          ...options.files ? { files: options.files.map((file) => resolve4(file)) } : {},
           ...options.moves ? { moves: options.moves.map((move) => ({ file: resolve4(move.file), target: resolve4(move.target) })), target: resolve4(options.moves[0].target) } : {},
           ...options.exclude ? { exclude: [...new Set(options.exclude)].sort() } : {},
           ...options.checker !== undefined ? { checker: options.checker } : {},
@@ -1269,6 +1299,8 @@ function createRefactorApi(context) {
             ...options.mocks !== undefined ? { mocks: options.mocks } : {},
             ...!options.file ? { projectScope: true } : {}
           } : {},
+          ...options.symbol !== undefined ? { symbol: options.symbol } : {},
+          ...options.public !== undefined ? { public: options.public } : {},
           ...options.at !== undefined ? { position: position(options.at) } : {},
           ...options.end !== undefined ? { end: position(options.end) } : {},
           ...options.name !== undefined ? { newName: options.name } : {},
