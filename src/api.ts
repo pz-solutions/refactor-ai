@@ -5,12 +5,20 @@ import { assertFresh, assertPlanShape, createPlan, loadPlan, preview, type Plan 
 import { languageForProject, languageOperations } from "./languages.ts";
 import type { Capability, Operation, RefactorRequest } from "./types.ts";
 import { RefactorContext } from "./refactor-context.ts";
+import { readRepoConfig } from "./core/repo-config.ts";
 
 export type { Plan } from "./core/plan.ts";
 export type { Capability, Diagnostic, FileChange, Operation } from "./types.ts";
 
 export interface PlanOptions {
+  /** Diagnostics checker for full verification; defaults to .refactor-ai/config.json, then TS5. */
   checker?: "ts5" | "ts7" | "both";
+  /**
+   * full (default): program diagnostics. bindings (TypeScript): edits, prechecks,
+   * reference preservation and changed files' syntax/import bindings only; run
+   * the project typecheck after apply. Defaults to .refactor-ai/config.json.
+   */
+  verify?: "full" | "bindings";
   project: string;
   file?: string;
   /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
@@ -52,12 +60,16 @@ export interface ValidationResult {
   status: "validated" | "failed";
   validation: Plan["validation"];
   id: string;
+  verify: "full" | "bindings";
 }
 
 export interface ApplyResult {
   status: "applied";
   files: string[];
   journal: string | null;
+  /** Present for --verify bindings plans: program diagnostics were not computed. */
+  verify?: "bindings";
+  next?: string;
 }
 
 export interface RefactorApi {
@@ -82,6 +94,9 @@ export function offset(text: string, point: string): number {
   }
   return lines.slice(0, line - 1).reduce((total, item) => total + item.length + 1, 0) + column - 1;
 }
+
+/** Bindings plans skip program diagnostics; the project's own typecheck must run after apply. */
+const bindingsReminder = "Plan verified bindings only (--verify bindings): program diagnostics were not computed. Run the project's typecheck (e.g. tsc --noEmit / tsgo, or the repo's check-types) before committing.";
 
 /** Internal binding shared by CLI, installed skills and language-specific npm packages. */
 export function createRefactorApi(context: RefactorContext): RefactorApi {
@@ -109,6 +124,9 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         if (context.operation && operation !== context.operation) throw new Error(`UNSUPPORTED: this tool only supports ${context.operation}`);
         assertLanguage(options.project);
         if (options.checker !== undefined && (!["ts5", "ts7", "both"].includes(options.checker) || languageForProject(options.project) !== "typescript")) throw new Error("INVALID_ARGUMENT: checker ts5|ts7|both requires TypeScript/JavaScript");
+        if (options.verify !== undefined && !["full", "bindings"].includes(options.verify)) throw new Error("INVALID_ARGUMENT: verify full|bindings");
+        if (options.verify === "bindings" && languageForProject(options.project) !== "typescript") throw new Error("INVALID_ARGUMENT: verify bindings requires TypeScript/JavaScript");
+        if (options.verify === "bindings" && options.checker !== undefined) throw new Error("INVALID_ARGUMENT: checker selects program diagnostics, which verify bindings does not compute");
         if (options.targetProject) assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode)) throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
         if (["move-type", "move-file", "port-route"].includes(operation) && !options.target && !options.moves?.length) throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
@@ -141,6 +159,10 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
         const project = await realpath(resolve(options.project));
         const file = await realpath(resolve(options.file ?? options.moves?.[0]?.file ?? dirname(project)));
         const root = await realpath(resolve(options.root ?? dirname(project)));
+        // Repository defaults apply to TypeScript plans; explicit options win.
+        const defaults = languageForProject(options.project) === "typescript" ? await readRepoConfig(root) : {};
+        const verify = options.verify ?? defaults.verify ?? "full";
+        const checker = options.checker ?? (verify === "full" ? defaults.checker : undefined);
         const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile(file, "utf8") : "";
         const position = (point: string | number): number => {
           if (typeof point === "string") return offset(text, point);
@@ -151,7 +173,8 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
           project, root, file, operation,
           ...(options.moves ? { moves: options.moves.map(move => ({ file: resolve(move.file), target: resolve(move.target) })), target: resolve(options.moves[0]!.target) } : {}),
           ...(options.exclude ? { exclude: [...new Set(options.exclude)].sort() } : {}),
-          ...(options.checker !== undefined ? { checker: options.checker } : {}),
+          ...(checker !== undefined ? { checker } : {}),
+          ...(verify === "bindings" ? { verify } : {}),
           ...(options.keep !== undefined ? { keep: options.keep } : {}),
           ...(operation === "move-file" ? { ...(options.mocks ? { mocks: options.mocks } : {}), ...(options.map ? { map: options.map } : {}), ...(options.only ? { only: options.only } : {}) } : {}),
           ...(operation === "port-route" ? { ...(options.map ? { map: options.map } : {}),
@@ -177,9 +200,13 @@ export function createRefactorApi(context: RefactorContext): RefactorApi {
     async validate(plan) {
       checkPlan(plan);
       await assertFresh(plan, compilerBase);
-      return { status: plan.validation.status === "passed" ? "validated" : "failed", validation: plan.validation, id: plan.id };
+      return { status: plan.validation.status === "passed" ? "validated" : "failed", validation: plan.validation, id: plan.id, verify: plan.request.verify ?? "full" };
     },
-    async apply(plan) { checkPlan(plan); return applyPlan(plan, compilerBase); },
+    async apply(plan) {
+      checkPlan(plan);
+      const result = await applyPlan(plan, compilerBase);
+      return plan.request.verify === "bindings" ? { ...result, verify: "bindings", next: bindingsReminder } : result;
+    },
     async loadPlan(path) { const plan = await loadPlan(resolve(path)); checkPlan(plan); return plan; },
     async capabilities(project) {
       assertLanguage(project);

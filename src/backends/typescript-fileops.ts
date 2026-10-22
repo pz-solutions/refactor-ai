@@ -15,6 +15,7 @@ import { anticipatePackageExport, packageSelfImport, packageSpecifier, relativeS
 import { moveSuppressions } from "./typescript-suppressions";
 import { portablePath } from "./typescript-paths";
 import { describeInputPath } from "../core/snapshot";
+import { ambientModules, assertBindings, type BindingState } from "./typescript-bindings";
 import { RouteExtractor, generatePortRoute, portRouteExtractOptions, preparePortRoute, regenerateRouteTree, rewriteView, type PortRoutePrep } from "./typescript-port-route";
 
 export const fileCapabilities: Capability[] = [
@@ -1086,6 +1087,41 @@ function newDiagnostics(before: Diagnostic[], after: Diagnostic[]): Diagnostic[]
   });
 }
 
+function assertLayouts(ws: Workspace, before: Map<string, string>, after: Map<string, string>): void {
+  for (const [key, layout] of before) {
+    const planned = after.get(key);
+    if (planned !== undefined && planned !== layout) {
+      fail("OUTPUT_LAYOUT_CHANGED", `${ws.participant(key).configPath} has no rootDir and its emitted files would move from mirroring ${layout} to mirroring ${planned}; set rootDir or choose another target`);
+    }
+  }
+}
+
+/**
+ * --verify bindings: capture the original owners, ambient modules and output
+ * layouts before editing; the returned check validates the planned changed
+ * files (origins map planned paths of moved files to their sources).
+ */
+function prepareBindings(ws: Workspace): (origins: Map<string, string>) => number {
+  const owners = new Map<string, ts.CompilerOptions>();
+  for (const item of ws.participants.values()) if (!item.observer) for (const path of item.parsed.fileNames) if (!owners.has(ws.vfs.key(path))) owners.set(ws.vfs.key(path), item.parsed.options);
+  const programFiles = ws.program().getSourceFiles();
+  const layouts = ws.outputLayouts();
+  const state = (options?: (path: string) => ts.CompilerOptions | undefined): BindingState => ({
+    source: path => ws.syntaxFile(path),
+    resolve: (specifier, source) => ws.resolveModule(specifier, source, options?.(source.fileName))?.resolvedFileName,
+    key: path => ws.vfs.key(path),
+  });
+  return origins => {
+    const changed = [...ws.vfs.changes().filter(change => change.after !== null).map(change => change.path), ...ws.vfs.ephemeralPaths()];
+    const ambient = ambientModules([...programFiles, ...changed.map(path => ws.syntaxFile(path)).filter((source): source is ts.SourceFile => !!source)]);
+    const original = state(path => owners.get(ws.vfs.key(path)) ?? ws.editOptions);
+    const checked = assertBindings(state(), run => ws.vfs.original(() => run(original)), changed, ambient,
+      path => origins.get(ws.vfs.key(path)) ?? (ws.vfs.diskText(path) !== null ? path : undefined));
+    assertLayouts(ws, layouts, ws.outputLayouts());
+    return checked;
+  };
+}
+
 export async function analyzeFileOperation(request: RefactorRequest): Promise<BackendResult> {
   const root = assertAbsolute("root", request.root);
   const file = assertAbsolute("file", request.file);
@@ -1111,9 +1147,12 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
   const affected = movingFiles ? movingFiles.map(([from]) => from) : [file];
   if (request.operation === "move-type" && request.target && isAbsolute(request.target) && existsSync(request.target)) affected.push(resolve(request.target));
   if (!request.only && (movingFiles || sourceConfig !== targetConfig)) precheckMove(root, sourceConfig, targetConfig, movingFiles ?? [], moveRequest, inputs.sys);
+  if (request.verify !== undefined && request.verify !== "bindings") fail("INVALID_REQUEST", "verify must be bindings or omitted (full)");
+  const bindingsOnly = request.verify === "bindings";
+  if (bindingsOnly && request.checker !== undefined) fail("INVALID_REQUEST", "checker selects program diagnostics, which verify bindings does not compute");
   const checkerMode = request.checker === "both" ? "both" : "ts7";
   const nativeChecker = request.checker === "ts7" || request.checker === "both" ? await loadTs7Checker(checkerMode) : undefined;
-  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode, inputs, port ? [port.startConfig] : []));
+  const ws = timed("workspace.load", () => new Workspace(root, sourceConfig, targetConfig, affected, nativeChecker, checkerMode, inputs, port ? [port.startConfig] : [], bindingsOnly));
   try {
     if (!movingFiles && !ws.vfs.fileExists(file)) fail("FILE_NOT_FOUND", file);
     const selected = movingFiles ? movingFiles.map(([from]) => from).filter(path => /\.[cm]?[jt]sx?$/.test(path)) : [file];
@@ -1128,7 +1167,11 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     const isJs = jsExtensions.includes(extension);
     const context: Context = { ws, root, file, sourceFile, isJs, notes: [] };
 
-    const validate = timed("workspace.prepare", () => ws.prepareValidation(true));
+    if (bindingsOnly && [...ws.participants.values()].some(item => item.references.length)) {
+      fail("VERIFY_UNSUPPORTED", "--verify bindings cannot plan across project references: dependents and edits read in-memory declaration builds that require full checking; use --verify full");
+    }
+    const validate = bindingsOnly ? undefined : timed("workspace.prepare", () => ws.prepareValidation(true));
+    const bindings = bindingsOnly ? timed("workspace.bindings-prepare", () => prepareBindings(ws)) : undefined;
     let renamed: [string, string] | undefined;
     if (request.operation === "rename-file") renamed = renameFile(context, request).renamed;
     else if (request.operation === "move-type") moveType(context, request);
@@ -1154,29 +1197,34 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
 
     const written = ws.vfs.changes().filter((change) => change.after !== null && !/\.json$/i.test(change.path)).map((change) => change.path);
     if (written.length) timed("workspace.external-projects", () => ws.assertNoUnhandledProjects(written, false));
-    if (request.operation !== "move-type" && ![...ws.participants.values()].some(item => item.references.length)) {
+    const renameMap = new Map(((request.only ? [] : movingFiles) ?? (renamed ? [renamed] : [])).map(([from, to]) => [ws.vfs.key(from), to]));
+    let diagnosticsBefore: Diagnostic[] = [], diagnosticsAfter: Diagnostic[] = [];
+    let validatedFiles: number | undefined, validatedProjects = ws.participants.size;
+    if (bindings) {
       context.verify?.();
       context.verify = undefined;
-      ws.service.cleanupSemanticCache();
-    }
-    const layoutsBefore = new Map(ws.layouts);
-    const { before: diagnosticsBefore, after: diagnosticsAfter, affected: validatedFiles, affectedProjects: validatedProjects = ws.participants.size } = timed("workspace.validate", validate);
-    const renameMap = new Map(((request.only ? [] : movingFiles) ?? (renamed ? [renamed] : [])).map(([from, to]) => [ws.vfs.key(from), to]));
-    const comparable = movingFiles ? diagnosticsBefore.map(item => ({ ...item, file: renameMap.get(ws.vfs.key(item.file)) ?? item.file })) : renamed
-      ? diagnosticsBefore.map((item) => ws.vfs.samePath(item.file, renamed[0]) ? { ...item, file: renamed[1] } : item)
-      : diagnosticsBefore;
-    if (!diagnosticsAfter.length && ![...ws.participants.values()].some(item => item.references.length)) context.notes.push("Skipped baseline diagnostics: the planned affected set has no errors.");
-    const introduced = newDiagnostics(comparable, diagnosticsAfter);
-    if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ")
-      + (movingFiles ? `; affected consumers: ${[...new Set(introduced.map(item => relative(root, item.file)))].join(", ")}; adapt these consumers before moving, or include dependent files in the same --file source=destination batch` : "")
-      + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : "")
-      + (port ? `; port-route generated ${relative(root, port.startFile)} and the Next adapter from ${relative(root, port.config.path)}: fix its templates, snippets or ports for generated-file errors, or prepare the view (props, ports) before porting` : ""));
-    context.verify?.();
-    for (const [key, layout] of layoutsBefore) {
-      const after = ws.layouts.get(key);
-      if (after !== undefined && after !== layout) {
-        fail("OUTPUT_LAYOUT_CHANGED", `${ws.participant(key).configPath} has no rootDir and its emitted files would move from mirroring ${layout} to mirroring ${after}; set rootDir or choose another target`);
+      const checked = timed("workspace.bindings", () => bindings(new Map([...renameMap].map(([from, to]) => [ws.vfs.key(to), from]))));
+      context.notes.push(`Verified bindings only (--verify bindings): edit prechecks, project membership, reference preservation, syntax and import/export bindings of ${checked} changed file(s); program diagnostics were not computed. Run the project typecheck after apply.`);
+    } else {
+      if (request.operation !== "move-type" && ![...ws.participants.values()].some(item => item.references.length)) {
+        context.verify?.();
+        context.verify = undefined;
+        ws.service.cleanupSemanticCache();
       }
+      const layoutsBefore = new Map(ws.layouts);
+      const validation = timed("workspace.validate", validate!);
+      ({ after: diagnosticsAfter, affected: validatedFiles, affectedProjects: validatedProjects = ws.participants.size } = validation);
+      diagnosticsBefore = movingFiles ? validation.before.map(item => ({ ...item, file: renameMap.get(ws.vfs.key(item.file)) ?? item.file })) : renamed
+        ? validation.before.map((item) => ws.vfs.samePath(item.file, renamed[0]) ? { ...item, file: renamed[1] } : item)
+        : validation.before;
+      if (!diagnosticsAfter.length && ![...ws.participants.values()].some(item => item.references.length)) context.notes.push("Skipped baseline diagnostics: the planned affected set has no errors.");
+      const introduced = newDiagnostics(diagnosticsBefore, diagnosticsAfter);
+      if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.file}: ${item.message}`).join("; ")
+        + (movingFiles ? `; affected consumers: ${[...new Set(introduced.map(item => relative(root, item.file)))].join(", ")}; adapt these consumers before moving, or include dependent files in the same --file source=destination batch` : "")
+        + (context.aliasHints?.length ? `; unresolved source-project alias imports: ${context.aliasHints.join(", ")}; move their dependencies too or replace these aliases` : "")
+        + (port ? `; port-route generated ${relative(root, port.startFile)} and the Next adapter from ${relative(root, port.config.path)}: fix its templates, snippets or ports for generated-file errors, or prepare the view (props, ports) before porting` : ""));
+      context.verify?.();
+      assertLayouts(ws, layoutsBefore, ws.layouts);
     }
 
     for (const config of ws.importingConfigs) {
@@ -1185,7 +1233,8 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
     for (const config of ws.observers()) {
       context.notes.push(`Updated and validated ${relative(root, config)}, a variant config that also compiles the affected files.`);
     }
-    if (request.checker === "ts7") context.notes.push(`Validated all user sources across ${ws.participants.size} project(s) with TS7 7.0.2; TS5 graph discovery is not used to restrict native diagnostics.`);
+    if (bindings) { /* program diagnostics were not computed */ }
+    else if (request.checker === "ts7") context.notes.push(`Validated all user sources across ${ws.participants.size} project(s) with TS7 7.0.2; TS5 graph discovery is not used to restrict native diagnostics.`);
     else if (validatedFiles !== undefined) {
       context.notes.push(`Validated ${validatedFiles} affected file(s) across ${validatedProjects} project(s): the changed files and their transitive importers in the original and planned module graphs.${validatedProjects < ws.participants.size ? ` Fully checked ${ws.participants.size - validatedProjects} other project(s).` : ""}`);
     } else if (ws.participants.size > 1) {
@@ -1195,14 +1244,15 @@ export async function analyzeFileOperation(request: RefactorRequest): Promise<Ba
       context.notes.push("JavaScript analysis is semantic only for references TypeScript can resolve; dynamic imports with computed paths and string-based references are not changed.");
     }
     if (renamed) context.notes.push(`Renamed ${relative(root, renamed[0])} to ${relative(root, renamed[1])}; the plan deletes the old path and creates the new one.`);
-    timed("workspace.inputs", () => ws.vfs.assertStableMetadata());
+    // createPlan replays this exact read set after analysis (later, so strictly stronger)
+    // before accepting a nonempty plan; empty plans need no freshness proof.
     return {
       readSet: inputs.snapshot(),
       backend: "typescript",
-      checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5", version: ts.version },
+      ...(bindings ? {} : { checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5" as const, version: ts.version } }),
       version: ts.version,
       changes: ws.vfs.changes(),
-      diagnosticsBefore: comparable,
+      diagnosticsBefore,
       diagnosticsAfter,
       notes: context.notes,
     };

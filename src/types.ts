@@ -4,6 +4,12 @@ export type Operation = "rename" | "imports" | "format" | "extract-function" | "
 export interface RefactorRequest {
   /** Opt-in native diagnostics; edits always use pinned TypeScript 5.9.3. */
   checker?: "ts5" | "ts7" | "both";
+  /**
+   * Absent: full verification (program diagnostics). "bindings": edits,
+   * prechecks, reference preservation and changed files' syntax and
+   * import/export bindings, without program diagnostics (TypeScript only).
+   */
+  verify?: "bindings";
   project: string;
   root: string;
   file: string;

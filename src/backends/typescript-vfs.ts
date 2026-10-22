@@ -130,6 +130,19 @@ function includeBasePath(absolute: string): string {
   return end === 2 && /^[A-Za-z]:/.test(normalized) ? normalized.slice(0, 3) : normalized.slice(0, end) || "/";
 }
 
+const contentIds = new Map<string, number>();
+let nextContentId = 0;
+
+/** Monotonic across instances: after eviction, a text receives a new identity rather than a reused one. */
+function contentId(text: string): number {
+  let id = contentIds.get(text);
+  if (id === undefined) {
+    if (contentIds.size >= 50_000) contentIds.clear();
+    contentIds.set(text, id = ++nextContentId);
+  }
+  return id;
+}
+
 export class VirtualFs {
   readonly inputs: CompilerInputs;
   readonly caseSensitive: boolean;
@@ -141,7 +154,6 @@ export class VirtualFs {
   private readonly generated = new Map<string, { path: string; text: string }>();
   /** Planned-state inputs that are validated but never written (ignored generator outputs). */
   private readonly ephemeral = new Map<string, { path: string; text: string }>();
-  private readonly versions = new Map<string, number>();
   private readonly keys = new Map<string, string>();
   private virtualDirectoryVersion = -1;
   private virtualDirectories = new Set<string>();
@@ -188,6 +200,12 @@ export class VirtualFs {
     this.version += 1;
     try { return callback(); }
     finally { this.suspended = previous; this.version += 1; }
+  }
+
+  /** Dependency or library file: outside root, or still under node_modules after workspace-package canonicalization. */
+  isExternal(path: string): boolean {
+    const canonical = this.readPath(path);
+    return !isInside(this.root, canonical) || canonical.split(sep).includes("node_modules");
   }
 
   /** Workspace package symlinks must observe canonical overlays, including newly exported files. */
@@ -251,15 +269,16 @@ export class VirtualFs {
     return this.readFile(path) !== undefined;
   }
 
+  /** Content identity: a document registry can never return a parse of different text (warm serve shares one). */
   scriptVersion(path: string): string {
-    return `${this.suspended ? "o" : "c"}${this.versions.get(this.key(path)) ?? 0}`;
+    const text = this.readFile(path);
+    return text === undefined ? "absent" : `t${contentId(text)}`;
   }
 
   write(path: string, text: string | null, bom = this.hasBom(path)): void {
     const key = this.key(path);
     const existing = this.overlays.get(key);
     this.overlays.set(key, { path: existing?.path ?? resolve(path), text: text?.startsWith(BOM) ? text.slice(1) : text, bom });
-    this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.version += 1;
   }
 
@@ -267,7 +286,6 @@ export class VirtualFs {
   writeEphemeral(path: string, text: string): void {
     const key = this.key(path);
     this.ephemeral.set(key, { path: resolve(path), text: text.startsWith(BOM) ? text.slice(1) : text });
-    this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.version += 1;
   }
 
@@ -276,7 +294,6 @@ export class VirtualFs {
   }
 
   clearGenerated(): void {
-    for (const key of this.generated.keys()) this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.generated.clear();
     this.version += 1;
   }
@@ -285,7 +302,6 @@ export class VirtualFs {
     if (!this.isHidden(path)) fail("DECLARATION_OUTPUT_UNSUPPORTED", `in-memory build would emit outside a declaration output directory: ${path}`);
     const key = this.key(path);
     this.generated.set(key, { path: resolve(path), text });
-    this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.version += 1;
   }
 
