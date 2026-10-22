@@ -169,6 +169,9 @@ ${language !== "csharp" ? `                           Named TS configurations ar
   --keep                   Retain the shim for inline-reexports.
 ${language !== "csharp" ? `  --checker <ts5|ts7|both> TS5 default; ts7 uses installed Go 7.0.2 diagnostics.
                            both audits TS5+TS7, rejecting any disagreement.
+  --verify <full|bindings> full (default) checks program diagnostics; bindings checks
+                           edits, references and import bindings only (typecheck after
+                           apply). Defaults: <root>/.refactor-ai/config.json.
 ` : ""}  --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
   --at <line:column>       Symbol/type position or extraction start, 1-based UTF-16.

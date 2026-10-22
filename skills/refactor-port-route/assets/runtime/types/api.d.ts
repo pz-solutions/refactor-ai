@@ -4,7 +4,14 @@ import { RefactorContext } from "./refactor-context.js";
 export type { Plan } from "./core/plan.js";
 export type { Capability, Diagnostic, FileChange, Operation } from "./types.js";
 export interface PlanOptions {
+    /** Diagnostics checker for full verification; defaults to .refactor-ai/config.json, then TS5. */
     checker?: "ts5" | "ts7" | "both";
+    /**
+     * full (default): program diagnostics. bindings (TypeScript): edits, prechecks,
+     * reference preservation and changed files' syntax/import bindings only; run
+     * the project typecheck after apply. Defaults to .refactor-ai/config.json.
+     */
+    verify?: "full" | "bindings";
     project: string;
     file?: string;
     /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
@@ -48,11 +55,15 @@ export interface ValidationResult {
     status: "validated" | "failed";
     validation: Plan["validation"];
     id: string;
+    verify: "full" | "bindings";
 }
 export interface ApplyResult {
     status: "applied";
     files: string[];
     journal: string | null;
+    /** Present for --verify bindings plans: program diagnostics were not computed. */
+    verify?: "bindings";
+    next?: string;
 }
 export interface RefactorApi {
     /** Compute changes without writing sources or a plan file. Failed diagnostics remain in the plan. */

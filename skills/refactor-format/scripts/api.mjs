@@ -1,10 +1,10 @@
 // scripts/skill-api.ts
-import { dirname as dirname5, join as join3, resolve as resolve6 } from "node:path";
+import { dirname as dirname5, join as join3, resolve as resolve7 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // src/api.ts
-import { readFile as readFile4, realpath as realpath3 } from "node:fs/promises";
-import { dirname as dirname3, resolve as resolve4 } from "node:path";
+import { readFile as readFile5, realpath as realpath3 } from "node:fs/promises";
+import { dirname as dirname3, resolve as resolve5 } from "node:path";
 
 // src/core/apply.ts
 import { lstat as lstat3, mkdir, open, readFile as readFile3, rename, rm, rmdir, stat, unlink, writeFile as writeFile2 } from "node:fs/promises";
@@ -614,6 +614,7 @@ async function gitFiles(root) {
   }
 }
 var stateIgnoreText = `*
+!config.json
 !equivalents.json
 !port-route.json
 !port-route/
@@ -623,6 +624,12 @@ var stateIgnoreText = `*
 var legacyIgnoreTexts = [`*
 `, `*
 !equivalents.json
+!.gitignore
+`, `*
+!equivalents.json
+!port-route.json
+!port-route/
+!port-route/**
 !.gitignore
 `];
 async function ignoreStateDirectory(stateDirectory) {
@@ -709,6 +716,9 @@ function assertPlanShape(plan) {
     throw new Error("INVALID_PLAN: plan integrity check failed");
   if (plan.snapshot.hash !== sha256(JSON.stringify(plan.snapshot.files)))
     throw new Error("INVALID_PLAN: invalid snapshot");
+  if (plan.request.verify !== undefined && (plan.request.verify !== "bindings" || plan.diagnosticsBefore.length || plan.diagnosticsAfter.length)) {
+    throw new Error("INVALID_PLAN: invalid verification mode");
+  }
   if (plan.schemaVersion === 3)
     assertReadSetShape(plan.readSet);
   else if (plan.readSet !== undefined)
@@ -1158,6 +1168,39 @@ function languageForProject(project) {
   throw new Error("UNSUPPORTED_PROJECT: use tsconfig/jsconfig.json, .csproj or .sln");
 }
 
+// src/core/repo-config.ts
+import { lstat as lstat4, readFile as readFile4 } from "node:fs/promises";
+import { resolve as resolve4 } from "node:path";
+var allowed = { verify: ["full", "bindings"], checker: ["ts5", "ts7", "both"] };
+async function readRepoConfig(root) {
+  const path = resolve4(root, ".refactor-ai/config.json");
+  const stat = await lstat4(path).catch((error) => {
+    if (["ENOENT", "ENOTDIR"].includes(error.code ?? ""))
+      return;
+    throw error;
+  });
+  if (!stat)
+    return {};
+  if (!stat.isFile())
+    throw new Error(`INVALID_REPO_CONFIG: ${path} must be a regular file`);
+  let config;
+  try {
+    config = JSON.parse(await readFile4(path, "utf8"));
+  } catch {
+    throw new Error(`INVALID_REPO_CONFIG: ${path} is not valid JSON`);
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config))
+    throw new Error(`INVALID_REPO_CONFIG: ${path} must contain an object`);
+  for (const [key, value] of Object.entries(config)) {
+    const values = Object.hasOwn(allowed, key) ? allowed[key] : undefined;
+    if (!values)
+      throw new Error(`INVALID_REPO_CONFIG: ${path}: unknown key '${key}'; supported: verify, checker`);
+    if (typeof value !== "string" || !values.includes(value))
+      throw new Error(`INVALID_REPO_CONFIG: ${path}: ${key} must be ${values.join("|")}`);
+  }
+  return config;
+}
+
 // src/api.ts
 function offset(text, point) {
   const match = /^(\d+):(\d+)$/.exec(point);
@@ -1171,6 +1214,7 @@ function offset(text, point) {
   }
   return lines.slice(0, line - 1).reduce((total, item) => total + item.length + 1, 0) + column - 1;
 }
+var bindingsReminder = "Plan verified bindings only (--verify bindings): program diagnostics were not computed. Run the project's typecheck (e.g. tsc --noEmit / tsgo, or the repo's check-types) before committing.";
 function createRefactorApi(context) {
   if (Number(process.versions.node.split(".")[0]) < 22)
     throw new Error("UNSUPPORTED_RUNTIME: Node.js 22+ is required");
@@ -1183,7 +1227,7 @@ function createRefactorApi(context) {
     assertPlanShape(plan);
     assertLanguage(plan.request.project, plan.backend);
   }
-  const compilerBase = context.toolkitRoot ? resolve4(context.toolkitRoot, "runtime/package.json") : undefined;
+  const compilerBase = context.toolkitRoot ? resolve5(context.toolkitRoot, "runtime/package.json") : undefined;
   return {
     async plan(options) {
       const { project, request } = await resolveRequest();
@@ -1198,6 +1242,12 @@ function createRefactorApi(context) {
         assertLanguage(options.project);
         if (options.checker !== undefined && (!["ts5", "ts7", "both"].includes(options.checker) || languageForProject(options.project) !== "typescript"))
           throw new Error("INVALID_ARGUMENT: checker ts5|ts7|both requires TypeScript/JavaScript");
+        if (options.verify !== undefined && !["full", "bindings"].includes(options.verify))
+          throw new Error("INVALID_ARGUMENT: verify full|bindings");
+        if (options.verify === "bindings" && languageForProject(options.project) !== "typescript")
+          throw new Error("INVALID_ARGUMENT: verify bindings requires TypeScript/JavaScript");
+        if (options.verify === "bindings" && options.checker !== undefined)
+          throw new Error("INVALID_ARGUMENT: checker selects program diagnostics, which verify bindings does not compute");
         if (options.targetProject)
           assertLanguage(options.targetProject);
         if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
@@ -1235,10 +1285,13 @@ function createRefactorApi(context) {
         }
         if (!options.file && !options.moves?.length && operation !== "retarget-import")
           throw new Error("INVALID_ARGUMENT: file required");
-        const project = await realpath3(resolve4(options.project));
-        const file = await realpath3(resolve4(options.file ?? options.moves?.[0]?.file ?? dirname3(project)));
-        const root = await realpath3(resolve4(options.root ?? dirname3(project)));
-        const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile4(file, "utf8") : "";
+        const project = await realpath3(resolve5(options.project));
+        const file = await realpath3(resolve5(options.file ?? options.moves?.[0]?.file ?? dirname3(project)));
+        const root = await realpath3(resolve5(options.root ?? dirname3(project)));
+        const defaults = languageForProject(options.project) === "typescript" ? await readRepoConfig(root) : {};
+        const verify = options.verify ?? defaults.verify ?? "full";
+        const checker = options.checker ?? (verify === "full" ? defaults.checker : undefined);
+        const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile5(file, "utf8") : "";
         const position = (point) => {
           if (typeof point === "string")
             return offset(text, point);
@@ -1251,15 +1304,16 @@ function createRefactorApi(context) {
           root,
           file,
           operation,
-          ...options.moves ? { moves: options.moves.map((move) => ({ file: resolve4(move.file), target: resolve4(move.target) })), target: resolve4(options.moves[0].target) } : {},
+          ...options.moves ? { moves: options.moves.map((move) => ({ file: resolve5(move.file), target: resolve5(move.target) })), target: resolve5(options.moves[0].target) } : {},
           ...options.exclude ? { exclude: [...new Set(options.exclude)].sort() } : {},
-          ...options.checker !== undefined ? { checker: options.checker } : {},
+          ...checker !== undefined ? { checker } : {},
+          ...verify === "bindings" ? { verify } : {},
           ...options.keep !== undefined ? { keep: options.keep } : {},
           ...operation === "move-file" ? { ...options.mocks ? { mocks: options.mocks } : {}, ...options.map ? { map: options.map } : {}, ...options.only ? { only: options.only } : {} } : {},
           ...operation === "port-route" ? {
             ...options.map ? { map: options.map } : {},
-            ...options.startRoutes !== undefined ? { startRoutes: resolve4(options.startRoutes) } : {},
-            config: resolve4(options.config ?? resolve4(root, ".refactor-ai/port-route.json"))
+            ...options.startRoutes !== undefined ? { startRoutes: resolve5(options.startRoutes) } : {},
+            config: resolve5(options.config ?? resolve5(root, ".refactor-ai/port-route.json"))
           } : {},
           ...operation === "retarget-import" ? {
             from: options.from,
@@ -1273,8 +1327,8 @@ function createRefactorApi(context) {
           ...options.end !== undefined ? { end: position(options.end) } : {},
           ...options.name !== undefined ? { newName: options.name } : {},
           ...operation === "imports" ? { mode: options.mode ?? (context.language === "csharp" ? "remove-unused" : "sort") } : {},
-          ...options.target !== undefined ? { target: resolve4(options.target) } : {},
-          ...options.targetProject !== undefined ? { targetProject: await realpath3(resolve4(options.targetProject)) } : {},
+          ...options.target !== undefined ? { target: resolve5(options.target) } : {},
+          ...options.targetProject !== undefined ? { targetProject: await realpath3(resolve5(options.targetProject)) } : {},
           ...options.typeName !== undefined ? { typeName: options.typeName } : {},
           ...options.rootNamespace !== undefined ? { rootNamespace: options.rootNamespace } : {}
         };
@@ -1288,20 +1342,21 @@ function createRefactorApi(context) {
     async validate(plan) {
       checkPlan(plan);
       await assertFresh(plan, compilerBase);
-      return { status: plan.validation.status === "passed" ? "validated" : "failed", validation: plan.validation, id: plan.id };
+      return { status: plan.validation.status === "passed" ? "validated" : "failed", validation: plan.validation, id: plan.id, verify: plan.request.verify ?? "full" };
     },
     async apply(plan) {
       checkPlan(plan);
-      return applyPlan(plan, compilerBase);
+      const result = await applyPlan(plan, compilerBase);
+      return plan.request.verify === "bindings" ? { ...result, verify: "bindings", next: bindingsReminder } : result;
     },
     async loadPlan(path) {
-      const plan = await loadPlan(resolve4(path));
+      const plan = await loadPlan(resolve5(path));
       checkPlan(plan);
       return plan;
     },
     async capabilities(project) {
       assertLanguage(project);
-      const engine = await context.loadBackend(await realpath3(resolve4(project)), context.toolkitRoot);
+      const engine = await context.loadBackend(await realpath3(resolve5(project)), context.toolkitRoot);
       return engine.capabilities.filter((item) => !context.operation || item.operation === context.operation).map((item) => ({ ...item, ...item.modes ? { modes: [...item.modes] } : {} }));
     }
   };
@@ -1315,13 +1370,13 @@ import { join as join2 } from "node:path";
 
 // src/runtime/npm.ts
 import { existsSync, realpathSync } from "node:fs";
-import { delimiter, dirname as dirname4, join, resolve as resolve5 } from "node:path";
+import { delimiter, dirname as dirname4, join, resolve as resolve6 } from "node:path";
 function npmCli() {
   const executableDirectory = dirname4(process.execPath);
   const candidates = [
     process.env.npm_execpath,
     join(executableDirectory, "node_modules", "npm", "bin", "npm-cli.js"),
-    resolve5(executableDirectory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    resolve6(executableDirectory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
     ...(process.env.PATH ?? "").split(delimiter).map((directory) => join(directory, process.platform === "win32" ? "npm.cmd" : "npm"))
   ];
   for (const candidate of candidates) {
@@ -1383,7 +1438,7 @@ ${result.stderr || result.stdout}` : ""}`);
 
 // scripts/skill-api.ts
 async function createInstalledRefactor(moduleUrl, operation) {
-  const skillRoot = resolve6(dirname5(fileURLToPath(moduleUrl)), "..");
+  const skillRoot = resolve7(dirname5(fileURLToPath(moduleUrl)), "..");
   if (Number(process.versions.node.split(".")[0]) < 22)
     throw new Error("UNSUPPORTED_RUNTIME: Node.js 22+ is required");
   await ensureSkillRuntime(skillRoot, true);
