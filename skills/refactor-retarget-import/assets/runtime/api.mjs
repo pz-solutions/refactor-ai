@@ -3714,7 +3714,7 @@ function jsxStringExpression(literal) {
   return result;
 }
 function hasEffects(node) {
-  if (ts14.isCallExpression(node) || ts14.isNewExpression(node) || ts14.isAwaitExpression(node) || ts14.isPostfixUnaryExpression(node) || ts14.isPrefixUnaryExpression(node) && (node.operator === ts14.SyntaxKind.PlusPlusToken || node.operator === ts14.SyntaxKind.MinusMinusToken) || ts14.isBinaryExpression(node) && node.operatorToken.kind >= ts14.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts14.SyntaxKind.LastAssignment)
+  if (ts14.isCallExpression(node) || ts14.isTaggedTemplateExpression(node) || ts14.isNewExpression(node) || ts14.isAwaitExpression(node) || ts14.isPostfixUnaryExpression(node) || ts14.isPrefixUnaryExpression(node) && (node.operator === ts14.SyntaxKind.PlusPlusToken || node.operator === ts14.SyntaxKind.MinusMinusToken) || ts14.isBinaryExpression(node) && node.operatorToken.kind >= ts14.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts14.SyntaxKind.LastAssignment)
     return true;
   return ts14.forEachChild(node, (child) => hasEffects(child) || undefined) ?? false;
 }

@@ -98,7 +98,7 @@ const normalize = (text: string) => text.replace(/\s+/g, "");
 
 /** Inlining these expressions can repeat observable work on each parameter/local reference. */
 function hasEffects(node: ts.Node): boolean {
-  if (ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isAwaitExpression(node)
+  if (ts.isCallExpression(node) || ts.isTaggedTemplateExpression(node) || ts.isNewExpression(node) || ts.isAwaitExpression(node)
     || ts.isPostfixUnaryExpression(node)
     || (ts.isPrefixUnaryExpression(node) && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken))
     || (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment)) return true;
