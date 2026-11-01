@@ -3713,6 +3713,11 @@ function jsxStringExpression(literal) {
     fail("PORT_ROUTE_LITERAL", "cannot translate JSX string attribute");
   return result;
 }
+function hasEffects(node) {
+  if (ts14.isCallExpression(node) || ts14.isNewExpression(node) || ts14.isAwaitExpression(node) || ts14.isPostfixUnaryExpression(node) || ts14.isPrefixUnaryExpression(node) && (node.operator === ts14.SyntaxKind.PlusPlusToken || node.operator === ts14.SyntaxKind.MinusMinusToken) || ts14.isBinaryExpression(node) && node.operatorToken.kind >= ts14.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts14.SyntaxKind.LastAssignment)
+    return true;
+  return ts14.forEachChild(node, (child) => hasEffects(child) || undefined) ?? false;
+}
 function dedent(text, source, node) {
   const start = node.getStart(source);
   const indent = /^[ \t]*/.exec(source.text.slice(source.text.lastIndexOf(`
@@ -3837,7 +3842,17 @@ class RouteExtractor {
       fn.parameters.forEach((parameter, index) => {
         if (!ts14.isIdentifier(parameter.name) || parameter.dotDotDotToken)
           throw new Untranslatable(`${name} has a destructured or rest parameter`);
-        const argument = call.arguments[index];
+        let argument = call.arguments[index];
+        if (parameter.initializer) {
+          if (hasEffects(parameter.initializer))
+            throw new Untranslatable(`${name}: default parameter ${parameter.name.text} has an effectful initializer; configure an explicit translation`);
+          const supplied = argument && unwrap(argument);
+          if (supplied && ts14.isIdentifier(supplied) && supplied.text === "undefined")
+            argument = undefined;
+          else if (supplied && !ts14.isLiteralExpression(supplied) && supplied.kind !== ts14.SyntaxKind.NullKeyword && supplied.kind !== ts14.SyntaxKind.TrueKeyword && supplied.kind !== ts14.SyntaxKind.FalseKeyword) {
+            throw new Untranslatable(`${name}: default parameter ${parameter.name.text} may receive undefined; configure an explicit translation`);
+          }
+        }
         const value = argument ? this.translate(argument, scope) : parameter.initializer ? this.translate(parameter.initializer, { ...hookScope, args: undefined }) : { text: "undefined", imports: [] };
         hookScope.args.set(this.checker.getSymbolAtLocation(parameter.name), value);
       });
@@ -3980,7 +3995,11 @@ class RouteExtractor {
     if (!local) {
       if (!ts14.isVariableDeclaration(declaration))
         throw new Untranslatable(`${node.text}: module-level destructuring is unsupported`);
-      return wrap(this.expression(variable.initializer, { ...scope, page: false, args: scope.args }, imports));
+      const text = this.expression(variable.initializer, { ...scope, page: false, args: scope.args }, imports);
+      if (this.within(variable, scope.fn) && hasEffects(variable.initializer) && !this.translations.has(normalize(variable.initializer.getText(scope.source)))) {
+        throw new Untranslatable(`${node.text}: helper-local initializer has observable effects; configure an explicit translation`);
+      }
+      return wrap(text);
     }
     return this.pageBinding(node, symbol, declaration, variable, scope);
   }

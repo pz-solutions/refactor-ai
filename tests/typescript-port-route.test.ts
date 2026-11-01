@@ -235,6 +235,48 @@ describe("port-route", () => {
     expect(after(plan, w.path(`${route}/item-adapter.tsx`))).toBeString();
   });
 
+  test("requires an explicit translation for effectful helper-local consts", async () => {
+    const w = await workspace({
+      "packages/data/src/index.ts": base["packages/data/src/index.ts"] + '\nexport async function getSnapshot() { return { code: "a", revision: "b" }; }',
+      [`${route}/_hooks/preload-item.ts`]: 'import { api, preloadQuery, getSnapshot } from "@scope/data"; export async function preloadItem(_code: string) { const snapshot = await getSnapshot(); return preloadQuery(api.items.get, { code: snapshot.code + snapshot.revision }); }',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan(request(w));
+    expect(plan.notes.some(note => note.includes("TODO(port-route)") && note.includes("helper-local initializer"))).toBe(true);
+    const start = after(plan, w.path("apps/start/src/routes/items.$code.index.tsx"))!;
+    expect(start).toContain("TODO(port-route): translate preloadedItem arguments");
+    expect(start).not.toContain("getSnapshot()");
+  });
+
+  for (const [argument, expected] of [["", "fallback"], ["undefined", "fallback"], ['"given"', "given"], ["null", null]] as const) test(`preserves a helper default for ${argument}`, async () => {
+    const w = await workspace({
+      "packages/data/src/index.ts": base["packages/data/src/index.ts"]!.replace("ref<{ code: string }", "ref<{ code: string | null }"),
+      [`${route}/page.tsx`]: base[`${route}/page.tsx`]!.replace("preloadItem(code)", `preloadItem(${argument})`),
+      [`${route}/_hooks/preload-item.ts`]: 'import { api, preloadQuery } from "@scope/data"; export async function preloadItem(code: string | null = "fallback") { return preloadQuery(api.items.get, { code }); }',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan(request(w));
+    expect(plan.validation.status).toBe("passed");
+    const start = after(plan, w.path("apps/start/src/routes/items.$code.index.tsx"))!;
+    const output = ts.transpileModule(start, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React }, fileName: "route.tsx" }).outputText;
+    const exports: any = {};
+    new Function("require", "exports", output)((module: string) => {
+      if (module === "../router") return { createFileRoute: () => (options: unknown) => ({ options }) };
+      if (module === "@scope/data") return { api: { items: { get: {}, list: {} } }, queryOptions: () => ({}) };
+      return { ItemView: () => null };
+    }, exports);
+    const result = await exports.Route.options.loader({ context: { now: new Date(), prefetch: async () => {} }, params: { code: "route" } });
+    expect(result.itemArgs.code).toBe(expected);
+  });
+
+  test("requires explicit translation when a supplied helper default argument may be undefined", async () => {
+    const w = await workspace({
+      "packages/data/src/index.ts": base["packages/data/src/index.ts"]!.replace("ref<{ code: string }", "ref<{ code?: string }") + '\nexport function getCode(): string | undefined { return undefined; }',
+      [`${route}/page.tsx`]: 'import { getCode } from "@scope/data";\n' + base[`${route}/page.tsx`]!.replace("preloadItem(code)", "preloadItem(getCode())"),
+      [`${route}/_hooks/preload-item.ts`]: 'import { api, preloadQuery } from "@scope/data"; export async function preloadItem(code = "fallback") { return preloadQuery(api.items.get, { code }); }',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan(request(w));
+    expect(plan.notes.some(note => note.includes("TODO(port-route)") && note.includes("default parameter"))).toBe(true);
+  });
+
   test("evaluates a shared destructuring initializer only once in the Start loader", async () => {
     const w = await workspace({
       "packages/data/src/index.ts": base["packages/data/src/index.ts"] + '\nexport async function getSnapshot() { return { a: 1, b: 2 }; }',

@@ -96,6 +96,15 @@ export interface ExtractOptions {
 
 const normalize = (text: string) => text.replace(/\s+/g, "");
 
+/** Inlining these expressions can repeat observable work on each parameter/local reference. */
+function hasEffects(node: ts.Node): boolean {
+  if (ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isAwaitExpression(node)
+    || ts.isPostfixUnaryExpression(node)
+    || (ts.isPrefixUnaryExpression(node) && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken))
+    || (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment)) return true;
+  return ts.forEachChild(node, child => hasEffects(child) || undefined) ?? false;
+}
+
 /** Continuation lines of copied page code lose the original statement's indentation. */
 function dedent(text: string, source: ts.SourceFile, node: ts.Node): string {
   const start = node.getStart(source);
@@ -219,7 +228,16 @@ export class RouteExtractor {
     const args = this.attempt(() => {
       fn.parameters.forEach((parameter, index) => {
         if (!ts.isIdentifier(parameter.name) || parameter.dotDotDotToken) throw new Untranslatable(`${name} has a destructured or rest parameter`);
-        const argument = call.arguments[index];
+        let argument: ts.Expression | undefined = call.arguments[index];
+        if (parameter.initializer) {
+          if (hasEffects(parameter.initializer)) throw new Untranslatable(`${name}: default parameter ${parameter.name.text} has an effectful initializer; configure an explicit translation`);
+          const supplied = argument && unwrap(argument);
+          if (supplied && ts.isIdentifier(supplied) && supplied.text === "undefined") argument = undefined;
+          else if (supplied && !ts.isLiteralExpression(supplied) && supplied.kind !== ts.SyntaxKind.NullKeyword
+            && supplied.kind !== ts.SyntaxKind.TrueKeyword && supplied.kind !== ts.SyntaxKind.FalseKeyword) {
+            throw new Untranslatable(`${name}: default parameter ${parameter.name.text} may receive undefined; configure an explicit translation`);
+          }
+        }
         const value = argument ? this.translate(argument, scope)
           : parameter.initializer ? this.translate(parameter.initializer, { ...hookScope, args: undefined }) : { text: "undefined", imports: [] };
         hookScope.args!.set(this.checker.getSymbolAtLocation(parameter.name)!, value);
@@ -348,7 +366,12 @@ export class RouteExtractor {
     const local = scope.page && this.within(variable, scope.fn);
     if (!local) {
       if (!ts.isVariableDeclaration(declaration)) throw new Untranslatable(`${node.text}: module-level destructuring is unsupported`);
-      return wrap(this.expression(variable.initializer, { ...scope, page: false, args: scope.args }, imports));
+      const text = this.expression(variable.initializer, { ...scope, page: false, args: scope.args }, imports);
+      if (this.within(variable, scope.fn) && hasEffects(variable.initializer)
+        && !this.translations.has(normalize(variable.initializer.getText(scope.source)))) {
+        throw new Untranslatable(`${node.text}: helper-local initializer has observable effects; configure an explicit translation`);
+      }
+      return wrap(text);
     }
     return this.pageBinding(node, symbol, declaration, variable, scope);
   }
