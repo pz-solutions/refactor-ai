@@ -1,4 +1,5 @@
 // Native sync IPC uses Node file descriptors; exercise it in the supported Node runtime.
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Workspace } from "../../src/backends/typescript-workspace";
 import { loadTs7Checker } from "../../src/backends/typescript-ts7";
@@ -7,10 +8,21 @@ import { loadBackend } from "../../src/backends/load";
 const input = JSON.parse(process.argv[2]!);
 if (input.operation) {
   const api = createRefactorApi({ loadBackend });
-  const plan = await api.plan(input);
+  let plan = await api.plan(input);
+  if (input.savePlan) {
+    const path = join(input.root, ".refactor-ai", "plan.json");
+    await mkdir(join(input.root, ".refactor-ai"), { recursive: true });
+    await writeFile(path, JSON.stringify(plan));
+    plan = await api.loadPlan(path);
+  }
+  if (input.mutateFile) await writeFile(join(input.root, input.mutateFile), input.mutateText);
+
   if (input.mutateChecker) {
     plan.checker!.version = "mutated by caller";
     process.stdout.write(JSON.stringify(await api.plan(input)));
+  } else if (input.applyPlan) {
+    await api.validate(plan);
+    process.stdout.write(JSON.stringify(await api.apply(plan)));
   } else
   process.stdout.write(JSON.stringify(plan));
 } else {

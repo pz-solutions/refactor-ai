@@ -5,6 +5,14 @@ export const inputMethods = ["readFile", "fileExists", "directoryExists", "getDi
 export interface ReadSetEntry { method: typeof inputMethods[number]; args: any[]; digest: string; }
 export const inputHash = (value: unknown): string => createHash("sha256").update(typeof value === "string" ? `string:${value}` : JSON.stringify(value) ?? "undefined").digest("hex");
 
+/** Runtime state may appear during save/apply. Its configuration files are guarded by their own reads. */
+export function inputDigest(method: ReadSetEntry["method"], value: unknown): string {
+  if (method === "getDirectories" && Array.isArray(value)) {
+    value = value.filter(path => typeof path !== "string" || path.replaceAll("\\", "/").split("/").at(-1) !== ".refactor-ai");
+  }
+  return inputHash(value);
+}
+
 export function assertReadSetShape(inputs: ReadSetEntry[]): void {
   if (!Array.isArray(inputs) || inputs.some(input => !input || !inputMethods.includes(input.method)
     || !Array.isArray(input.args) || typeof input.args[0] !== "string" || !/^[a-f0-9]{64}$/.test(input.digest))) {
@@ -27,7 +35,7 @@ export async function assertReadSetFresh(inputs: ReadSetEntry[], compilerBase?: 
   const ts = load("typescript") as typeof import("typescript");
   for (const input of inputs) {
     const method = ts.sys[input.method];
-    if (!method || inputHash((method as Function)(...input.args.map(value => value === null ? undefined : value))) !== input.digest) {
+    if (!method || inputDigest(input.method, (method as Function)(...input.args.map(value => value === null ? undefined : value))) !== input.digest) {
       throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}${inputQueryDetails(input)}; compiler inputs include project-discovery reads; create a new plan after those writers/generators settle`);
     }
   }

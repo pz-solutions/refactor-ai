@@ -16,6 +16,12 @@ import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 var inputMethods = ["readFile", "fileExists", "directoryExists", "getDirectories", "readDirectory", "realpath"];
 var inputHash = (value) => createHash("sha256").update(typeof value === "string" ? `string:${value}` : JSON.stringify(value) ?? "undefined").digest("hex");
+function inputDigest(method, value) {
+  if (method === "getDirectories" && Array.isArray(value)) {
+    value = value.filter((path) => typeof path !== "string" || path.replaceAll("\\", "/").split("/").at(-1) !== ".refactor-ai");
+  }
+  return inputHash(value);
+}
 function assertReadSetShape(inputs) {
   if (!Array.isArray(inputs) || inputs.some((input) => !input || !inputMethods.includes(input.method) || !Array.isArray(input.args) || typeof input.args[0] !== "string" || !/^[a-f0-9]{64}$/.test(input.digest))) {
     throw new Error("INVALID_PLAN: malformed read set");
@@ -35,7 +41,7 @@ async function assertReadSetFresh(inputs, compilerBase) {
   const ts = load("typescript");
   for (const input of inputs) {
     const method = ts.sys[input.method];
-    if (!method || inputHash(method(...input.args.map((value) => value === null ? undefined : value))) !== input.digest) {
+    if (!method || inputDigest(input.method, method(...input.args.map((value) => value === null ? undefined : value))) !== input.digest) {
       throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}${inputQueryDetails(input)}; compiler inputs include project-discovery reads; create a new plan after those writers/generators settle`);
     }
   }
@@ -607,6 +613,10 @@ async function gitFiles(root) {
       maxBuffer: 1 << 28,
       env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
     });
+    try {
+      await run("git", ["check-ignore", "--no-index", "--quiet", "."], { cwd: root, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } });
+      return null;
+    } catch {}
     const names = [...new Set(stdout.split("\x00").filter(Boolean))].map((name) => name.split(sep).join("/"));
     return names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
   } catch {

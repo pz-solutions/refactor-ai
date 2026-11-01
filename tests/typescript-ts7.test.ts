@@ -118,3 +118,17 @@ for (const checker of ["ts7", "both"] as const) test(`${checker} validates cross
   expect(JSON.parse(manifest.after).exports["./a"]).toBe("./src/a.ts");
   expect(await readFile(join(root, "source/src/a.ts"), "utf8")).toContain("value");
 }, 30_000);
+
+for (const checker of ["ts7", "both"] as const) for (const savePlan of [false, true]) test(`${checker} applies a ${savePlan ? "saved" : "freshly created"} plan`, async () => {
+  const root = await fixture({ "src/a.ts": "export const value = 1;" });
+  const result = native({ root, project: join(root, "tsconfig.json"), file: join(root, "src/a.ts"), operation: "rename", at: "1:14", name: "renamed", checker, applyPlan: true, savePlan });
+  expect(result.status).toBe("applied");
+  expect(await readFile(join(root, "src/a.ts"), "utf8")).toContain("renamed");
+});
+
+for (const checker of ["ts7", "both"] as const) test(`${checker} still rejects changed compiler inputs after saving a plan`, async () => {
+  const root = await fixture({ "src/a.ts": "export const value = 1;", "src/use.ts": 'import { value } from "./a"; export const result = value;', "src/caller.ts": 'import { result } from "./use"; export const output = result;' });
+  const request = { root, project: join(root, "tsconfig.json"), file: join(root, "src/a.ts"), operation: "rename", at: "1:14", name: "renamed", checker, applyPlan: true, savePlan: true };
+  expect(() => native({ ...request, mutateFile: "src/caller.ts", mutateText: 'export const changed = true;' })).toThrow("STALE_PROJECT_INPUTS");
+  expect(await readFile(join(root, "src/a.ts"), "utf8")).toBe("export const value = 1;");
+});

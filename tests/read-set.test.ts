@@ -116,3 +116,19 @@ test("discovery-only project reads remain inputs even when their files are not e
   await f.write("e2e/unrelated.test.ts", 'export { value } from "../src/leaf";');
   await expect(f.api.validate(plan)).rejects.toThrow("STALE_PROJECT_INPUTS");
 });
+
+test("runtime state is ignored in directory guards while configuration and other directories remain guarded", async () => {
+  const f = await fixture();
+  const inputs = new CompilerInputs(true);
+  inputs.sys.getDirectories(f.root);
+  await f.write(".refactor-ai/plan.json", "{}");
+  expect(inputs.unchanged()).toBe(true);
+  inputs.sys.readFile(f.path(".refactor-ai/config.json"));
+  await f.write(".refactor-ai/config.json", '{"checker":"ts7"}');
+  expect(inputs.changed()?.method).toBe("readFile");
+
+  const directories = new CompilerInputs(true);
+  directories.sys.getDirectories(f.root);
+  await mkdir(f.path("new-project"));
+  expect(directories.changed()?.method).toBe("getDirectories");
+});

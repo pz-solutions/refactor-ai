@@ -215,6 +215,10 @@ async function gitFiles(root) {
       maxBuffer: 1 << 28,
       env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
     });
+    try {
+      await run("git", ["check-ignore", "--no-index", "--quiet", "."], { cwd: root, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } });
+      return null;
+    } catch {}
     const names = [...new Set(stdout.split("\x00").filter(Boolean))].map((name) => name.split(sep).join("/"));
     return names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
   } catch {
@@ -351,6 +355,12 @@ var init_run_log = __esm(() => {
 // src/core/read-set.ts
 import { createRequire } from "node:module";
 import { createHash as createHash3 } from "node:crypto";
+function inputDigest(method, value) {
+  if (method === "getDirectories" && Array.isArray(value)) {
+    value = value.filter((path) => typeof path !== "string" || path.replaceAll("\\", "/").split("/").at(-1) !== ".refactor-ai");
+  }
+  return inputHash(value);
+}
 function assertReadSetShape(inputs) {
   if (!Array.isArray(inputs) || inputs.some((input) => !input || !inputMethods.includes(input.method) || !Array.isArray(input.args) || typeof input.args[0] !== "string" || !/^[a-f0-9]{64}$/.test(input.digest))) {
     throw new Error("INVALID_PLAN: malformed read set");
@@ -370,7 +380,7 @@ async function assertReadSetFresh(inputs, compilerBase) {
   const ts = load("typescript");
   for (const input of inputs) {
     const method = ts.sys[input.method];
-    if (!method || inputHash(method(...input.args.map((value) => value === null ? undefined : value))) !== input.digest) {
+    if (!method || inputDigest(input.method, method(...input.args.map((value) => value === null ? undefined : value))) !== input.digest) {
       throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}${inputQueryDetails(input)}; compiler inputs include project-discovery reads; create a new plan after those writers/generators settle`);
     }
   }
@@ -2286,7 +2296,7 @@ class CompilerInputs {
         if (this.values.has(key))
           return this.values.get(key);
         const value = original(...args);
-        this.inputs.set(key, { method, args: args.map((arg) => Array.isArray(arg) ? [...arg] : arg), digest: inputHash(value) });
+        this.inputs.set(key, { method, args: args.map((arg) => Array.isArray(arg) ? [...arg] : arg), digest: inputDigest(method, value) });
         this.values.set(key, value);
         return value;
       };
@@ -2310,7 +2320,7 @@ function current(input) {
   if (!input || !inputMethods.includes(input.method) || !Array.isArray(input.args) || typeof input.digest !== "string")
     return false;
   const method = ts.sys[input.method];
-  return !!method && inputHash(method(...input.args.map((value) => value === null ? undefined : value))) === input.digest;
+  return !!method && inputDigest(input.method, method(...input.args.map((value) => value === null ? undefined : value))) === input.digest;
 }
 function regularDirectory(path, create) {
   const parent = dirname6(path);
@@ -5855,6 +5865,23 @@ var init_typescript_port_route_config = __esm(() => {
 // src/backends/typescript-port-route-extract.ts
 import ts14 from "typescript";
 import { resolve as resolve21 } from "node:path";
+function jsxStringExpression(literal) {
+  const emitted = ts14.transpileModule(`const value = <element value=${literal} />;`, {
+    compilerOptions: { jsx: ts14.JsxEmit.React, target: ts14.ScriptTarget.ESNext },
+    fileName: "literal.tsx"
+  }).outputText;
+  const source = ts14.createSourceFile("literal.js", emitted, ts14.ScriptTarget.Latest, true);
+  let result;
+  const visit = (node) => {
+    if (ts14.isPropertyAssignment(node) && node.name.getText(source) === "value" && ts14.isStringLiteral(node.initializer))
+      result = node.initializer.getText(source);
+    ts14.forEachChild(node, visit);
+  };
+  visit(source);
+  if (result === undefined)
+    fail("PORT_ROUTE_LITERAL", "cannot translate JSX string attribute");
+  return result;
+}
 function dedent(text, source, node) {
   const start = node.getStart(source);
   const indent = /^[ \t]*/.exec(source.text.slice(source.text.lastIndexOf(`
@@ -6163,6 +6190,19 @@ class RouteExtractor {
     if (value === this.options.paramsObject && !this.options.params.includes(property)) {
       throw new Untranslatable(`route parameter '${property}' is not a segment of the Start route`);
     }
+    if (value !== this.options.paramsObject) {
+      let shared = this.emitted.get(pattern);
+      if (shared === undefined) {
+        shared = "__portRouteValue";
+        const reserved = scope.source.text + this.statements.map((statement) => statement.text).join(`
+`);
+        while (reserved.includes(shared))
+          shared += "2";
+        this.statements.push({ text: `const ${shared} = ${value};`, imports });
+        this.emitted.set(pattern, shared);
+      }
+      value = shared;
+    }
     this.statements.push({ text: `const { ${element.getText(scope.source)} } = ${value};`, imports });
     this.emitted.set(symbol, node.text);
     return node.text;
@@ -6275,7 +6315,7 @@ class RouteExtractor {
         attributes.push({ name, kind: "preloaded", preload });
         continue;
       }
-      const sourceText = !initializer ? "true" : ts14.isStringLiteral(initializer) ? initializer.getText(source) : expression?.getText(source) ?? "undefined";
+      const sourceText = !initializer ? "true" : ts14.isStringLiteral(initializer) ? jsxStringExpression(initializer.getText(source)) : expression?.getText(source) ?? "undefined";
       const start = !expression || ts14.isStringLiteral(expression) ? { text: sourceText, imports: [] } : this.attempt(() => this.translate(expression, scope));
       attributes.push({ name, kind: "value", source: sourceText, start });
     }

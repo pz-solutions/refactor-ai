@@ -36,6 +36,22 @@ export interface Preload {
   hook?: { name: string; path: string };
 }
 
+/** Let the compiler decode JSX entities/whitespace, then reuse its escaped JS literal. */
+function jsxStringExpression(literal: string): string {
+  const emitted = ts.transpileModule(`const value = <element value=${literal} />;`, {
+    compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ESNext }, fileName: "literal.tsx",
+  }).outputText;
+  const source = ts.createSourceFile("literal.js", emitted, ts.ScriptTarget.Latest, true);
+  let result: string | undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAssignment(node) && node.name.getText(source) === "value" && ts.isStringLiteral(node.initializer)) result = node.initializer.getText(source);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  if (result === undefined) fail("PORT_ROUTE_LITERAL", "cannot translate JSX string attribute");
+  return result;
+}
+
 export interface ViewAttribute {
   name: string;
   kind: "preloaded" | "value";
@@ -115,7 +131,7 @@ interface Scope {
 export class RouteExtractor {
   private readonly checker: ts.TypeChecker;
   private readonly statements: Translation[] = [];
-  private readonly emitted = new Map<ts.Symbol, string>();
+  private readonly emitted = new Map<ts.Symbol | ts.BindingName, string>();
   private readonly notes: string[] = [];
   private readonly translations: Map<string, string>;
 
@@ -372,6 +388,18 @@ export class RouteExtractor {
     if (value === this.options.paramsObject && !this.options.params.includes(property)) {
       throw new Untranslatable(`route parameter '${property}' is not a segment of the Start route`);
     }
+    // Share the initializer across fields without binding unused fields or evaluating it again.
+    if (value !== this.options.paramsObject) {
+      let shared = this.emitted.get(pattern);
+      if (shared === undefined) {
+        shared = "__portRouteValue";
+        const reserved = scope.source.text + this.statements.map(statement => statement.text).join("\n");
+        while (reserved.includes(shared)) shared += "2";
+        this.statements.push({ text: `const ${shared} = ${value};`, imports });
+        this.emitted.set(pattern, shared);
+      }
+      value = shared;
+    }
     this.statements.push({ text: `const { ${element.getText(scope.source)} } = ${value};`, imports });
     this.emitted.set(symbol, node.text);
     return node.text;
@@ -477,7 +505,7 @@ export class RouteExtractor {
       const expression = !initializer ? undefined : ts.isJsxExpression(initializer) ? initializer.expression : initializer;
       const preload = expression && ts.isIdentifier(unwrap(expression)) ? preloads.find(item => item.variable === (unwrap(expression) as ts.Identifier).text) : undefined;
       if (preload) { attributes.push({ name, kind: "preloaded", preload }); continue; }
-      const sourceText = !initializer ? "true" : ts.isStringLiteral(initializer) ? initializer.getText(source) : expression?.getText(source) ?? "undefined";
+      const sourceText = !initializer ? "true" : ts.isStringLiteral(initializer) ? jsxStringExpression(initializer.getText(source)) : expression?.getText(source) ?? "undefined";
       const start = !expression || ts.isStringLiteral(expression) ? { text: sourceText, imports: [] } : this.attempt(() => this.translate(expression, scope));
       attributes.push({ name, kind: "value", source: sourceText, start });
     }

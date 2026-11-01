@@ -85,6 +85,12 @@ var init_typescript_timing = __esm(() => {
 
 // src/core/read-set.ts
 import { createHash } from "node:crypto";
+function inputDigest(method, value) {
+  if (method === "getDirectories" && Array.isArray(value)) {
+    value = value.filter((path) => typeof path !== "string" || path.replaceAll("\\", "/").split("/").at(-1) !== ".refactor-ai");
+  }
+  return inputHash(value);
+}
 function inputQueryDetails(input) {
   if (input.method !== "readDirectory")
     return "";
@@ -121,7 +127,7 @@ class CompilerInputs {
         if (this.values.has(key))
           return this.values.get(key);
         const value = original(...args);
-        this.inputs.set(key, { method, args: args.map((arg) => Array.isArray(arg) ? [...arg] : arg), digest: inputHash(value) });
+        this.inputs.set(key, { method, args: args.map((arg) => Array.isArray(arg) ? [...arg] : arg), digest: inputDigest(method, value) });
         this.values.set(key, value);
         return value;
       };
@@ -145,7 +151,7 @@ function current(input) {
   if (!input || !inputMethods.includes(input.method) || !Array.isArray(input.args) || typeof input.digest !== "string")
     return false;
   const method = ts.sys[input.method];
-  return !!method && inputHash(method(...input.args.map((value) => value === null ? undefined : value))) === input.digest;
+  return !!method && inputDigest(input.method, method(...input.args.map((value) => value === null ? undefined : value))) === input.digest;
 }
 function regularDirectory(path, create) {
   const parent = dirname2(path);
@@ -3690,6 +3696,23 @@ var init_typescript_port_route_config = __esm(() => {
 // src/backends/typescript-port-route-extract.ts
 import ts14 from "typescript";
 import { resolve as resolve14 } from "node:path";
+function jsxStringExpression(literal) {
+  const emitted = ts14.transpileModule(`const value = <element value=${literal} />;`, {
+    compilerOptions: { jsx: ts14.JsxEmit.React, target: ts14.ScriptTarget.ESNext },
+    fileName: "literal.tsx"
+  }).outputText;
+  const source = ts14.createSourceFile("literal.js", emitted, ts14.ScriptTarget.Latest, true);
+  let result;
+  const visit = (node) => {
+    if (ts14.isPropertyAssignment(node) && node.name.getText(source) === "value" && ts14.isStringLiteral(node.initializer))
+      result = node.initializer.getText(source);
+    ts14.forEachChild(node, visit);
+  };
+  visit(source);
+  if (result === undefined)
+    fail("PORT_ROUTE_LITERAL", "cannot translate JSX string attribute");
+  return result;
+}
 function dedent(text, source, node) {
   const start = node.getStart(source);
   const indent = /^[ \t]*/.exec(source.text.slice(source.text.lastIndexOf(`
@@ -3998,6 +4021,19 @@ class RouteExtractor {
     if (value === this.options.paramsObject && !this.options.params.includes(property)) {
       throw new Untranslatable(`route parameter '${property}' is not a segment of the Start route`);
     }
+    if (value !== this.options.paramsObject) {
+      let shared = this.emitted.get(pattern);
+      if (shared === undefined) {
+        shared = "__portRouteValue";
+        const reserved = scope.source.text + this.statements.map((statement) => statement.text).join(`
+`);
+        while (reserved.includes(shared))
+          shared += "2";
+        this.statements.push({ text: `const ${shared} = ${value};`, imports });
+        this.emitted.set(pattern, shared);
+      }
+      value = shared;
+    }
     this.statements.push({ text: `const { ${element.getText(scope.source)} } = ${value};`, imports });
     this.emitted.set(symbol, node.text);
     return node.text;
@@ -4110,7 +4146,7 @@ class RouteExtractor {
         attributes.push({ name, kind: "preloaded", preload });
         continue;
       }
-      const sourceText = !initializer ? "true" : ts14.isStringLiteral(initializer) ? initializer.getText(source) : expression?.getText(source) ?? "undefined";
+      const sourceText = !initializer ? "true" : ts14.isStringLiteral(initializer) ? jsxStringExpression(initializer.getText(source)) : expression?.getText(source) ?? "undefined";
       const start = !expression || ts14.isStringLiteral(expression) ? { text: sourceText, imports: [] } : this.attempt(() => this.translate(expression, scope));
       attributes.push({ name, kind: "value", source: sourceText, start });
     }

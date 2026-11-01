@@ -5,6 +5,8 @@ export interface ReadSetEntry {
     digest: string;
 }
 export declare const inputHash: (value: unknown) => string;
+/** Runtime state may appear during save/apply. Its configuration files are guarded by their own reads. */
+export declare function inputDigest(method: ReadSetEntry["method"], value: unknown): string;
 export declare function assertReadSetShape(inputs: ReadSetEntry[]): void;
 /** Explain directory guards without dumping file contents or opaque digests. */
 export declare function inputQueryDetails(input: ReadSetEntry): string;

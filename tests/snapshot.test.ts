@@ -61,3 +61,19 @@ test("generated state ignore preserves equivalents and upgrades only the legacy 
     expect(await readFile(join(root, ".gitignore"), "utf8")).toBe("custom\n");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+for (const tracked of [false, true]) test(`an ignored project root ${tracked ? "with tracked files " : ""}still fingerprints files for legacy freshness`, async () => {
+  const root = await repo();
+  const project = join(root, "cache");
+  try {
+    if (tracked) {
+      await writeFile(join(project, "tracked.ts"), "export const value = 1;");
+      execFileSync("git", ["add", "-f", "cache/tracked.ts"], { cwd: root });
+    }
+    const before = await snapshot(project);
+    expect(before.files["big.bin"]).toBeDefined();
+    await writeFile(join(project, "big.bin"), "changed");
+    expect((await snapshot(project)).hash).not.toBe(before.hash);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

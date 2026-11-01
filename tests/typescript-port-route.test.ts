@@ -1,3 +1,4 @@
+import ts from "typescript";
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -158,6 +159,38 @@ function request(w: Awaited<ReturnType<typeof workspace>>, extra: object = {}) {
 const after = (plan: { changes: { path: string; after: string | null }[] }, path: string) => plan.changes.find(change => change.path === path)?.after;
 
 describe("port-route", () => {
+  for (const [literal, expected] of [
+    [String.raw`"A &amp; B &#65; &#x42; &quot; \n C:\temp"`, String.raw`A & B A B " \n C:\temp`],
+    ["'single &apos; quote'", "single ' quote"],
+    ['"first\n  second\tline"', "first\n  second\tline"],
+    ['""', ""],
+  ]) test(`preserves JSX attribute value ${JSON.stringify(literal)} in Start routes`, async () => {
+    const w = await workspace({
+      [`${route}/page.tsx`]: base[`${route}/page.tsx`]!.replace('title="Item"', `title=${literal}`),
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan(request(w));
+    expect(plan.validation.status).toBe("passed");
+    const start = after(plan, w.path("apps/start/src/routes/items.$code.index.tsx"))!;
+    const emitted = ts.transpileModule(start, { fileName: "route.tsx", compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ESNext } }).outputText;
+    const source = ts.createSourceFile("route.js", emitted, ts.ScriptTarget.Latest, true);
+    const titles: string[] = [];
+    const strings = new Map<string, string>();
+    const collect = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && ts.isStringLiteral(node.initializer)) strings.set(node.name.text, node.initializer.text);
+      ts.forEachChild(node, collect);
+    };
+    collect(source);
+    const visit = (node: ts.Node): void => {
+      if (ts.isPropertyAssignment(node) && node.name.getText(source) === "title" && ts.isCallExpression(node.parent.parent)) {
+        if (ts.isStringLiteral(node.initializer)) titles.push(node.initializer.text);
+        else if (ts.isIdentifier(node.initializer)) titles.push(strings.get(node.initializer.text)!);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    expect(titles).toEqual([expected!]);
+  });
+
   test("retro: parameter snippets share one hook call and generated files use a configured formatter", async () => {
     const nested = `${route}/[unitCode]`;
     const configured = JSON.parse(base[".refactor-ai/port-route.json"]!);
@@ -200,6 +233,28 @@ describe("port-route", () => {
     expect(start).not.toContain("Promise.all([])");
     expect(start).toContain("function ItemPage()");
     expect(after(plan, w.path(`${route}/item-adapter.tsx`))).toBeString();
+  });
+
+  test("evaluates a shared destructuring initializer only once in the Start loader", async () => {
+    const w = await workspace({
+      "packages/data/src/index.ts": base["packages/data/src/index.ts"] + '\nexport async function getSnapshot() { return { a: 1, b: 2 }; }',
+      [`${route}/page.tsx`]: 'import { getSnapshot } from "@scope/data"; import { ItemView } from "./item-view"; export default async function Page() { const { a, b } = await getSnapshot(); return <ItemView a={a} b={b} />; }',
+      [`${route}/item-view.tsx`]: 'export function ItemView({ a, b }: { a: number; b: number }) { return <div>{a}{b}</div>; }',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan(request(w));
+    expect(plan.validation.status).toBe("passed");
+    const start = after(plan, w.path("apps/start/src/routes/items.$code.index.tsx"))!;
+    const output = ts.transpileModule(start, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React }, fileName: "route.tsx" }).outputText;
+    let calls = 0;
+    const exports: any = {};
+    new Function("require", "exports", output)((module: string) => {
+      if (module === "../router") return { createFileRoute: () => (options: unknown) => ({ options }) };
+      if (module === "@scope/data") return { getSnapshot: async () => { calls++; return { a: calls, b: calls }; } };
+      return { ItemView: () => null };
+    }, exports);
+    const result = await exports.Route.options.loader({});
+    expect(calls).toBe(1);
+    expect(result).toMatchObject({ a: 1, b: 1 });
   });
 
   test("retro: translated props reuse existing loader bindings", async () => {

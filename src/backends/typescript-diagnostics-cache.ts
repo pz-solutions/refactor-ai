@@ -1,4 +1,4 @@
-import { inputMethods as methods, inputHash as hash, type ReadSetEntry as Input } from "../core/read-set";
+import { inputMethods as methods, inputHash as hash, inputDigest, type ReadSetEntry as Input } from "../core/read-set";
 import ts from "typescript";
 import { stateIgnoreText } from "../core/snapshot";
 import { randomUUID } from "node:crypto";
@@ -24,7 +24,7 @@ export class CompilerInputs {
         const key = JSON.stringify([method, args]);
         if (this.values.has(key)) return this.values.get(key);
         const value = (original as Function)(...args);
-        this.inputs.set(key, { method, args: args.map(arg => Array.isArray(arg) ? [...arg] : arg), digest: hash(value) });
+        this.inputs.set(key, { method, args: args.map(arg => Array.isArray(arg) ? [...arg] : arg), digest: inputDigest(method, value) });
         this.values.set(key, value);
         return value;
       };
@@ -41,7 +41,7 @@ export class CompilerInputs {
 function current(input: Input): boolean {
   if (!input || !methods.includes(input.method) || !Array.isArray(input.args) || typeof input.digest !== "string") return false;
   const method = ts.sys[input.method];
-  return !!method && hash((method as Function)(...input.args.map(value => value === null ? undefined : value))) === input.digest;
+  return !!method && inputDigest(input.method, (method as Function)(...input.args.map(value => value === null ? undefined : value))) === input.digest;
 }
 
 /** Avoid following a cache directory or entry symlink, including an overridden location. */

@@ -57,13 +57,6 @@ export interface RefactorRequest {
 }
 export interface Diagnostic {
     file: string;
-    /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
-    moves?: {
-        file: string;
-        target: string;
-    }[];
-    /** TS-style globs relative to each moved directory; excluded adapters remain. */
-    exclude?: string[];
     code: string;
     message: string;
 }

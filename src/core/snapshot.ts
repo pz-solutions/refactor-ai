@@ -144,6 +144,10 @@ async function gitFiles(root: string): Promise<string[] | null> {
     const { stdout } = await run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."], {
       cwd: root, maxBuffer: 1 << 28, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
     });
+    try {
+      await run("git", ["check-ignore", "--no-index", "--quiet", "."], { cwd: root, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } });
+      return null; // An ignored project root needs a full snapshot, even with force-tracked files.
+    } catch { /* An unignored Git root uses the tracked and unignored file list. */ }
     const names = [...new Set(stdout.split("\0").filter(Boolean))].map(name => name.split(sep).join("/"));
     return names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
   } catch {
