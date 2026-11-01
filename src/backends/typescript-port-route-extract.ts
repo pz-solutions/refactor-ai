@@ -238,6 +238,9 @@ export class RouteExtractor {
             throw new Untranslatable(`${name}: default parameter ${parameter.name.text} may receive undefined; configure an explicit translation`);
           }
         }
+        if (argument && hasEffects(argument) && !this.translations.has(normalize(argument.getText(scope.source)))) {
+          throw new Untranslatable(`${name}: helper argument has observable effects; configure an explicit translation`);
+        }
         const value = argument ? this.translate(argument, scope)
           : parameter.initializer ? this.translate(parameter.initializer, { ...hookScope, args: undefined }) : { text: "undefined", imports: [] };
         hookScope.args!.set(this.checker.getSymbolAtLocation(parameter.name)!, value);
@@ -366,9 +369,10 @@ export class RouteExtractor {
     const local = scope.page && this.within(variable, scope.fn);
     if (!local) {
       if (!ts.isVariableDeclaration(declaration)) throw new Untranslatable(`${node.text}: module-level destructuring is unsupported`);
+      const replacement = this.within(variable, scope.fn) ? this.translations.get(normalize(variable.initializer.getText(scope.source))) : undefined;
+      if (replacement !== undefined) return wrap(replacement);
       const text = this.expression(variable.initializer, { ...scope, page: false, args: scope.args }, imports);
-      if (this.within(variable, scope.fn) && hasEffects(variable.initializer)
-        && !this.translations.has(normalize(variable.initializer.getText(scope.source)))) {
+      if (this.within(variable, scope.fn) && hasEffects(variable.initializer)) {
         throw new Untranslatable(`${node.text}: helper-local initializer has observable effects; configure an explicit translation`);
       }
       return wrap(text);

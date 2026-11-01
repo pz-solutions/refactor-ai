@@ -235,15 +235,36 @@ describe("port-route", () => {
     expect(after(plan, w.path(`${route}/item-adapter.tsx`))).toBeString();
   });
 
-  test("requires an explicit translation for effectful helper-local consts", async () => {
+  for (const configured of [false, true]) test(`${configured ? "uses" : "requires"} an explicit translation for effectful helper-local consts`, async () => {
+    const config = JSON.parse(base[".refactor-ai/port-route.json"]!);
+    if (configured) config.translate["await getSnapshot()"] = "context.snapshot";
     const w = await workspace({
+      ".refactor-ai/port-route.json": JSON.stringify(config),
       "packages/data/src/index.ts": base["packages/data/src/index.ts"] + '\nexport async function getSnapshot() { return { code: "a", revision: "b" }; }',
       [`${route}/_hooks/preload-item.ts`]: 'import { api, preloadQuery, getSnapshot } from "@scope/data"; export async function preloadItem(_code: string) { const snapshot = await getSnapshot(); return preloadQuery(api.items.get, { code: snapshot.code + snapshot.revision }); }',
     });
     const plan = await createRefactorApi({ loadBackend }).plan(request(w));
-    expect(plan.notes.some(note => note.includes("TODO(port-route)") && note.includes("helper-local initializer"))).toBe(true);
+    expect(plan.notes.some(note => note.includes("TODO(port-route)") && note.includes("helper-local initializer"))).toBe(!configured);
     const start = after(plan, w.path("apps/start/src/routes/items.$code.index.tsx"))!;
-    expect(start).toContain("TODO(port-route): translate preloadedItem arguments");
+    if (configured) expect(start).toContain("context.snapshot");
+    else expect(start).toContain("TODO(port-route): translate preloadedItem arguments");
+    expect(start).not.toContain("getSnapshot()");
+  });
+
+  for (const configured of [false, true]) test(`${configured ? "uses" : "requires"} explicit translation for an effectful helper argument`, async () => {
+    const config = JSON.parse(base[".refactor-ai/port-route.json"]!);
+    if (configured) config.translate["await getSnapshot()"] = "context.snapshot";
+    const w = await workspace({
+      ".refactor-ai/port-route.json": JSON.stringify(config),
+      "packages/data/src/index.ts": base["packages/data/src/index.ts"] + '\nexport async function getSnapshot() { return { code: "a", revision: "b" }; }',
+      [`${route}/page.tsx`]: 'import { getSnapshot } from "@scope/data";\n' + base[`${route}/page.tsx`]!.replace("preloadItem(code)", "preloadItem(await getSnapshot())"),
+      [`${route}/_hooks/preload-item.ts`]: 'import { api, preloadQuery } from "@scope/data"; export async function preloadItem(snapshot: { code: string; revision: string }) { return preloadQuery(api.items.get, { code: snapshot.code + snapshot.revision }); }',
+    });
+    const plan = await createRefactorApi({ loadBackend }).plan(request(w));
+    expect(plan.validation.status).toBe("passed");
+    const start = after(plan, w.path("apps/start/src/routes/items.$code.index.tsx"))!;
+    if (configured) expect(start).toContain("context.snapshot");
+    else expect(plan.notes.some(note => note.includes("TODO(port-route)") && note.includes("helper argument"))).toBe(true);
     expect(start).not.toContain("getSnapshot()");
   });
 
