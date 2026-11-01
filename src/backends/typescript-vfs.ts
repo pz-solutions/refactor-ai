@@ -1,5 +1,8 @@
 import ts from "typescript";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import type { FileSystem } from "typescript7/unstable/fs";
+import { inputQueryDetails } from "../core/read-set";
+import { CompilerInputs } from "./typescript-diagnostics-cache";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import type { FileChange } from "../types";
 import { isInside, portablePath } from "./typescript-paths";
@@ -114,6 +117,11 @@ function wildcardRegex(specs: readonly string[] | undefined, basePath: string, u
   return new RegExp(`^(?:${patterns.map((item) => `(?:${item})`).join("|")})${usage === "exclude" ? "(?:$|/)" : "$"}`, flags);
 }
 
+/** Same exclude-glob rules as tsconfig, including literal bracketed route directories. */
+export function excludedByPatterns(path: string, base: string, patterns: string[]): boolean {
+  return wildcardRegex(patterns, base, "exclude", ts.sys.useCaseSensitiveFileNames ? "" : "i")?.test(portablePath(resolve(path))) ?? false;
+}
+
 function includeBasePath(absolute: string): string {
   const wildcard = absolute.search(/[*?]/);
   if (wildcard < 0) return basename(absolute).includes(".") ? dirname(absolute) : absolute;
@@ -122,23 +130,50 @@ function includeBasePath(absolute: string): string {
   return end === 2 && /^[A-Za-z]:/.test(normalized) ? normalized.slice(0, 3) : normalized.slice(0, end) || "/";
 }
 
+const contentIds = new Map<string, number>();
+let nextContentId = 0;
+
+/** Monotonic across instances: after eviction, a text receives a new identity rather than a reused one. */
+function contentId(text: string): number {
+  let id = contentIds.get(text);
+  if (id === undefined) {
+    if (contentIds.size >= 50_000) contentIds.clear();
+    contentIds.set(text, id = ++nextContentId);
+  }
+  return id;
+}
+
 export class VirtualFs {
+  readonly inputs: CompilerInputs;
   readonly caseSensitive: boolean;
+  private readonly readPaths = new Map<string, string>();
   private readonly disk = new Map<string, string | undefined>();
+  private readonly diskDirectories = new Map<string, Entries>();
+  private readonly diskDirectoryExists = new Map<string, boolean>();
   private readonly overlays = new Map<string, Overlay>();
   private readonly generated = new Map<string, { path: string; text: string }>();
-  private readonly versions = new Map<string, number>();
+  /** Planned-state inputs that are validated but never written (ignored generator outputs). */
+  private readonly ephemeral = new Map<string, { path: string; text: string }>();
+  private readonly keys = new Map<string, string>();
+  private virtualDirectoryVersion = -1;
+  private virtualDirectories = new Set<string>();
+  private changedDirectories = new Set<string>();
   private hiddenDirectories: string[] = [];
   private suspended = false;
   version = 0;
 
-  constructor(readonly root: string) {
+  constructor(readonly root: string, inputs = new CompilerInputs(true)) {
+    this.inputs = inputs;
     this.caseSensitive = detectCaseSensitivity(root);
   }
 
   key(path: string): string {
+    const cached = this.keys.get(path);
+    if (cached !== undefined) return cached;
     const normalized = resolve(path);
-    return this.caseSensitive ? normalized : normalized.toLowerCase();
+    const key = this.caseSensitive ? normalized : normalized.toLowerCase();
+    this.keys.set(path, key);
+    return key;
   }
 
   samePath(a: string, b: string): boolean {
@@ -146,7 +181,8 @@ export class VirtualFs {
   }
 
   contains(directory: string, path: string): boolean {
-    return isInside(this.key(directory), this.key(path));
+    const parent = this.key(directory), child = this.key(path);
+    return child === parent || child.startsWith(parent.endsWith(sep) ? parent : `${parent}${sep}`);
   }
 
   setHiddenDirectories(directories: string[]): void {
@@ -166,9 +202,33 @@ export class VirtualFs {
     finally { this.suspended = previous; this.version += 1; }
   }
 
+  /** Dependency or library file: outside root, or still under node_modules after workspace-package canonicalization. */
+  isExternal(path: string): boolean {
+    const canonical = this.readPath(path);
+    return !isInside(this.root, canonical) || canonical.split(sep).includes("node_modules");
+  }
+
+  /** Workspace package symlinks must observe canonical overlays, including newly exported files. */
+  private readPath(path: string): string {
+    path = resolve(path);
+    if (!path.split(sep).includes("node_modules")) return path;
+    const cached = this.readPaths.get(path);
+    if (cached) return cached;
+    let ancestor = path;
+    while (!existsSync(ancestor) && dirname(ancestor) !== ancestor) ancestor = dirname(ancestor);
+    let canonical = path;
+    try {
+      const real = resolve(this.inputs.sys.realpath?.(ancestor) ?? realpathSync(ancestor), relative(ancestor, path));
+      if (isInside(this.root, real) && !real.split(sep).includes("node_modules")) canonical = real;
+    } catch { /* unresolved dependency stays on disk */ }
+    this.readPaths.set(path, canonical);
+    return canonical;
+  }
+
   private rawDisk(path: string): string | undefined {
     const key = this.key(path);
     if (!this.disk.has(key)) {
+      if (this.inputs.enabled) { this.inputs.sys.fileExists(path); this.inputs.sys.readFile(path); }
       let text: string | undefined;
       try {
         if (statSync(path).isFile()) text = readFileSync(path, "utf8");
@@ -185,16 +245,20 @@ export class VirtualFs {
   }
 
   hasBom(path: string): boolean {
+    path = this.readPath(path);
     const overlay = this.suspended ? undefined : this.overlays.get(this.key(path));
     if (overlay) return overlay.bom;
     return this.diskText(path)?.startsWith(BOM) ?? false;
   }
 
   readFile(path: string): string | undefined {
+    path = this.readPath(path);
     const key = this.key(path);
     const generated = this.generated.get(key);
     if (generated) return generated.text;
     if (this.isHidden(path)) return undefined;
+    const ephemeral = this.suspended ? undefined : this.ephemeral.get(key);
+    if (ephemeral) return ephemeral.text;
     const overlay = this.suspended ? undefined : this.overlays.get(key);
     if (overlay) return overlay.text ?? undefined;
     const text = this.rawDisk(path);
@@ -205,20 +269,31 @@ export class VirtualFs {
     return this.readFile(path) !== undefined;
   }
 
+  /** Content identity: a document registry can never return a parse of different text (warm serve shares one). */
   scriptVersion(path: string): string {
-    return `${this.suspended ? "o" : "c"}${this.versions.get(this.key(path)) ?? 0}`;
+    const text = this.readFile(path);
+    return text === undefined ? "absent" : `t${contentId(text)}`;
   }
 
   write(path: string, text: string | null, bom = this.hasBom(path)): void {
     const key = this.key(path);
     const existing = this.overlays.get(key);
     this.overlays.set(key, { path: existing?.path ?? resolve(path), text: text?.startsWith(BOM) ? text.slice(1) : text, bom });
-    this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.version += 1;
   }
 
+  /** Validation-only content, e.g. a regenerated ignored route tree; excluded from changes(). */
+  writeEphemeral(path: string, text: string): void {
+    const key = this.key(path);
+    this.ephemeral.set(key, { path: resolve(path), text: text.startsWith(BOM) ? text.slice(1) : text });
+    this.version += 1;
+  }
+
+  ephemeralPaths(): string[] {
+    return [...this.ephemeral.values()].map(item => item.path).sort();
+  }
+
   clearGenerated(): void {
-    for (const key of this.generated.keys()) this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.generated.clear();
     this.version += 1;
   }
@@ -227,18 +302,26 @@ export class VirtualFs {
     if (!this.isHidden(path)) fail("DECLARATION_OUTPUT_UNSUPPORTED", `in-memory build would emit outside a declaration output directory: ${path}`);
     const key = this.key(path);
     this.generated.set(key, { path: resolve(path), text });
-    this.versions.set(key, (this.versions.get(key) ?? 0) + 1);
     this.version += 1;
   }
 
   private diskEntries(directory: string): Entries {
-    const files: string[] = [];
-    const directories: string[] = [];
-    let names: string[];
-    try { names = readdirSync(directory); } catch { return { files, directories }; }
-    for (const name of names) {
+    const key = this.key(directory);
+    const cached = this.diskDirectories.get(key);
+    if (cached) return cached;
+    const result = this.readDiskEntries(directory);
+    this.diskDirectories.set(key, result);
+    return result;
+  }
+
+  private readDiskEntries(directory: string): Entries {
+    const files: string[] = [], directories: string[] = [];
+    let entries;
+    try { entries = readdirSync(directory, { withFileTypes: true }); } catch { return { files, directories }; }
+    for (const entry of entries) {
+      const name = entry.name;
       try {
-        const stat = statSync(resolve(directory, name));
+        const stat = entry.isSymbolicLink() ? statSync(resolve(directory, name)) : entry;
         if (stat.isFile()) files.push(name);
         else if (stat.isDirectory()) directories.push(name);
       } catch { /* dangling symlink */ }
@@ -246,16 +329,42 @@ export class VirtualFs {
     return { files, directories };
   }
 
+  /** Cached metadata must not hide ignored generator inputs outside the Git snapshot. */
+  assertStableMetadata(): void {
+    const changed = this.inputs.changed();
+    if (changed) fail("STALE_PROJECT_INPUTS", `${changed.method} changed during analysis: ${changed.args[0]}${inputQueryDetails(changed)}; compiler inputs include project-discovery reads; retry after those writers/generators settle`);
+  }
+
   private virtualPaths(): string[] {
     const paths = [...this.generated.values()].map((item) => item.path);
     if (!this.suspended) {
       for (const overlay of this.overlays.values()) if (overlay.text !== null) paths.push(overlay.path);
+      for (const item of this.ephemeral.values()) paths.push(item.path);
     }
     return paths;
   }
 
+  private hasVirtualDirectory(path: string): boolean {
+    if (this.virtualDirectoryVersion !== this.version) {
+      this.virtualDirectories = new Set();
+      this.changedDirectories = new Set();
+      const index = (file: string, directories: Set<string>) => {
+        for (let directory = dirname(file); ; directory = dirname(directory)) {
+          const key = this.key(directory);
+          if (directories.has(key)) break;
+          directories.add(key);
+          if (dirname(directory) === directory) break;
+        }
+      };
+      for (const file of this.virtualPaths()) index(file, this.virtualDirectories);
+      if (!this.suspended) for (const item of [...this.overlays.values(), ...this.ephemeral.values()]) index(item.path, this.changedDirectories);
+      this.virtualDirectoryVersion = this.version;
+    }
+    return this.virtualDirectories.has(this.key(path));
+  }
+
   entries(directory: string): Entries {
-    directory = resolve(directory);
+    directory = this.readPath(directory);
     const hidden = this.isHidden(directory);
     const files = new Map<string, string>();
     const directories = new Map<string, string>();
@@ -281,25 +390,35 @@ export class VirtualFs {
   }
 
   directoryExists(path: string): boolean {
-    path = resolve(path);
-    if (this.virtualPaths().some((item) => this.contains(path, item) && !this.samePath(path, item))) return true;
+    path = this.readPath(path);
+    if (this.inputs.enabled) this.inputs.sys.directoryExists(path);
+    if (this.hasVirtualDirectory(path)) return true;
     if (this.isHidden(path)) return false;
-    try { return statSync(path).isDirectory(); } catch { return false; }
+    const key = this.key(path);
+    if (!this.diskDirectoryExists.has(key)) {
+      let exists = false;
+      try { exists = statSync(path).isDirectory(); } catch { /* missing directory */ }
+      this.diskDirectoryExists.set(key, exists);
+    }
+    return this.diskDirectoryExists.get(key)!;
   }
 
   getDirectories(path: string): string[] {
+    this.inputs.sys.getDirectories(path);
     return this.entries(path).directories;
   }
 
   realpath(path: string): string {
+    path = this.readPath(path);
     const key = this.key(path);
-    if (this.generated.has(key) || (!this.suspended && this.overlays.has(key))) return resolve(path);
-    try { return ts.sys.realpath?.(path) ?? path; } catch { return path; }
+    if (this.generated.has(key) || (!this.suspended && (this.overlays.has(key) || this.ephemeral.has(key)))) return resolve(path);
+    try { return this.inputs.sys.realpath?.(path) ?? path; } catch { return path; }
   }
 
   /** Overlay-aware implementation of TypeScript's readDirectory matching. */
   readDirectory(path: string, extensions?: readonly string[], excludes?: readonly string[], includes?: readonly string[], depth?: number): string[] {
     path = resolve(path);
+    this.inputs.sys.readDirectory(path, extensions, excludes, includes, depth);
     const flags = this.caseSensitive ? "" : "i";
     const includeFiles = includes?.length
       ? includes.map((spec) => subPattern(spec, path, "files")).map((pattern) => pattern === undefined ? undefined : new RegExp(`^${pattern}$`, flags))
@@ -347,6 +466,28 @@ export class VirtualFs {
       getDirectories: (path) => this.getDirectories(path),
       realpath: (path) => this.realpath(path),
       useCaseSensitiveFileNames: this.caseSensitive,
+    };
+  }
+
+  /** Delegate ordinary disk IO to native code; intercept every virtual/tombstoned path and parent. */
+  nativeFileSystem(): FileSystem {
+    const virtual = (path: string) => {
+      const canonical = this.readPath(path), key = this.key(canonical);
+      return this.isHidden(canonical) || this.generated.has(key) || (!this.suspended && (this.overlays.has(key) || this.ephemeral.has(key)));
+    };
+    return {
+      readFile: path => { this.inputs.sys.readFile(this.readPath(path)); return virtual(path) ? this.readFile(path) ?? null : undefined; },
+      fileExists: path => { this.inputs.sys.fileExists(this.readPath(path)); return virtual(path) ? this.fileExists(path) : undefined; },
+      directoryExists: path => { this.inputs.sys.directoryExists(this.readPath(path)); return this.hasVirtualDirectory(this.readPath(path)) ? true : this.isHidden(this.readPath(path)) ? false : undefined; },
+      getAccessibleEntries: path => {
+        const canonical = this.readPath(path);
+        this.inputs.sys.getDirectories(canonical);
+        this.inputs.sys.readDirectory(canonical, undefined, undefined, ["*"], 1);
+        // Deleted files must disappear from directory enumeration as well as readFile.
+        const virtual = this.hasVirtualDirectory(canonical);
+        return this.isHidden(canonical) || virtual || this.changedDirectories.has(this.key(canonical)) ? this.entries(canonical) : undefined;
+      },
+      realpath: path => { this.inputs.sys.realpath?.(this.readPath(path)); return virtual(path) ? this.readPath(path) : undefined; },
     };
   }
 

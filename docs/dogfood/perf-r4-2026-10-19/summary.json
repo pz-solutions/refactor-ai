@@ -1,0 +1,1488 @@
+{
+  "before": {
+    "mode": "Cold Node processes, TS7, cache off, OS cache retained; serial historical move order vs atomic batch; plans applied/restored only in disposable /tmp for single mode",
+    "root": "/tmp/ra-target",
+    "commit": "9f66b9dc4c2177cf7141b67984849d89a11688f2",
+    "node": "v24.22.0",
+    "cliHash": "831e1171fb3ca817cac198b11adadfe53617b53459aad7a344cd4db9f713ea63",
+    "variant": "single",
+    "samples": [
+      {
+        "iteration": 1,
+        "statusBefore": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/",
+        "plans": [
+          {
+            "ms": 24785,
+            "machineLoad": [
+              8.07,
+              4.07,
+              3.01
+            ],
+            "id": "a418f91d0ceb79ac4f1eb9c693fc0a9864ca463b35a0a08306373998988265f8",
+            "editHash": "39a024647e3b907bdc690002759a855def9c69d456e9cc804bcf645dbb7bac08",
+            "readCount": 62615,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 6,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 5689,
+              "workspace.program": 3461,
+              "workspace.prepare": 0,
+              "workspace.move": 2055,
+              "workspace.external-projects": 742,
+              "diagnostics.ts7": 8044,
+              "workspace.validate": 10336,
+              "workspace.inputs": 728
+            }
+          },
+          {
+            "ms": 21242,
+            "machineLoad": [
+              7.67,
+              4.31,
+              3.12
+            ],
+            "id": "582d9df89f73897b335e4d404bf7d1cca40cea6c7bd9d06edb591fba41d7a128",
+            "editHash": "95d2bf75f67374cb8fbe0663b5eab2ab0166274180ea17728d2fd9e07b1e10eb",
+            "readCount": 62624,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 14,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4788,
+              "workspace.program": 2846,
+              "workspace.prepare": 0,
+              "workspace.move": 1697,
+              "workspace.external-projects": 575,
+              "diagnostics.ts7": 6629,
+              "workspace.validate": 8607,
+              "workspace.inputs": 773
+            }
+          },
+          {
+            "ms": 21940,
+            "machineLoad": [
+              6.53,
+              4.31,
+              3.15
+            ],
+            "id": "96f30901a9a5d02ebeed82bc726c225189b4aa89fd713b032d8843798772c921",
+            "editHash": "03c69e0d5c154d7a8ad0ffa99883bee8fbd4929499cc6108be830038c91ed218",
+            "readCount": 62611,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 5052,
+              "workspace.program": 3069,
+              "workspace.prepare": 0,
+              "workspace.move": 2051,
+              "workspace.external-projects": 649,
+              "diagnostics.ts7": 6480,
+              "workspace.validate": 8620,
+              "workspace.inputs": 695
+            }
+          },
+          {
+            "ms": 20635,
+            "machineLoad": [
+              6.5,
+              4.5,
+              3.25
+            ],
+            "id": "b348e1842c096f0e89d3453bad2916b22cb4c3a1a754c51f02e3d8e1e8823d88",
+            "editHash": "219bd75b120f8f487888c4e10859767cc18458edb7447ac2125257b3e3f1b6ac",
+            "readCount": 62619,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4792,
+              "workspace.program": 2901,
+              "workspace.prepare": 0,
+              "workspace.move": 1635,
+              "workspace.external-projects": 611,
+              "diagnostics.ts7": 6197,
+              "workspace.validate": 8176,
+              "workspace.inputs": 733
+            }
+          },
+          {
+            "ms": 20927,
+            "machineLoad": [
+              5.57,
+              4.41,
+              3.25
+            ],
+            "id": "d87f8d496c7ce2600a246544f547f7964948df05397e518a49b93785ebf19de5",
+            "editHash": "7117b681cf942fd4f8fe55350c10131b326db0648c58e84f8a32af45f4613ab6",
+            "readCount": 62626,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4731,
+              "workspace.program": 2875,
+              "workspace.prepare": 0,
+              "workspace.move": 1703,
+              "workspace.external-projects": 622,
+              "diagnostics.ts7": 6529,
+              "workspace.validate": 8466,
+              "workspace.inputs": 735
+            }
+          },
+          {
+            "ms": 20889,
+            "machineLoad": [
+              5.18,
+              4.4,
+              3.27
+            ],
+            "id": "d6ecba1642d72011d7b2f9e01893061a32f9b2608a2e29f899149997b87db29b",
+            "editHash": "495491633faad296c73b6e3898ee78f8a9db54d5cfe30e7775bdd2c4a251a208",
+            "readCount": 62625,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4789,
+              "workspace.program": 2913,
+              "workspace.prepare": 0,
+              "workspace.move": 1553,
+              "workspace.external-projects": 593,
+              "diagnostics.ts7": 6540,
+              "workspace.validate": 8526,
+              "workspace.inputs": 729
+            }
+          },
+          {
+            "ms": 21401,
+            "machineLoad": [
+              4.57,
+              4.32,
+              3.27
+            ],
+            "id": "6852148e6bf1093e0b4544b158382f1d4f5fab2a8b2b002e79a660a4e8eb3dfd",
+            "editHash": "426f2809254ced12421921e318fb735f4d1446cd58145828b4376b3d1cfa7eb7",
+            "readCount": 62656,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4756,
+              "workspace.program": 2819,
+              "workspace.prepare": 0,
+              "workspace.move": 2067,
+              "workspace.external-projects": 592,
+              "diagnostics.ts7": 6550,
+              "workspace.validate": 8672,
+              "workspace.inputs": 727
+            }
+          },
+          {
+            "ms": 20978,
+            "machineLoad": [
+              4.61,
+              4.35,
+              3.3
+            ],
+            "id": "02a57ce3d2cc700e1ba9b7fcbfb31a381d253cae9045823b1cde838c034ca774",
+            "editHash": "baf267a0029ed44a1e8261f5f36bc07b21e4c38bc41b9e43352184763a5c34fd",
+            "readCount": 62652,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4561,
+              "workspace.program": 3091,
+              "workspace.prepare": 0,
+              "workspace.move": 1697,
+              "workspace.external-projects": 626,
+              "diagnostics.ts7": 6415,
+              "workspace.validate": 8445,
+              "workspace.inputs": 727
+            }
+          },
+          {
+            "ms": 20834,
+            "machineLoad": [
+              4.44,
+              4.32,
+              3.32
+            ],
+            "id": "98ef86153d689f808ce9c293186945f31133480f75c71a2861307ede6fe633b1",
+            "editHash": "52245f329ef9fa63f882082595cac5273a3a1cee5968c0ccfa427a29c5661cf7",
+            "readCount": 62639,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4687,
+              "workspace.program": 2927,
+              "workspace.prepare": 0,
+              "workspace.move": 1642,
+              "workspace.external-projects": 595,
+              "diagnostics.ts7": 6519,
+              "workspace.validate": 8516,
+              "workspace.inputs": 711
+            }
+          },
+          {
+            "ms": 20708,
+            "machineLoad": [
+              4.68,
+              4.38,
+              3.36
+            ],
+            "id": "477274dacdb7c804257dfb37bffb28aaa4ef82b22638eccaf91c727b3e767868",
+            "editHash": "6f705d7577f03ec9ef71e5d9002aa16272f2b4e512fc6b69d4a7f9ba308e229a",
+            "readCount": 62643,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4731,
+              "workspace.program": 2815,
+              "workspace.prepare": 0,
+              "workspace.move": 1708,
+              "workspace.external-projects": 612,
+              "diagnostics.ts7": 6431,
+              "workspace.validate": 8397,
+              "workspace.inputs": 714
+            }
+          },
+          {
+            "ms": 20804,
+            "machineLoad": [
+              4.43,
+              4.35,
+              3.38
+            ],
+            "id": "8f068b5f4af34d838de2fa979617a5ec98e3ec2ec8370bbd037309811cbb2717",
+            "editHash": "f7d3117bc44fd484bc48630a2c17f5ad913148e4b54355b482e0516db6cd9a57",
+            "readCount": 62651,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4575,
+              "workspace.program": 2934,
+              "workspace.prepare": 0,
+              "workspace.move": 1678,
+              "workspace.external-projects": 607,
+              "diagnostics.ts7": 6531,
+              "workspace.validate": 8591,
+              "workspace.inputs": 669
+            }
+          },
+          {
+            "ms": 20677,
+            "machineLoad": [
+              4.52,
+              4.38,
+              3.41
+            ],
+            "id": "26a7dfbb36e85942cc4c601eb9c156232f59a09b493c9240813f4374a470a8ba",
+            "editHash": "9c2c95eeeb199a609d1170a09cd7e31f993a2c4d9181978b32efe174d76c6b9c",
+            "readCount": 62639,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4595,
+              "workspace.program": 2849,
+              "workspace.prepare": 0,
+              "workspace.move": 1567,
+              "workspace.external-projects": 568,
+              "diagnostics.ts7": 6691,
+              "workspace.validate": 8678,
+              "workspace.inputs": 721
+            }
+          },
+          {
+            "ms": 20665,
+            "machineLoad": [
+              4.81,
+              4.46,
+              3.46
+            ],
+            "id": "f7712ddb8885a4f78b08d8a6ef542a8862734a9b08407238e67f672651d15666",
+            "editHash": "e4c9fe2a26a7cd6f83bd1b6fd332a0315b2059bb4acdbfbd9f0205ba818140a7",
+            "readCount": 62658,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4692,
+              "workspace.program": 2883,
+              "workspace.prepare": 0,
+              "workspace.move": 1646,
+              "workspace.external-projects": 601,
+              "diagnostics.ts7": 6389,
+              "workspace.validate": 8399,
+              "workspace.inputs": 714
+            }
+          }
+        ],
+        "ms": 276485,
+        "finalContents": {
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/event-edit-dialog.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/event-search-params.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx": "eb3a070a80280704834307430a0933b5d0d19c02a3d84c54e3cb096c27561d8e",
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.helpers.test.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.helpers.test.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.helpers.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table.columns.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/page.tsx": "d8b566d75cd83c86d02e1b18cde30b0fe098f431e1db96d63db76d468125d416",
+          "/tmp/ra-target/packages/app-features/package.json": "7a9a84dbd36ff22e661f2ee3c5db4ddf19e38f6fc699bd9699b1c78f22ee7e16",
+          "/tmp/ra-target/packages/app-features/src/events/event-edit-dialog.tsx": "4170c6856606be0c689829e9e707bd2d95b29cc51dc14df127e67f669b19f7dc",
+          "/tmp/ra-target/packages/app-features/src/events/event-search-params.ts": "7e5777577a67a7e87e6f320054c17d7e747ce3a0339b5cb2081c6c548777ab78",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.helpers.test.ts": "6adc80d0881329f0e948921936419ec7df3116320ffb689ecaa83ffb90a0dbc5",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.helpers.ts": "ff482da1bffcfc50a652dc2d6c4ce8dfa4f67bb6388c3e6acf460a07111b15ca",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.sections.tsx": "97f0030e9b750438bee87e248ff148531a4a699c115227a2ecf50b3e130e7a4a",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.test.tsx": "1244c80732b040e91434a23a6d866c808cc01de7e5c9b93e06537202902e1820",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.tsx": "f0df343e8cc0a48643c9d807016017ede577cd01a8d4af239729a198c8ed60cc",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.helpers.test.ts": "2cc8eb8181dfddfebdaa287733e391a658bd72f98850fdf092a9a3fd62a5e4c9",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.helpers.ts": "d140e0e358151eae4e25681c27da1c63cdfeaefd3006d33b74e8161830d86ede",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.test.tsx": "ebe2fb7bdf8583b6c6fa7306f639861473875959bd8bd3d0964e989ebfa386d2",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.tsx": "896e1dc54a5a0eb69595616b7dd4c1f88b7f165ffc6997e3a5b01a2d0994567b",
+          "/tmp/ra-target/packages/app-features/src/events/events-table.columns.test.tsx": "1b581f5d1fb58e683a9a36b82160d9fdc5ad4127cf2af4629f297620d4fde9d6",
+          "/tmp/ra-target/packages/app-features/src/events/events-table.columns.tsx": "09a589caf2415ba8f9679a41fd1e30dd7bb7384b72a644c0379c436f43a98e25"
+        },
+        "statusAfter": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/"
+      },
+      {
+        "iteration": 2,
+        "statusBefore": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/",
+        "plans": [
+          {
+            "ms": 17938,
+            "machineLoad": [
+              4.36,
+              4.38,
+              3.46
+            ],
+            "id": "a418f91d0ceb79ac4f1eb9c693fc0a9864ca463b35a0a08306373998988265f8",
+            "editHash": "39a024647e3b907bdc690002759a855def9c69d456e9cc804bcf645dbb7bac08",
+            "readCount": 62615,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 6,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4062,
+              "workspace.program": 2509,
+              "workspace.prepare": 0,
+              "workspace.move": 1428,
+              "workspace.external-projects": 519,
+              "diagnostics.ts7": 5271,
+              "workspace.validate": 6979,
+              "workspace.inputs": 675
+            }
+          },
+          {
+            "ms": 20770,
+            "machineLoad": [
+              3.79,
+              4.24,
+              3.43
+            ],
+            "id": "582d9df89f73897b335e4d404bf7d1cca40cea6c7bd9d06edb591fba41d7a128",
+            "editHash": "95d2bf75f67374cb8fbe0663b5eab2ab0166274180ea17728d2fd9e07b1e10eb",
+            "readCount": 62624,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 14,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4643,
+              "workspace.program": 2862,
+              "workspace.prepare": 0,
+              "workspace.move": 1675,
+              "workspace.external-projects": 618,
+              "diagnostics.ts7": 6465,
+              "workspace.validate": 8518,
+              "workspace.inputs": 698
+            }
+          },
+          {
+            "ms": 20686,
+            "machineLoad": [
+              3.77,
+              4.21,
+              3.44
+            ],
+            "id": "96f30901a9a5d02ebeed82bc726c225189b4aa89fd713b032d8843798772c921",
+            "editHash": "03c69e0d5c154d7a8ad0ffa99883bee8fbd4929499cc6108be830038c91ed218",
+            "readCount": 62611,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4752,
+              "workspace.program": 2898,
+              "workspace.prepare": 0,
+              "workspace.move": 1676,
+              "workspace.external-projects": 590,
+              "diagnostics.ts7": 6307,
+              "workspace.validate": 8309,
+              "workspace.inputs": 718
+            }
+          },
+          {
+            "ms": 20695,
+            "machineLoad": [
+              4.57,
+              4.34,
+              3.5
+            ],
+            "id": "b348e1842c096f0e89d3453bad2916b22cb4c3a1a754c51f02e3d8e1e8823d88",
+            "editHash": "219bd75b120f8f487888c4e10859767cc18458edb7447ac2125257b3e3f1b6ac",
+            "readCount": 62619,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4703,
+              "workspace.program": 2962,
+              "workspace.prepare": 0,
+              "workspace.move": 1638,
+              "workspace.external-projects": 601,
+              "diagnostics.ts7": 6320,
+              "workspace.validate": 8348,
+              "workspace.inputs": 715
+            }
+          },
+          {
+            "ms": 20702,
+            "machineLoad": [
+              4.61,
+              4.36,
+              3.53
+            ],
+            "id": "d87f8d496c7ce2600a246544f547f7964948df05397e518a49b93785ebf19de5",
+            "editHash": "7117b681cf942fd4f8fe55350c10131b326db0648c58e84f8a32af45f4613ab6",
+            "readCount": 62626,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4682,
+              "workspace.program": 2901,
+              "workspace.prepare": 0,
+              "workspace.move": 1620,
+              "workspace.external-projects": 628,
+              "diagnostics.ts7": 6356,
+              "workspace.validate": 8414,
+              "workspace.inputs": 694
+            }
+          },
+          {
+            "ms": 21237,
+            "machineLoad": [
+              4.35,
+              4.32,
+              3.54
+            ],
+            "id": "d6ecba1642d72011d7b2f9e01893061a32f9b2608a2e29f899149997b87db29b",
+            "editHash": "495491633faad296c73b6e3898ee78f8a9db54d5cfe30e7775bdd2c4a251a208",
+            "readCount": 62625,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4844,
+              "workspace.program": 3051,
+              "workspace.prepare": 0,
+              "workspace.move": 1602,
+              "workspace.external-projects": 630,
+              "diagnostics.ts7": 6549,
+              "workspace.validate": 8704,
+              "workspace.inputs": 669
+            }
+          },
+          {
+            "ms": 21417,
+            "machineLoad": [
+              4.18,
+              4.29,
+              3.54
+            ],
+            "id": "6852148e6bf1093e0b4544b158382f1d4f5fab2a8b2b002e79a660a4e8eb3dfd",
+            "editHash": "426f2809254ced12421921e318fb735f4d1446cd58145828b4376b3d1cfa7eb7",
+            "readCount": 62656,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4755,
+              "workspace.program": 3073,
+              "workspace.prepare": 0,
+              "workspace.move": 2027,
+              "workspace.external-projects": 618,
+              "diagnostics.ts7": 6375,
+              "workspace.validate": 8448,
+              "workspace.inputs": 717
+            }
+          },
+          {
+            "ms": 20741,
+            "machineLoad": [
+              4.18,
+              4.28,
+              3.56
+            ],
+            "id": "02a57ce3d2cc700e1ba9b7fcbfb31a381d253cae9045823b1cde838c034ca774",
+            "editHash": "baf267a0029ed44a1e8261f5f36bc07b21e4c38bc41b9e43352184763a5c34fd",
+            "readCount": 62652,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4748,
+              "workspace.program": 2859,
+              "workspace.prepare": 0,
+              "workspace.move": 1621,
+              "workspace.external-projects": 587,
+              "diagnostics.ts7": 6453,
+              "workspace.validate": 8443,
+              "workspace.inputs": 725
+            }
+          },
+          {
+            "ms": 20415,
+            "machineLoad": [
+              3.82,
+              4.19,
+              3.55
+            ],
+            "id": "98ef86153d689f808ce9c293186945f31133480f75c71a2861307ede6fe633b1",
+            "editHash": "52245f329ef9fa63f882082595cac5273a3a1cee5968c0ccfa427a29c5661cf7",
+            "readCount": 62639,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4606,
+              "workspace.program": 2849,
+              "workspace.prepare": 0,
+              "workspace.move": 1552,
+              "workspace.external-projects": 540,
+              "diagnostics.ts7": 6447,
+              "workspace.validate": 8497,
+              "workspace.inputs": 629
+            }
+          },
+          {
+            "ms": 20852,
+            "machineLoad": [
+              4.05,
+              4.23,
+              3.57
+            ],
+            "id": "477274dacdb7c804257dfb37bffb28aaa4ef82b22638eccaf91c727b3e767868",
+            "editHash": "6f705d7577f03ec9ef71e5d9002aa16272f2b4e512fc6b69d4a7f9ba308e229a",
+            "readCount": 62643,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4705,
+              "workspace.program": 3059,
+              "workspace.prepare": 0,
+              "workspace.move": 1612,
+              "workspace.external-projects": 602,
+              "diagnostics.ts7": 6400,
+              "workspace.validate": 8434,
+              "workspace.inputs": 708
+            }
+          },
+          {
+            "ms": 20065,
+            "machineLoad": [
+              4.21,
+              4.27,
+              3.6
+            ],
+            "id": "8f068b5f4af34d838de2fa979617a5ec98e3ec2ec8370bbd037309811cbb2717",
+            "editHash": "f7d3117bc44fd484bc48630a2c17f5ad913148e4b54355b482e0516db6cd9a57",
+            "readCount": 62651,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4556,
+              "workspace.program": 2839,
+              "workspace.prepare": 0,
+              "workspace.move": 1625,
+              "workspace.external-projects": 572,
+              "diagnostics.ts7": 6078,
+              "workspace.validate": 8033,
+              "workspace.inputs": 666
+            }
+          },
+          {
+            "ms": 20246,
+            "machineLoad": [
+              4.18,
+              4.25,
+              3.61
+            ],
+            "id": "26a7dfbb36e85942cc4c601eb9c156232f59a09b493c9240813f4374a470a8ba",
+            "editHash": "9c2c95eeeb199a609d1170a09cd7e31f993a2c4d9181978b32efe174d76c6b9c",
+            "readCount": 62639,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4648,
+              "workspace.program": 2794,
+              "workspace.prepare": 0,
+              "workspace.move": 1635,
+              "workspace.external-projects": 617,
+              "diagnostics.ts7": 6061,
+              "workspace.validate": 8026,
+              "workspace.inputs": 724
+            }
+          },
+          {
+            "ms": 20084,
+            "machineLoad": [
+              4.36,
+              4.3,
+              3.64
+            ],
+            "id": "f7712ddb8885a4f78b08d8a6ef542a8862734a9b08407238e67f672651d15666",
+            "editHash": "e4c9fe2a26a7cd6f83bd1b6fd332a0315b2059bb4acdbfbd9f0205ba818140a7",
+            "readCount": 62658,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4483,
+              "workspace.program": 2907,
+              "workspace.prepare": 0,
+              "workspace.move": 1692,
+              "workspace.external-projects": 579,
+              "diagnostics.ts7": 5977,
+              "workspace.validate": 7910,
+              "workspace.inputs": 738
+            }
+          }
+        ],
+        "ms": 265848,
+        "finalContents": {
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/event-edit-dialog.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/event-search-params.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx": "eb3a070a80280704834307430a0933b5d0d19c02a3d84c54e3cb096c27561d8e",
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.helpers.test.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.helpers.test.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.helpers.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table.columns.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/page.tsx": "d8b566d75cd83c86d02e1b18cde30b0fe098f431e1db96d63db76d468125d416",
+          "/tmp/ra-target/packages/app-features/package.json": "7a9a84dbd36ff22e661f2ee3c5db4ddf19e38f6fc699bd9699b1c78f22ee7e16",
+          "/tmp/ra-target/packages/app-features/src/events/event-edit-dialog.tsx": "4170c6856606be0c689829e9e707bd2d95b29cc51dc14df127e67f669b19f7dc",
+          "/tmp/ra-target/packages/app-features/src/events/event-search-params.ts": "7e5777577a67a7e87e6f320054c17d7e747ce3a0339b5cb2081c6c548777ab78",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.helpers.test.ts": "6adc80d0881329f0e948921936419ec7df3116320ffb689ecaa83ffb90a0dbc5",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.helpers.ts": "ff482da1bffcfc50a652dc2d6c4ce8dfa4f67bb6388c3e6acf460a07111b15ca",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.sections.tsx": "97f0030e9b750438bee87e248ff148531a4a699c115227a2ecf50b3e130e7a4a",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.test.tsx": "1244c80732b040e91434a23a6d866c808cc01de7e5c9b93e06537202902e1820",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.tsx": "f0df343e8cc0a48643c9d807016017ede577cd01a8d4af239729a198c8ed60cc",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.helpers.test.ts": "2cc8eb8181dfddfebdaa287733e391a658bd72f98850fdf092a9a3fd62a5e4c9",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.helpers.ts": "d140e0e358151eae4e25681c27da1c63cdfeaefd3006d33b74e8161830d86ede",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.test.tsx": "ebe2fb7bdf8583b6c6fa7306f639861473875959bd8bd3d0964e989ebfa386d2",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.tsx": "896e1dc54a5a0eb69595616b7dd4c1f88b7f165ffc6997e3a5b01a2d0994567b",
+          "/tmp/ra-target/packages/app-features/src/events/events-table.columns.test.tsx": "1b581f5d1fb58e683a9a36b82160d9fdc5ad4127cf2af4629f297620d4fde9d6",
+          "/tmp/ra-target/packages/app-features/src/events/events-table.columns.tsx": "09a589caf2415ba8f9679a41fd1e30dd7bb7384b72a644c0379c436f43a98e25"
+        },
+        "statusAfter": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/"
+      },
+      {
+        "iteration": 3,
+        "statusBefore": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/",
+        "plans": [
+          {
+            "ms": 20299,
+            "machineLoad": [
+              5.12,
+              4.48,
+              3.72
+            ],
+            "id": "a418f91d0ceb79ac4f1eb9c693fc0a9864ca463b35a0a08306373998988265f8",
+            "editHash": "39a024647e3b907bdc690002759a855def9c69d456e9cc804bcf645dbb7bac08",
+            "readCount": 62615,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 6,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4544,
+              "workspace.program": 2755,
+              "workspace.prepare": 0,
+              "workspace.move": 1602,
+              "workspace.external-projects": 605,
+              "diagnostics.ts7": 6342,
+              "workspace.validate": 8412,
+              "workspace.inputs": 667
+            }
+          },
+          {
+            "ms": 20466,
+            "machineLoad": [
+              4.9,
+              4.47,
+              3.73
+            ],
+            "id": "582d9df89f73897b335e4d404bf7d1cca40cea6c7bd9d06edb591fba41d7a128",
+            "editHash": "95d2bf75f67374cb8fbe0663b5eab2ab0166274180ea17728d2fd9e07b1e10eb",
+            "readCount": 62624,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 14,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4605,
+              "workspace.program": 2841,
+              "workspace.prepare": 0,
+              "workspace.move": 1630,
+              "workspace.external-projects": 595,
+              "diagnostics.ts7": 6314,
+              "workspace.validate": 8333,
+              "workspace.inputs": 719
+            }
+          },
+          {
+            "ms": 17933,
+            "machineLoad": [
+              4.79,
+              4.47,
+              3.75
+            ],
+            "id": "96f30901a9a5d02ebeed82bc726c225189b4aa89fd713b032d8843798772c921",
+            "editHash": "03c69e0d5c154d7a8ad0ffa99883bee8fbd4929499cc6108be830038c91ed218",
+            "readCount": 62611,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4079,
+              "workspace.program": 2536,
+              "workspace.prepare": 0,
+              "workspace.move": 1421,
+              "workspace.external-projects": 512,
+              "diagnostics.ts7": 5197,
+              "workspace.validate": 7010,
+              "workspace.inputs": 650
+            }
+          },
+          {
+            "ms": 20315,
+            "machineLoad": [
+              4.41,
+              4.41,
+              3.75
+            ],
+            "id": "b348e1842c096f0e89d3453bad2916b22cb4c3a1a754c51f02e3d8e1e8823d88",
+            "editHash": "219bd75b120f8f487888c4e10859767cc18458edb7447ac2125257b3e3f1b6ac",
+            "readCount": 62619,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4628,
+              "workspace.program": 2809,
+              "workspace.prepare": 0,
+              "workspace.move": 1540,
+              "workspace.external-projects": 597,
+              "diagnostics.ts7": 6377,
+              "workspace.validate": 8281,
+              "workspace.inputs": 702
+            }
+          },
+          {
+            "ms": 20172,
+            "machineLoad": [
+              4.2,
+              4.36,
+              3.75
+            ],
+            "id": "d87f8d496c7ce2600a246544f547f7964948df05397e518a49b93785ebf19de5",
+            "editHash": "7117b681cf942fd4f8fe55350c10131b326db0648c58e84f8a32af45f4613ab6",
+            "readCount": 62626,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4631,
+              "workspace.program": 2662,
+              "workspace.prepare": 0,
+              "workspace.move": 1750,
+              "workspace.external-projects": 597,
+              "diagnostics.ts7": 6213,
+              "workspace.validate": 8227,
+              "workspace.inputs": 659
+            }
+          },
+          {
+            "ms": 18679,
+            "machineLoad": [
+              4.04,
+              4.32,
+              3.75
+            ],
+            "id": "d6ecba1642d72011d7b2f9e01893061a32f9b2608a2e29f899149997b87db29b",
+            "editHash": "495491633faad296c73b6e3898ee78f8a9db54d5cfe30e7775bdd2c4a251a208",
+            "readCount": 62625,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4064,
+              "workspace.program": 2518,
+              "workspace.prepare": 0,
+              "workspace.move": 1449,
+              "workspace.external-projects": 530,
+              "diagnostics.ts7": 6044,
+              "workspace.validate": 7839,
+              "workspace.inputs": 668
+            }
+          },
+          {
+            "ms": 19317,
+            "machineLoad": [
+              3.9,
+              4.27,
+              3.74
+            ],
+            "id": "6852148e6bf1093e0b4544b158382f1d4f5fab2a8b2b002e79a660a4e8eb3dfd",
+            "editHash": "426f2809254ced12421921e318fb735f4d1446cd58145828b4376b3d1cfa7eb7",
+            "readCount": 62656,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4066,
+              "workspace.program": 2542,
+              "workspace.prepare": 0,
+              "workspace.move": 1779,
+              "workspace.external-projects": 508,
+              "diagnostics.ts7": 6254,
+              "workspace.validate": 8106,
+              "workspace.inputs": 692
+            }
+          },
+          {
+            "ms": 18214,
+            "machineLoad": [
+              3.3,
+              4.1,
+              3.7
+            ],
+            "id": "02a57ce3d2cc700e1ba9b7fcbfb31a381d253cae9045823b1cde838c034ca774",
+            "editHash": "baf267a0029ed44a1e8261f5f36bc07b21e4c38bc41b9e43352184763a5c34fd",
+            "readCount": 62652,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 5,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4010,
+              "workspace.program": 2504,
+              "workspace.prepare": 0,
+              "workspace.move": 1433,
+              "workspace.external-projects": 526,
+              "diagnostics.ts7": 5759,
+              "workspace.validate": 7460,
+              "workspace.inputs": 671
+            }
+          },
+          {
+            "ms": 18116,
+            "machineLoad": [
+              3.01,
+              4,
+              3.67
+            ],
+            "id": "98ef86153d689f808ce9c293186945f31133480f75c71a2861307ede6fe633b1",
+            "editHash": "52245f329ef9fa63f882082595cac5273a3a1cee5968c0ccfa427a29c5661cf7",
+            "readCount": 62639,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4020,
+              "workspace.program": 2483,
+              "workspace.prepare": 0,
+              "workspace.move": 1506,
+              "workspace.external-projects": 618,
+              "diagnostics.ts7": 5312,
+              "workspace.validate": 7208,
+              "workspace.inputs": 667
+            }
+          },
+          {
+            "ms": 19922,
+            "machineLoad": [
+              2.64,
+              3.85,
+              3.63
+            ],
+            "id": "477274dacdb7c804257dfb37bffb28aaa4ef82b22638eccaf91c727b3e767868",
+            "editHash": "6f705d7577f03ec9ef71e5d9002aa16272f2b4e512fc6b69d4a7f9ba308e229a",
+            "readCount": 62643,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4049,
+              "workspace.program": 2831,
+              "workspace.prepare": 0,
+              "workspace.move": 1616,
+              "workspace.external-projects": 589,
+              "diagnostics.ts7": 6476,
+              "workspace.validate": 8484,
+              "workspace.inputs": 664
+            }
+          },
+          {
+            "ms": 20651,
+            "machineLoad": [
+              2.75,
+              3.79,
+              3.62
+            ],
+            "id": "8f068b5f4af34d838de2fa979617a5ec98e3ec2ec8370bbd037309811cbb2717",
+            "editHash": "f7d3117bc44fd484bc48630a2c17f5ad913148e4b54355b482e0516db6cd9a57",
+            "readCount": 62651,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4688,
+              "workspace.program": 2837,
+              "workspace.prepare": 0,
+              "workspace.move": 1539,
+              "workspace.external-projects": 633,
+              "diagnostics.ts7": 6452,
+              "workspace.validate": 8527,
+              "workspace.inputs": 677
+            }
+          },
+          {
+            "ms": 20666,
+            "machineLoad": [
+              2.6,
+              3.69,
+              3.59
+            ],
+            "id": "26a7dfbb36e85942cc4c601eb9c156232f59a09b493c9240813f4374a470a8ba",
+            "editHash": "9c2c95eeeb199a609d1170a09cd7e31f993a2c4d9181978b32efe174d76c6b9c",
+            "readCount": 62639,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4524,
+              "workspace.program": 2795,
+              "workspace.prepare": 0,
+              "workspace.move": 1630,
+              "workspace.external-projects": 597,
+              "diagnostics.ts7": 6474,
+              "workspace.validate": 8451,
+              "workspace.inputs": 734
+            }
+          },
+          {
+            "ms": 20165,
+            "machineLoad": [
+              3.51,
+              3.81,
+              3.63
+            ],
+            "id": "f7712ddb8885a4f78b08d8a6ef542a8862734a9b08407238e67f672651d15666",
+            "editHash": "e4c9fe2a26a7cd6f83bd1b6fd332a0315b2059bb4acdbfbd9f0205ba818140a7",
+            "readCount": 62658,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 2,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4553,
+              "workspace.program": 2852,
+              "workspace.prepare": 0,
+              "workspace.move": 1661,
+              "workspace.external-projects": 652,
+              "diagnostics.ts7": 6110,
+              "workspace.validate": 7937,
+              "workspace.inputs": 725
+            }
+          }
+        ],
+        "ms": 254915,
+        "finalContents": {
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/event-edit-dialog.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/event-search-params.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx": "eb3a070a80280704834307430a0933b5d0d19c02a3d84c54e3cb096c27561d8e",
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.helpers.test.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-client.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.helpers.test.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.helpers.ts": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table-row.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/events-table.columns.tsx": null,
+          "/tmp/ra-target/apps/web/src/app/[locale]/dashboard/events/page.tsx": "d8b566d75cd83c86d02e1b18cde30b0fe098f431e1db96d63db76d468125d416",
+          "/tmp/ra-target/packages/app-features/package.json": "7a9a84dbd36ff22e661f2ee3c5db4ddf19e38f6fc699bd9699b1c78f22ee7e16",
+          "/tmp/ra-target/packages/app-features/src/events/event-edit-dialog.tsx": "4170c6856606be0c689829e9e707bd2d95b29cc51dc14df127e67f669b19f7dc",
+          "/tmp/ra-target/packages/app-features/src/events/event-search-params.ts": "7e5777577a67a7e87e6f320054c17d7e747ce3a0339b5cb2081c6c548777ab78",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.helpers.test.ts": "6adc80d0881329f0e948921936419ec7df3116320ffb689ecaa83ffb90a0dbc5",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.helpers.ts": "ff482da1bffcfc50a652dc2d6c4ce8dfa4f67bb6388c3e6acf460a07111b15ca",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.sections.tsx": "97f0030e9b750438bee87e248ff148531a4a699c115227a2ecf50b3e130e7a4a",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.test.tsx": "1244c80732b040e91434a23a6d866c808cc01de7e5c9b93e06537202902e1820",
+          "/tmp/ra-target/packages/app-features/src/events/events-client.tsx": "f0df343e8cc0a48643c9d807016017ede577cd01a8d4af239729a198c8ed60cc",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.helpers.test.ts": "2cc8eb8181dfddfebdaa287733e391a658bd72f98850fdf092a9a3fd62a5e4c9",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.helpers.ts": "d140e0e358151eae4e25681c27da1c63cdfeaefd3006d33b74e8161830d86ede",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.test.tsx": "ebe2fb7bdf8583b6c6fa7306f639861473875959bd8bd3d0964e989ebfa386d2",
+          "/tmp/ra-target/packages/app-features/src/events/events-table-row.tsx": "896e1dc54a5a0eb69595616b7dd4c1f88b7f165ffc6997e3a5b01a2d0994567b",
+          "/tmp/ra-target/packages/app-features/src/events/events-table.columns.test.tsx": "1b581f5d1fb58e683a9a36b82160d9fdc5ad4127cf2af4629f297620d4fde9d6",
+          "/tmp/ra-target/packages/app-features/src/events/events-table.columns.tsx": "09a589caf2415ba8f9679a41fd1e30dd7bb7384b72a644c0379c436f43a98e25"
+        },
+        "statusAfter": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/"
+      }
+    ]
+  },
+  "after": {
+    "preparedInputHash": "ff005f3d96150345ff443630a9fce1363c46c8d6bcd5bf2f7862aa0033a81dec",
+    "mode": "Cold Node processes, TS7, cache off, OS cache retained; serial historical move order vs atomic batch; plans applied/restored only in disposable /tmp for single mode",
+    "root": "/tmp/ra-target",
+    "commit": "9f66b9dc4c2177cf7141b67984849d89a11688f2",
+    "node": "v24.22.0",
+    "cliHash": "a08b200dbdbe24c2cdb611f2a63086ff8de82e076ebb769000793bb33dcc0403",
+    "variant": "batch",
+    "samples": [
+      {
+        "iteration": 1,
+        "statusBefore": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/",
+        "plans": [
+          {
+            "ms": 20305,
+            "machineLoad": [
+              2.54,
+              3.31,
+              3.48
+            ],
+            "id": "21b5cf42e8b5903d50f2127eba09cc14e02df265417f4d9caef5fcb1e3aaf780",
+            "editHash": "aa88c59f01a4ac09308d8f58b09502b0910e966ee0f623e87338358d214ac135",
+            "readCount": 51351,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 29,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4459,
+              "workspace.program": 2678,
+              "workspace.prepare": 0,
+              "workspace.move": 1748,
+              "workspace.external-projects": 579,
+              "diagnostics.ts7": 6577,
+              "workspace.validate": 8623,
+              "workspace.inputs": 564
+            }
+          }
+        ],
+        "ms": 20305,
+        "finalContents": {},
+        "statusAfter": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/"
+      },
+      {
+        "iteration": 2,
+        "statusBefore": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/",
+        "plans": [
+          {
+            "ms": 20264,
+            "machineLoad": [
+              2.74,
+              3.31,
+              3.47
+            ],
+            "id": "21b5cf42e8b5903d50f2127eba09cc14e02df265417f4d9caef5fcb1e3aaf780",
+            "editHash": "aa88c59f01a4ac09308d8f58b09502b0910e966ee0f623e87338358d214ac135",
+            "readCount": 51351,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 29,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4574,
+              "workspace.program": 2733,
+              "workspace.prepare": 0,
+              "workspace.move": 1631,
+              "workspace.external-projects": 560,
+              "diagnostics.ts7": 6535,
+              "workspace.validate": 8519,
+              "workspace.inputs": 583
+            }
+          }
+        ],
+        "ms": 20264,
+        "finalContents": {},
+        "statusAfter": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/"
+      },
+      {
+        "iteration": 3,
+        "statusBefore": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/",
+        "plans": [
+          {
+            "ms": 19735,
+            "machineLoad": [
+              3.7,
+              3.48,
+              3.53
+            ],
+            "id": "21b5cf42e8b5903d50f2127eba09cc14e02df265417f4d9caef5fcb1e3aaf780",
+            "editHash": "aa88c59f01a4ac09308d8f58b09502b0910e966ee0f623e87338358d214ac135",
+            "readCount": 51351,
+            "checker": {
+              "name": "ts7",
+              "version": "7.0.2"
+            },
+            "changes": 29,
+            "validation": {
+              "status": "passed",
+              "newDiagnostics": []
+            },
+            "phases": {
+              "workspace.load": 4504,
+              "workspace.program": 2514,
+              "workspace.prepare": 0,
+              "workspace.move": 1686,
+              "workspace.external-projects": 616,
+              "diagnostics.ts7": 6220,
+              "workspace.validate": 8182,
+              "workspace.inputs": 554
+            }
+          }
+        ],
+        "ms": 19735,
+        "finalContents": {},
+        "statusAfter": "M apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts\n M apps/web/src/app/[locale]/dashboard/events/event-search-params.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.helpers.ts\n M apps/web/src/app/[locale]/dashboard/events/events-client.sections.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-client.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table-row.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/events-table.columns.test.tsx\n M apps/web/src/app/[locale]/dashboard/events/page.tsx\n M packages/app-features/package.json\n?? apps/web/src/app/[locale]/dashboard/events/events-adapter.tsx\n?? packages/app-features/src/events/"
+      }
+    ]
+  },
+  "medianSeconds": {
+    "single13": 265.848,
+    "batch1": 20.264
+  },
+  "reductionPercent": 92.37759922963498,
+  "speedup": 13.119226213975525,
+  "allBatchIdsEqual": true,
+  "allSingleFinalContentsEqual": true,
+  "sameChangedPathSet": true,
+  "finalContentDifferences": [
+    "packages/app-features/package.json"
+  ],
+  "note": "Batch and sequential results have identical contents for every source/caller file. Sequential moves publish additional intermediate helper exports; batch publishes only needed entries.",
+  "reproductions": {
+    "only": {
+      "before": {
+        "status": "failed",
+        "error": "MOVE_IMPORT_UNRESOLVED: /tmp/ra-only-target/apps/web/src/app/[locale]/dashboard/events/_hooks/preload-events.ts: '@/lib/preload-authenticated' cannot resolve from /tmp/ra-only-target/packages/app-features/src/events/types.ts; unresolved source-project alias imports: @/lib/preload-authenticated; move its dependency too or retarget the alias before moving"
+      },
+      "after": {
+        "id": "55deee4665eb49b474e778ac45b61425e38972f36c788e87eae4a90f40175fcc",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "diagnosticsAfter": [],
+        "changes": 7,
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        }
+      },
+      "root": "/tmp/ra-only-target",
+      "sourceCommit": "9f66b9dc4c2177cf7141b67984849d89a11688f2",
+      "applied": false
+    },
+    "directoryWithFutureAdapter": {
+      "id": "b0f23a01f463b824781a179cd1861839f1a1262988f7ea25e36da18fd02c570a",
+      "validation": {
+        "status": "passed",
+        "newDiagnostics": []
+      },
+      "diagnosticsAfter": [],
+      "changes": 28,
+      "checker": {
+        "name": "ts7",
+        "version": "7.0.2"
+      },
+      "applied": false
+    }
+  },
+  "verification": {
+    "typecheck": "passed",
+    "test": "326 passed, 0 failed, 1491 assertions, 20 files, 239.81 s",
+    "build": "passed",
+    "skillValidation": "passed",
+    "diffCheck": "passed",
+    "temporaryDotnet": "8.0.426 in /tmp/ra-dotnet8",
+    "npm": "11.19.1",
+    "measuredBinaryMatchesFinalBuild": true
+  }
+}

@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { main, offset } from "../src/cli.ts";
 import { operationHelp } from "../src/help.ts";
@@ -19,10 +19,31 @@ afterEach(async () => {
 });
 
 describe("CLI", () => {
+  test("skill launcher and bundled runner share one complete run record", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "ra-launcher-history-")));
+    roots.push(root);
+    const skill = join(root, "skill"), runtime = join(skill, "assets/runtime");
+    await mkdir(join(skill, "scripts"), { recursive: true });
+    await mkdir(join(runtime, "node_modules"), { recursive: true });
+    await cp(join(import.meta.dir, "../skills/refactor-rename/scripts/refactor.mjs"), join(skill, "scripts/refactor.mjs"));
+    await cp(join(import.meta.dir, "../dist/cli.js"), join(runtime, "cli.mjs"));
+    await symlink(join(import.meta.dir, "../node_modules/typescript"), join(runtime, "node_modules/typescript"), "junction");
+    const project = join(root, "project");
+    await mkdir(project);
+    await writeFile(join(project, "tsconfig.json"), '{"files":["src.ts"]}');
+    await writeFile(join(project, "src.ts"), 'export const value = 1;');
+    const result = spawnSync("node", [join(skill, "scripts/refactor.mjs"), "plan", "rename", "--project", join(project, "tsconfig.json"), "--file", join(project, "src.ts"), "--symbol", "value", "--name", "renamed"], { cwd: root, encoding: "utf8" });
+    expect(result.status).toBe(0);
+    const records = (await readFile(join(project, ".refactor-ai/runs.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: "planned", planId: JSON.parse(result.stdout).id, checker: { name: "ts5" } });
+    expect(records[0].phases.length).toBeGreaterThan(0);
+  });
+
   test("shows command and operation help before reading any project or plan", () => {
     const cli = join(import.meta.dir, "..", "dist", "cli.js");
     const cases = [[], ["--help"], ["-h"], ["help"],
-      ...["capabilities", "plan", "preview", "validate", "apply"].map(command => [command, "--help"]),
+      ...["capabilities", "plan", "preview", "validate", "apply", "serve"].map(command => [command, "--help"]),
       ...Object.keys(operationHelp).map(operation => ["plan", operation, "--help"]),
       ["help", "plan", "rename"], ["plan", "rename", "--project", "/missing/tsconfig.json", "-h"]];
     for (const args of cases) {
@@ -36,7 +57,7 @@ describe("CLI", () => {
     expect(unknown.stderr).toContain("UNSUPPORTED");
   }, 30_000); // Multiple Node startups can exceed Bun's 5-second default on CI.
 
-  test("all eight relocated launchers show help with no assets or setup tools", async () => {
+  test("all relocated launchers show help with no assets or setup tools", async () => {
     const root = await mkdtemp(join(tmpdir(), "refactor-ai-help-offline-"));
     roots.push(root);
     const node = Bun.which("node")!;
@@ -47,7 +68,7 @@ describe("CLI", () => {
       await cp(join(import.meta.dir, "..", "skills", `refactor-${operation}`, "scripts", "refactor.mjs"), launcher);
       for (const args of [["--help"], ["plan", operation, "--help"]]) {
         const result = spawnSync(node, [launcher, ...args], {
-          cwd: skill, encoding: "utf8", env: { ...process.env, PATH: "", TMPDIR: root },
+          cwd: skill, encoding: "utf8", env: { ...process.env, PATH: "", TMPDIR: root, REFACTOR_AI_RUN_LOG: "off" },
         });
         expect(result.stderr).toBe("");
         expect(result.status).toBe(0);
@@ -62,7 +83,7 @@ describe("CLI", () => {
     const root = await mkdtemp(join(tmpdir(), "refactor-ai-tools-help-"));
     roots.push(root);
     const demo = spawnSync(Bun.which("node")!, [join(import.meta.dir, "..", "dist", "demo.js"), "--help"], {
-      cwd: root, encoding: "utf8", env: { ...process.env, PATH: "", TMPDIR: root },
+      cwd: root, encoding: "utf8", env: { ...process.env, PATH: "", TMPDIR: root, REFACTOR_AI_RUN_LOG: "off" },
     });
     expect(demo.status).toBe(0);
     expect(demo.stderr).toBe("");
@@ -109,6 +130,48 @@ describe("CLI", () => {
     expect(offset(text, "1:10")).toBe(9);
     expect(offset(text, "2:1")).toBe(12);
     expect(() => offset(text, "1:12")).toThrow("INVALID_POSITION");
+  });
+
+  test("stdio server accepts sequential plans, recovers after errors and exits on EOF", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "refactor-ai-serve-")));
+    roots.push(root);
+    await writeFile(join(root, "src.ts"), "export const value = 1;\n");
+    await writeFile(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true }, files: ["src.ts"] }));
+    const plan = (name: string) => ["plan", "rename", "--project", "tsconfig.json", "--file", "src.ts", "--at", "1:14", "--name", name, "--out", join(root, ".refactor-ai", `${name}.json`)];
+    const requests = [{ id: 0, args: ["apply"] }, { id: 1, args: plan("one") },
+      { id: 2, args: [...plan("two"), "--root", dirname(root)] }, { id: 3, args: plan("one") }];
+    const result = spawnSync("node", [join(import.meta.dir, "..", "dist/cli.js"), "serve", "--root", root], {
+      input: requests.map(request => JSON.stringify(request)).join("\n") + "\n", encoding: "utf8", timeout: 20_000,
+      env: { ...process.env, REFACTOR_AI_CACHE: "off" },
+    });
+    expect(result.status).toBe(0); expect(result.stderr).toBe("");
+    const responses = result.stdout.trim().split("\n").map(line => JSON.parse(line));
+    expect(responses.map(response => response.status)).toEqual(["failed", "ok", "failed", "ok"]);
+    expect(responses[2].error).toContain("OUTSIDE_ROOT");
+    expect(responses[1].output.id).toBe(responses[3].output.id);
+    expect(await readFile(join(root, "src.ts"), "utf8")).toBe("export const value = 1;\n");
+  }, 30_000);
+
+
+  test("CLI accepts repeatable move pairs and keeps the saved plan independent of pair order", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "refactor-ai-cli-batch-")));
+    roots.push(root);
+    await mkdir(join(root, "src"));
+    const project = join(root, "tsconfig.json");
+    await writeFile(project, JSON.stringify({ compilerOptions: { module: "esnext", moduleResolution: "bundler", skipLibCheck: true }, include: ["src"] }));
+    await writeFile(join(root, "src/a.ts"), 'import { b } from "./b"; export const a = b;');
+    await writeFile(join(root, "src/b.ts"), 'export const b = 1;');
+    const pairs = [join(root, "src/a.ts") + "=" + join(root, "src/ui/a.ts"), join(root, "src/b.ts") + "=" + join(root, "src/ui/b.ts")];
+    const context = { write: (_text: string) => {} };
+    const out = join(root, ".refactor-ai", "batch.json");
+    const args = ["plan", "move-file", "--project", project, "--out", out];
+    await main([...args, ...pairs.flatMap(pair => ["--file", pair])], context);
+    const first = await readFile(out, "utf8");
+    await main([...args, ...pairs.reverse().flatMap(pair => ["--file", pair])], context);
+    expect(await readFile(out, "utf8")).toBe(first);
+    expect(JSON.parse(first).changes).toHaveLength(4);
+    await expect(main([...args, "--file", pairs[0]!, "--file", join(root, "src/b.ts")], context)).rejects.toThrow("INVALID_ARGUMENT");
+    await expect(main([...args, "--file", join(root, "src/a.ts"), "--file", join(root, "src/b.ts")], context)).rejects.toThrow("INVALID_ARGUMENT");
   });
 
   test("rejects invalid arguments and supports a no-op plan", async () => {
@@ -188,6 +251,10 @@ describe("CLI", () => {
     const planned = run(["plan", "rename", "--project", project, "--file", file, "--at", "1:14", "--name", "newName", "--out", plan]);
     expect(planned.stderr).toBe("");
     expect(planned.status).toBe(0);
+    expect(await readFile(file, "utf8")).toContain("oldName");
+    const native = run(["plan", "rename", "--project", project, "--file", file, "--at", "1:14", "--name", "newName", "--checker", "ts7", "--out", plan]);
+    expect(native.status).toBe(1);
+    expect(native.stderr).toContain("CHECKER_UNAVAILABLE");
     expect(await readFile(file, "utf8")).toContain("oldName");
     expect(run(["apply", "--plan", plan]).status).toBe(0);
     expect(await readFile(file, "utf8")).toBe("export const newName = 1;\nconsole.log(newName);\n");

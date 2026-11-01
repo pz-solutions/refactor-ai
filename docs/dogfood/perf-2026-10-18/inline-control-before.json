@@ -1,0 +1,26 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "cli": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/baseline.js",
+  "runs": 1,
+  "mode": "cold process, OS filesystem cache retained",
+  "results": [
+    {
+      "scenario": "inline-reexports",
+      "medianMs": 152686,
+      "minMs": 152686,
+      "maxMs": 152686,
+      "samples": [
+        {
+          "ms": 152686,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {},
+          "notes": [
+            "Kept /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/lib/formatters.ts and its re-exports (remaining module references).",
+            "Validated 261 affected file(s) across 1 project(s): the changed files and their transitive importers in the original and planned module graphs."
+          ]
+        }
+      ]
+    }
+  ]
+}

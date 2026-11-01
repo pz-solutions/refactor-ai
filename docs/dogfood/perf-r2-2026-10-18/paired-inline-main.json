@@ -1,0 +1,398 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "before": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli-before-r2.js",
+  "after": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+  "node": "v22.23.3",
+  "targetCommit": "95ff838d38ee578d771aec17fd29265ed92377d3",
+  "beforeHash": "365c1c14f4ab0a580d6f33921cb2482270e5c183f80acf4d119b411fb247e090",
+  "afterHash": "77f8e071314c83e05d20f86aee4d5aa09f299cf9bc475af446fda16a09fac216",
+  "mode": "paired cold processes; OS cache retained; cache off; no apply",
+  "samples": [
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "before",
+      "ms": 151389,
+      "status": 0,
+      "machineLoad": [
+        10.63,
+        10.93,
+        14.59
+      ],
+      "phases": {
+        "workspace.load": 10384,
+        "workspace.prepare": 5078,
+        "workspace.validate": 46669
+      },
+      "outcome": {
+        "snapshotHash": "7fe71333f1b741c668a3d99ede3f4f2478b256f0441b92511b6a1aecc1c9e15c",
+        "editHash": "5c2c4d56fc913f8ac4e39f64d8500218b7a531830ad3421605abf097c02ca426",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 100
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "after",
+      "ms": 35324,
+      "status": 0,
+      "machineLoad": [
+        12.69,
+        11.49,
+        14.25
+      ],
+      "phases": {
+        "workspace.load": 8442,
+        "workspace.program": 4807,
+        "workspace.prepare": 1291,
+        "workspace.inline": 1275,
+        "workspace.external-projects": 1678,
+        "workspace.validate": 16348,
+        "workspace.inputs": 52
+      },
+      "outcome": {
+        "snapshotHash": "7fe71333f1b741c668a3d99ede3f4f2478b256f0441b92511b6a1aecc1c9e15c",
+        "editHash": "5c2c4d56fc913f8ac4e39f64d8500218b7a531830ad3421605abf097c02ca426",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 100
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "ts7",
+      "ms": 24834,
+      "status": 0,
+      "machineLoad": [
+        11.35,
+        11.29,
+        14.07
+      ],
+      "phases": {
+        "workspace.load": 6971,
+        "workspace.program": 4605,
+        "workspace.prepare": 1304,
+        "workspace.inline": 1179,
+        "workspace.external-projects": 1268,
+        "diagnostics.ts7": 7223,
+        "workspace.validate": 8111,
+        "workspace.inputs": 49
+      },
+      "outcome": {
+        "snapshotHash": "7fe71333f1b741c668a3d99ede3f4f2478b256f0441b92511b6a1aecc1c9e15c",
+        "editHash": "5c2c4d56fc913f8ac4e39f64d8500218b7a531830ad3421605abf097c02ca426",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 100
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "both",
+      "ms": 38217,
+      "status": 0,
+      "machineLoad": [
+        11.76,
+        11.41,
+        14.03
+      ],
+      "phases": {
+        "workspace.load": 8024,
+        "workspace.program": 3838,
+        "workspace.prepare": 1076,
+        "workspace.inline": 1053,
+        "workspace.external-projects": 1159,
+        "diagnostics.ts7": 5226,
+        "workspace.validate": 21445,
+        "workspace.inputs": 45
+      },
+      "outcome": {
+        "snapshotHash": "7fe71333f1b741c668a3d99ede3f4f2478b256f0441b92511b6a1aecc1c9e15c",
+        "editHash": "5c2c4d56fc913f8ac4e39f64d8500218b7a531830ad3421605abf097c02ca426",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 100
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 2,
+      "variant": "before",
+      "ms": 140379,
+      "status": 1,
+      "machineLoad": [
+        9.53,
+        10.87,
+        13.75
+      ],
+      "phases": {
+        "workspace.load": 7486,
+        "workspace.prepare": 4700,
+        "workspace.validate": 43773
+      },
+      "outcome": "{\"status\":\"failed\",\"error\":\"NEW_DIAGNOSTICS: TS2307 /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenants/[id]/tenant-detail-client.tsx: Cannot find module '@/components/invitations/send-invitation-dialog' or its corresponding type declarations.; TS2307 /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenants/[id]/tenant-detail-sections.tsx: Cannot find module '@/components/invitations/linked-accounts-section' or its corresponding type declarations.; TS2307 /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenants/[id]/tenant-detail-sections.tsx: Cannot find module '@/components/invitations/pending-invitations-section' or its corresponding type declarations.\"}"
+    },
+    {
+      "scenario": "inline",
+      "run": 2,
+      "variant": "after",
+      "ms": 46565,
+      "status": 0,
+      "machineLoad": [
+        6.23,
+        9.39,
+        12.81
+      ],
+      "phases": {
+        "workspace.load": 9138,
+        "workspace.program": 8587,
+        "workspace.prepare": 2319,
+        "workspace.inline": 2399,
+        "workspace.external-projects": 2952,
+        "workspace.validate": 20040,
+        "workspace.inputs": 43
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 97
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 2,
+      "variant": "ts7",
+      "ms": 16712,
+      "status": 0,
+      "machineLoad": [
+        13.85,
+        11.12,
+        13.23
+      ],
+      "phases": {
+        "workspace.load": 5126,
+        "workspace.program": 3327,
+        "workspace.prepare": 846,
+        "workspace.inline": 856,
+        "workspace.external-projects": 999,
+        "diagnostics.ts7": 3892,
+        "workspace.validate": 4489,
+        "workspace.inputs": 34
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 97
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 2,
+      "variant": "both",
+      "ms": 29063,
+      "status": 0,
+      "machineLoad": [
+        11.69,
+        10.77,
+        13.08
+      ],
+      "phases": {
+        "workspace.load": 5398,
+        "workspace.program": 3576,
+        "workspace.prepare": 806,
+        "workspace.inline": 736,
+        "workspace.external-projects": 901,
+        "diagnostics.ts7": 5146,
+        "workspace.validate": 16434,
+        "workspace.inputs": 45
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 97
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 3,
+      "variant": "before",
+      "ms": 122959,
+      "status": 0,
+      "machineLoad": [
+        9.02,
+        10.22,
+        12.82
+      ],
+      "phases": {
+        "workspace.load": 7012,
+        "workspace.prepare": 4035,
+        "workspace.validate": 35656
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 97
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 3,
+      "variant": "after",
+      "ms": 24798,
+      "status": 0,
+      "machineLoad": [
+        7.57,
+        9.37,
+        12.2
+      ],
+      "phases": {
+        "workspace.load": 5973,
+        "workspace.program": 3267,
+        "workspace.prepare": 885,
+        "workspace.inline": 853,
+        "workspace.external-projects": 989,
+        "workspace.validate": 11674,
+        "workspace.inputs": 40
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 97
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 3,
+      "variant": "ts7",
+      "ms": 17477,
+      "status": 0,
+      "machineLoad": [
+        6.09,
+        8.87,
+        11.96
+      ],
+      "phases": {
+        "workspace.load": 5302,
+        "workspace.program": 3172,
+        "workspace.prepare": 902,
+        "workspace.inline": 815,
+        "workspace.external-projects": 1004,
+        "diagnostics.ts7": 4508,
+        "workspace.validate": 5129,
+        "workspace.inputs": 39
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 97
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 3,
+      "variant": "both",
+      "ms": 33252,
+      "status": 0,
+      "machineLoad": [
+        5.29,
+        8.51,
+        11.77
+      ],
+      "phases": {
+        "workspace.load": 6191,
+        "workspace.program": 3649,
+        "workspace.prepare": 955,
+        "workspace.inline": 1169,
+        "workspace.external-projects": 987,
+        "diagnostics.ts7": 5690,
+        "workspace.validate": 18942,
+        "workspace.inputs": 45
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 97
+      }
+    }
+  ],
+  "stage": "Final engine. Inline repetition two baseline rejected during concurrent source migration; exclude entire repetition from paired medians."
+}

@@ -59,7 +59,7 @@ const names = (await readdir(join(root, "skills"))).sort();
 const declarations = join(root, "dist", "api-types");
 await buildApiDeclarations(root, declarations);
 const apiRuntime = join(root, "dist", "skill-api-runtime.mjs");
-const apiBuilt = spawnSync("bun", ["build", "src/skill-api-runtime.ts", "--target", "node", "--format", "esm", "--external", "typescript", "--outfile", apiRuntime], { cwd: root, stdio: "inherit" });
+const apiBuilt = spawnSync("bun", ["build", "src/skill-api-runtime.ts", "--target", "node", "--format", "esm", "--external", "typescript", "--external", "typescript7", "--outfile", apiRuntime], { cwd: root, stdio: "inherit" });
 if (apiBuilt.error) throw apiBuilt.error;
 if (apiBuilt.status !== 0) throw new Error("Skill API runtime build failed");
 for (const name of names) {

@@ -1,0 +1,28 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "cli": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+  "runs": 1,
+  "mode": "cold process, OS filesystem cache retained",
+  "results": [
+    {
+      "scenario": "rename",
+      "medianMs": 10281,
+      "minMs": 10281,
+      "maxMs": 10281,
+      "samples": [
+        {
+          "ms": 10281,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "diagnostics.after": 7013
+          },
+          "notes": [
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Validated 23 affected file(s): the changed files and their transitive importers."
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -247,7 +247,9 @@ describe("file create/delete plans", () => {
     const target = join(root, "lib", "Widget.ts");
     const pending = await plan([{ path: target, before: null, after: moved }]);
     await symlink(outside, join(root, "lib"));
-    await expect(applyPlan(pending)).rejects.toThrow("SYMLINK_UNSUPPORTED");
+    // The new link makes the plan stale; a plan made with the link present refuses to write through it.
+    await expect(applyPlan(pending)).rejects.toThrow("STALE_SNAPSHOT");
+    await expect(plan([{ path: target, before: null, after: moved }])).rejects.toThrow(/SYMLINK_UNSUPPORTED|OUTSIDE_ROOT/);
     expect(await readdir(outside)).toEqual([]);
   });
 

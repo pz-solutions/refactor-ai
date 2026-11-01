@@ -1,0 +1,375 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "before": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli-before-r2.js",
+  "after": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+  "node": "v22.23.2",
+  "targetCommit": "80baa6ea5d170dd5b6bcebd9694751b1cb666e54",
+  "beforeHash": "365c1c14f4ab0a580d6f33921cb2482270e5c183f80acf4d119b411fb247e090",
+  "afterHash": "0b8286d2a9ed92989dd85b61ef90948975ab30a5bccb320de496dfb9914ded28",
+  "mode": "paired cold processes; OS cache retained; cache off; no apply",
+  "samples": [
+    {
+      "scenario": "move",
+      "run": 1,
+      "variant": "before",
+      "ms": 123199,
+      "status": 0,
+      "machineLoad": [
+        40.53,
+        30.8,
+        25.13
+      ],
+      "phases": {
+        "workspace.load": 18880,
+        "workspace.prepare": 3876,
+        "workspace.move": 19872,
+        "workspace.validate": 53803
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 1,
+      "variant": "after",
+      "ms": 70622,
+      "status": 0,
+      "machineLoad": [
+        20.47,
+        26.8,
+        24.41
+      ],
+      "phases": {
+        "workspace.load": 11387,
+        "workspace.program": 6083,
+        "workspace.prepare": 1433,
+        "workspace.move": 5627,
+        "workspace.external-projects": 1234,
+        "workspace.validate": 43018,
+        "workspace.inputs": 52
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 1,
+      "variant": "ts7",
+      "ms": 44391,
+      "status": 0,
+      "machineLoad": [
+        15.73,
+        23.96,
+        23.59
+      ],
+      "phases": {
+        "workspace.load": 12246,
+        "workspace.program": 5634,
+        "workspace.prepare": 838,
+        "workspace.move": 3336,
+        "workspace.external-projects": 782,
+        "diagnostics.ts7": 18264,
+        "workspace.validate": 19891,
+        "workspace.inputs": 59
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 1,
+      "variant": "both",
+      "ms": 73308,
+      "status": 0,
+      "machineLoad": [
+        15.95,
+        22.83,
+        23.22
+      ],
+      "phases": {
+        "workspace.load": 10671,
+        "workspace.program": 5416,
+        "workspace.prepare": 949,
+        "workspace.move": 3190,
+        "workspace.external-projects": 748,
+        "diagnostics.ts7": 13383,
+        "workspace.validate": 50443,
+        "workspace.inputs": 48
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 2,
+      "variant": "before",
+      "ms": 103158,
+      "status": 0,
+      "machineLoad": [
+        10.84,
+        19.65,
+        22.08
+      ],
+      "phases": {
+        "workspace.load": 12531,
+        "workspace.prepare": 2845,
+        "workspace.move": 15078,
+        "workspace.validate": 52548
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 2,
+      "variant": "after",
+      "ms": 53488,
+      "status": 0,
+      "machineLoad": [
+        10.95,
+        16.97,
+        20.85
+      ],
+      "phases": {
+        "workspace.load": 10585,
+        "workspace.program": 4861,
+        "workspace.prepare": 978,
+        "workspace.move": 2929,
+        "workspace.external-projects": 684,
+        "workspace.validate": 32030,
+        "workspace.inputs": 46
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 2,
+      "variant": "ts7",
+      "ms": 32734,
+      "status": 0,
+      "machineLoad": [
+        8.46,
+        15.33,
+        20.07
+      ],
+      "phases": {
+        "workspace.load": 9725,
+        "workspace.program": 4107,
+        "workspace.prepare": 927,
+        "workspace.move": 2822,
+        "workspace.external-projects": 633,
+        "diagnostics.ts7": 11706,
+        "workspace.validate": 13160,
+        "workspace.inputs": 50
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 2,
+      "variant": "both",
+      "ms": 74838,
+      "status": 0,
+      "machineLoad": [
+        6.96,
+        14.19,
+        19.51
+      ],
+      "phases": {
+        "workspace.load": 9182,
+        "workspace.program": 4401,
+        "workspace.prepare": 905,
+        "workspace.move": 3022,
+        "workspace.external-projects": 711,
+        "diagnostics.ts7": 14655,
+        "workspace.validate": 54397,
+        "workspace.inputs": 87
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 3,
+      "variant": "before",
+      "ms": 190066,
+      "status": 0,
+      "machineLoad": [
+        10.49,
+        13.53,
+        18.86
+      ],
+      "phases": {
+        "workspace.load": 21277,
+        "workspace.prepare": 9284,
+        "workspace.move": 32066,
+        "workspace.validate": 91704
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 3,
+      "variant": "after",
+      "ms": 112255,
+      "status": 0,
+      "machineLoad": [
+        32.16,
+        22.82,
+        21.53
+      ],
+      "phases": {
+        "workspace.load": 21994,
+        "workspace.program": 12885,
+        "workspace.prepare": 927,
+        "workspace.move": 8269,
+        "workspace.external-projects": 1384,
+        "workspace.validate": 63673,
+        "workspace.inputs": 70
+      },
+      "outcome": {
+        "snapshotHash": "3fb134ff8b2e625d7775ca7fe1029f2bfc2f3aa8fbed58f0b301612d55826bae",
+        "editHash": "e5ad37ff29238a0de114befb6d51fbd38619951a481c2ba33857d70eb493810f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 18
+      }
+    },
+    {
+      "scenario": "move",
+      "run": 3,
+      "variant": "ts7",
+      "ms": 64577,
+      "status": 1,
+      "machineLoad": [
+        25.52,
+        24.21,
+        22.24
+      ],
+      "phases": {
+        "workspace.load": 18956,
+        "workspace.program": 8001,
+        "workspace.prepare": 1396,
+        "workspace.move": 3756,
+        "workspace.external-projects": 757,
+        "diagnostics.ts7": 26084,
+        "workspace.validate": 28345,
+        "workspace.inputs": 8
+      },
+      "outcome": "{\"status\":\"failed\",\"error\":\"STALE_PROJECT_INPUTS: directory membership changed during analysis: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/packages/app-features/src; retry after writers/generators settle\"}"
+    },
+    {
+      "scenario": "move",
+      "run": 3,
+      "variant": "both",
+      "ms": 2053,
+      "status": 1,
+      "machineLoad": [
+        27.79,
+        24.9,
+        22.6
+      ],
+      "phases": {},
+      "outcome": "{\"status\":\"failed\",\"error\":\"INVALID_PACKAGE: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/packages/app-features/package.json\"}"
+    }
+  ],
+  "stage": "Final engine; interrupted by concurrent target merge. Diagnostic provenance only; fresh stable series supersedes these timings."
+}

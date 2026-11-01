@@ -52,8 +52,8 @@ test("API rejects modified and stale plans and reads unchanged CLI-compatible JS
   expect(() => api.preview(modified)).toThrow("INVALID_PLAN");
   await expect(api.apply(modified)).rejects.toThrow("INVALID_PLAN");
   await writeFile(join(root, "new.ts"), "export const extra = 1;\n");
-  await expect(api.validate(plan)).rejects.toThrow("STALE_SNAPSHOT");
-  await expect(api.apply(plan)).rejects.toThrow("STALE_SNAPSHOT");
+  await expect(api.validate(plan)).rejects.toThrow("STALE_PROJECT_INPUTS");
+  await expect(api.apply(plan)).rejects.toThrow("STALE_PROJECT_INPUTS");
   expect(await readFile(file, "utf8")).toContain("function add");
 });
 
@@ -66,6 +66,7 @@ test("language and operation restrictions reject requests before a backend is lo
   await expect(api.plan({ project: "/missing/App.csproj", file: "/missing.cs" })).rejects.toThrow("UNSUPPORTED_LANGUAGE");
   await expect(api.plan({ project: "/missing/tsconfig.json", file: "/missing.ts", operation: "format" })).rejects.toThrow("only supports rename");
   await expect(api.plan({ project: "/missing/tsconfig.json", file: "/missing.ts", targetProject: "/missing/App.csproj" })).rejects.toThrow("UNSUPPORTED_LANGUAGE");
+  await expect(api.plan({ project: "/missing/tsconfig.json", file: "/missing.ts", checker: "unknown" as "ts7" })).rejects.toThrow("INVALID_ARGUMENT: checker");
   expect(loaded).toBe(false);
 });
 

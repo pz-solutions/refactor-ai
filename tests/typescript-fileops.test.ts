@@ -397,7 +397,7 @@ describe("TypeScript cross-project moves", () => {
   });
 
   test("rejects referenced projects without a dedicated declaration output directory", async () => {
-    const w = await monorepo({ "packages/core/tsconfig.json": JSON.stringify({ compilerOptions: { composite: true }, include: ["src"] }) });
+    const w = await monorepo({ "packages/core/tsconfig.json": core({ outDir: undefined }) });
     await expect(analyze({
       project: w.path("packages/app/tsconfig.json"), root: w.root, file: w.path("packages/app/src/models.ts"), operation: "move-type",
       typeName: "Price", target: w.path("packages/core/src/Price.ts"), targetProject: w.path("packages/core/tsconfig.json"),
@@ -473,6 +473,63 @@ describe("TypeScript projects connected only by imports", () => {
     run([tsc, "--project", w.path("Source/tsconfig.json")], w.root);
     run([tsc, "--project", w.path("Target/tsconfig.json")], w.root);
     expect(run([w.path("dist/source/Source/caller.js")], w.root).trim()).toBe("7");
+  });
+
+  for (const source of [{ paths: { "@/*": ["./*"] } }, { paths: { "@/*": ["./*"] }, baseUrl: "." }]) {
+    test(`move-type allows project-local resolution ${JSON.stringify(source)}`, async () => {
+      const w = await sourceAndTarget(source);
+      const result = await analyze({
+        project: w.path("Source/tsconfig.json"), root: w.root, file: w.path("Source/types.ts"), operation: "move-type",
+        typeName: "Widget", target: w.path("Target/Widget.ts"), targetProject: w.path("Target/tsconfig.json"),
+      });
+      expect(result.diagnosticsAfter).toEqual([]);
+      expect(result.notes.join("\n")).toContain("affected file(s) across 2 project(s)");
+      await apply(result.changes);
+      run([tsc, "--project", w.path("Source/tsconfig.json")], w.root);
+      run([tsc, "--project", w.path("Target/tsconfig.json")], w.root);
+    });
+  }
+
+  for (const target of [{ jsx: "preserve" }, { module: "esnext" }, { moduleResolution: "bundler", module: "esnext" }]) {
+    test(`move-type rejects incompatible syntax or extension rules ${JSON.stringify(target)}`, async () => {
+      const w = await sourceAndTarget({}, target);
+      await expect(analyze({
+        project: w.path("Source/tsconfig.json"), root: w.root, file: w.path("Source/types.ts"), operation: "move-type",
+        typeName: "Widget", target: w.path("Target/Widget.ts"), targetProject: w.path("Target/tsconfig.json"),
+      })).rejects.toThrow(/^PROJECT_OPTIONS_INCOMPATIBLE:/);
+    });
+  }
+
+  test("move-type allows different allowImportingTsExtensions when no .ts import is introduced", async () => {
+    const w = await sourceAndTarget({}, { allowImportingTsExtensions: true, noEmit: true });
+    const result = await analyze({
+      project: w.path("Source/tsconfig.json"), root: w.root, file: w.path("Source/types.ts"), operation: "move-type",
+      typeName: "Widget", target: w.path("Target/Widget.ts"), targetProject: w.path("Target/tsconfig.json"),
+    });
+    expect(result.diagnosticsAfter).toEqual([]);
+  });
+
+  test("move-type rejects aliases that resolve to a different compatible declaration in the target", async () => {
+    const paths = { paths: { "@/*": ["./*"] } };
+    const w = await sourceAndTarget(paths, paths,
+      'import type { Dependency } from "@/dependency";\nexport interface Widget { value: Dependency }\nexport class Other { static value = 2; }\n');
+    for (const project of ["Source", "Target"]) await writeFile(w.path(`${project}/dependency.ts`), "export interface Dependency { value: number }\n");
+    await writeFile(w.path("Source/caller.ts"), "export {};\n");
+    await expect(analyze({
+      project: w.path("Source/tsconfig.json"), root: w.root, file: w.path("Source/types.ts"), operation: "move-type",
+      typeName: "Widget", target: w.path("Target/Widget.ts"), targetProject: w.path("Target/tsconfig.json"),
+    })).rejects.toThrow(/^REFERENCES_NOT_PRESERVED:/);
+  });
+
+  test("move-type reports target alias resolution failures as new diagnostics", async () => {
+    const w = await sourceAndTarget({ paths: { "@/*": ["./*"] } }, {},
+      'import type { Dependency } from "@/dependency";\nexport interface Widget { value: Dependency }\nexport class Other { static value = 2; }\n');
+    await writeFile(w.path("Source/dependency.ts"), "export interface Dependency { value: number }\n");
+    await writeFile(w.path("Source/caller.ts"), "export {};\n");
+    await expect(analyze({
+      project: w.path("Source/tsconfig.json"), root: w.root, file: w.path("Source/types.ts"), operation: "move-type",
+      typeName: "Widget", target: w.path("Target/Widget.ts"), targetProject: w.path("Target/tsconfig.json"),
+    })).rejects.toThrow(/^NEW_DIAGNOSTICS: .*TS2307/);
   });
 
   test("still rejects plain-project moves that need references, close a cycle, break rootDir or shift outputs", async () => {

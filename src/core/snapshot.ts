@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { lstat, readdir, readFile, readlink, realpath, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 const excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
@@ -11,6 +13,20 @@ export function sha256(value: string | Uint8Array): string {
 export interface Snapshot {
   files: Record<string, string>;
   hash: string;
+}
+
+/** Labels are hints, never grounds for excluding compiler inputs or edits. */
+export function describeInputPath(path: string): string {
+  const portable = path.split(sep).join("/");
+  return /(^|\/)(next-env\.d\.ts|[^/]+\.gen\.[^/]+|_generated|\.next)(\/|$)/.test(portable)
+    ? `${path} [generated candidate]` : path;
+}
+
+export function snapshotChanges(before: Snapshot, after: Snapshot): string {
+  return [...new Set([...Object.keys(before.files), ...Object.keys(after.files)])].sort()
+    .filter(path => before.files[path] !== after.files[path])
+    .map(path => `${before.files[path] === undefined ? "added" : after.files[path] === undefined ? "removed" : "changed"} ${describeInputPath(path)}`)
+    .join(", ");
 }
 
 export function inside(root: string, file: string): string {
@@ -25,7 +41,8 @@ export function inside(root: string, file: string): string {
   return result;
 }
 
-export async function assertRegularPath(root: string, file: string, allowMissing = false): Promise<void> {
+export async function assertRegularPath(root: string, file: string, allowMissing = false, allowDirectory = false): Promise<void> {
+  if (allowDirectory && resolve(file) === root && (await lstat(root)).isDirectory()) return;
   const target = inside(root, file);
   const parts = relative(root, target).split(sep);
   let current = root;
@@ -40,7 +57,7 @@ export async function assertRegularPath(root: string, file: string, allowMissing
       throw error;
     }
     if (stat.isSymbolicLink()) throw new Error(`SYMLINK_UNSUPPORTED: ${current}`);
-    if (i === parts.length - 1 && !stat.isFile()) throw new Error(`NOT_A_FILE: ${current}`);
+    if (i === parts.length - 1 && !stat.isFile() && !(allowDirectory && stat.isDirectory())) throw new Error(`NOT_A_FILE: ${current}`);
     if (i < parts.length - 1 && !stat.isDirectory()) throw new Error(`NOT_A_DIRECTORY: ${current}`);
   }
 }
@@ -77,20 +94,83 @@ export async function missingDirectories(root: string, file: string): Promise<st
   return missing;
 }
 
+/**
+ * Fingerprint every regular file and symlink under the root. Symlinks are recorded
+ * by their link text, never followed; writes through them are still rejected by
+ * assertRegularPath. Inside a Git work tree only tracked and unignored files count,
+ * so build caches and ignored artifacts neither slow planning nor make plans stale.
+ */
 export async function snapshot(rootPath: string): Promise<Snapshot> {
   const root = await realpath(rootPath);
   const files: Record<string, string> = {};
-  async function walk(directory: string): Promise<void> {
-    const entries = await readdir(directory, { withFileTypes: true });
-    entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    for (const entry of entries) {
-      if (excluded.has(entry.name)) continue;
-      const file = resolve(directory, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(`SYMLINK_UNSUPPORTED: ${file}`);
-      if (entry.isDirectory()) await walk(file);
-      else if (entry.isFile()) files[relative(root, file)] = sha256(await readFile(file));
+  const record = async (file: string, kind: "file" | "symlink") => {
+    files[relative(root, file)] = kind === "symlink" ? `symlink:${await readlink(file)}` : sha256(await readFile(file));
+  };
+  const listed = await gitFiles(root);
+  if (listed) {
+    for (const name of listed) {
+      if (name.split("/").some(part => excluded.has(part))) continue;
+      const file = resolve(root, name);
+      const stat = await lstat(file).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      });
+      if (stat?.isSymbolicLink()) await record(file, "symlink");
+      else if (stat?.isFile()) await record(file, "file");
     }
+  } else {
+    async function walk(directory: string): Promise<void> {
+      const entries = await readdir(directory, { withFileTypes: true });
+      entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      for (const entry of entries) {
+        if (excluded.has(entry.name)) continue;
+        const file = resolve(directory, entry.name);
+        if (entry.isSymbolicLink()) await record(file, "symlink");
+        else if (entry.isDirectory()) await walk(file);
+        else if (entry.isFile()) await record(file, "file");
+      }
+    }
+    await walk(root);
   }
-  await walk(root);
   return { files, hash: sha256(JSON.stringify(files)) };
+}
+
+const run = promisify(execFile);
+
+/** Tracked and unignored untracked files below root, sorted; null outside a Git work tree. */
+async function gitFiles(root: string): Promise<string[] | null> {
+  try {
+    // Without --full-name, paths are relative to cwd (the root); -z disables quoting.
+    const { stdout } = await run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."], {
+      cwd: root, maxBuffer: 1 << 28, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    });
+    try {
+      await run("git", ["check-ignore", "--no-index", "--quiet", "."], { cwd: root, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } });
+      return null; // An ignored project root needs a full snapshot, even with force-tracked files.
+    } catch { /* An unignored Git root uses the tracked and unignored file list. */ }
+    const names = [...new Set(stdout.split("\0").filter(Boolean))].map(name => name.split(sep).join("/"));
+    return names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+  } catch {
+    return null;
+  }
+}
+
+/** Keep plans, journals and locks out of the user's version control without touching their ignore files. */
+export const stateIgnoreText = "*\n!config.json\n!equivalents.json\n!port-route.json\n!port-route/\n!port-route/**\n!.gitignore\n";
+/** Earlier generated contents; upgraded in place, custom ignore files are preserved. */
+const legacyIgnoreTexts = ["*\n", "*\n!equivalents.json\n!.gitignore\n", "*\n!equivalents.json\n!port-route.json\n!port-route/\n!port-route/**\n!.gitignore\n"];
+
+export async function ignoreStateDirectory(stateDirectory: string): Promise<void> {
+  const path = resolve(stateDirectory, ".gitignore");
+  const stat = await lstat(path).catch(error => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (stat?.isSymbolicLink()) throw new Error("SYMLINK_UNSUPPORTED: state .gitignore");
+  if (stat?.isFile()) {
+    if (legacyIgnoreTexts.includes(await readFile(path, "utf8"))) await writeFile(path, stateIgnoreText);
+    return;
+  }
+  try { await writeFile(path, stateIgnoreText, { flag: "wx", mode: 0o644 }); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
 }

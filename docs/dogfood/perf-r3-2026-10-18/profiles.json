@@ -1,0 +1,351 @@
+{
+  "note": "Separate CPU-profiled successful plans; overhead included, excluded from paired medians. Node main thread only; native Go CPU is not included and blocking IPC appears in sampled stacks. Full profiles in /tmp/refactor-r3-profile.",
+  "samples": [
+    {
+      "scenario": "in-package",
+      "validation": {
+        "status": "passed",
+        "newDiagnostics": []
+      },
+      "planId": "4c68bf49e24cedc3e80e7db2db1332465de45c22a18ea9720d097e8d9cb3f9ad",
+      "files": 22,
+      "readSet": 64648,
+      "durationMs": 28592,
+      "phases": {
+        "workspace.load": 9214,
+        "workspace.program": 4064,
+        "workspace.prepare": 0,
+        "workspace.move": 2501,
+        "workspace.external-projects": 560,
+        "diagnostics.ts7": 8725,
+        "workspace.validate": 9804,
+        "workspace.inputs": 744
+      },
+      "topSamples": [
+        {
+          "function": "read",
+          "url": "",
+          "line": 0,
+          "sampledMs": 8190
+        },
+        {
+          "function": "(garbage collector)",
+          "url": "",
+          "line": 0,
+          "sampledMs": 4115
+        },
+        {
+          "function": "scan",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 12794,
+          "sampledMs": 902
+        },
+        {
+          "function": "readPath",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+          "line": 2078,
+          "sampledMs": 622
+        },
+        {
+          "function": "resolve",
+          "url": "node:path",
+          "line": 1260,
+          "sampledMs": 406
+        },
+        {
+          "function": "update",
+          "url": "node:internal/crypto/hash",
+          "line": 132,
+          "sampledMs": 403
+        },
+        {
+          "function": "realpath",
+          "url": "",
+          "line": 0,
+          "sampledMs": 398
+        },
+        {
+          "function": "CompilerInputs.sys.<computed>",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+          "line": 1801,
+          "sampledMs": 338
+        },
+        {
+          "function": "doJSDocScan",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 39066,
+          "sampledMs": 324
+        },
+        {
+          "function": "RegExp: \\/\\/|(?:^|\\/)\\.\\.?(?:$|\\/)",
+          "url": "",
+          "line": 0,
+          "sampledMs": 311
+        },
+        {
+          "function": "openSync",
+          "url": "node:fs",
+          "line": 559,
+          "sampledMs": 272
+        },
+        {
+          "function": "internIdentifier",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 33998,
+          "sampledMs": 257
+        },
+        {
+          "function": "stat",
+          "url": "",
+          "line": 0,
+          "sampledMs": 222
+        },
+        {
+          "function": "getIdentifierToken",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 12735,
+          "sampledMs": 193
+        },
+        {
+          "function": "findSourceFileWorker",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 128602,
+          "sampledMs": 187
+        },
+        {
+          "function": "key",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+          "line": 2045,
+          "sampledMs": 184
+        },
+        {
+          "function": "speculationHelper",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 33719,
+          "sampledMs": 175
+        },
+        {
+          "function": "open",
+          "url": "",
+          "line": 0,
+          "sampledMs": 171
+        },
+        {
+          "function": "sourceFile",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+          "line": 3091,
+          "sampledMs": 167
+        },
+        {
+          "function": "slice",
+          "url": "node:buffer",
+          "line": 640,
+          "sampledMs": 164
+        },
+        {
+          "function": "pathComponents",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 8829,
+          "sampledMs": 156
+        },
+        {
+          "function": "statSync",
+          "url": "node:fs",
+          "line": 1745,
+          "sampledMs": 150
+        },
+        {
+          "function": "(idle)",
+          "url": "",
+          "line": 0,
+          "sampledMs": 138
+        },
+        {
+          "function": "iterateCommentRanges",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 11917,
+          "sampledMs": 135
+        },
+        {
+          "function": "parseTagComments",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 39320,
+          "sampledMs": 133
+        }
+      ]
+    },
+    {
+      "scenario": "cross-package",
+      "validation": {
+        "status": "passed",
+        "newDiagnostics": []
+      },
+      "planId": "8b4232edaf9ffbd426c30068ed11332cbb058d1dde2794ec4420865bb57c4f20",
+      "files": 10,
+      "readSet": 62965,
+      "durationMs": 22432,
+      "phases": {
+        "workspace.load": 5194,
+        "workspace.program": 3173,
+        "workspace.prepare": 0,
+        "workspace.move": 2054,
+        "workspace.external-projects": 944,
+        "diagnostics.ts7": 5944,
+        "workspace.validate": 8688,
+        "workspace.inputs": 831
+      },
+      "topSamples": [
+        {
+          "function": "read",
+          "url": "",
+          "line": 0,
+          "sampledMs": 5516
+        },
+        {
+          "function": "(garbage collector)",
+          "url": "",
+          "line": 0,
+          "sampledMs": 3445
+        },
+        {
+          "function": "scan",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 12794,
+          "sampledMs": 762
+        },
+        {
+          "function": "readPath",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+          "line": 2078,
+          "sampledMs": 538
+        },
+        {
+          "function": "update",
+          "url": "node:internal/crypto/hash",
+          "line": 132,
+          "sampledMs": 404
+        },
+        {
+          "function": "realpath",
+          "url": "",
+          "line": 0,
+          "sampledMs": 389
+        },
+        {
+          "function": "resolve",
+          "url": "node:path",
+          "line": 1260,
+          "sampledMs": 322
+        },
+        {
+          "function": "CompilerInputs.sys.<computed>",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+          "line": 1801,
+          "sampledMs": 314
+        },
+        {
+          "function": "RegExp: \\/\\/|(?:^|\\/)\\.\\.?(?:$|\\/)",
+          "url": "",
+          "line": 0,
+          "sampledMs": 259
+        },
+        {
+          "function": "doJSDocScan",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 39066,
+          "sampledMs": 246
+        },
+        {
+          "function": "openSync",
+          "url": "node:fs",
+          "line": 559,
+          "sampledMs": 222
+        },
+        {
+          "function": "internIdentifier",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 33998,
+          "sampledMs": 194
+        },
+        {
+          "function": "stat",
+          "url": "",
+          "line": 0,
+          "sampledMs": 191
+        },
+        {
+          "function": "open",
+          "url": "",
+          "line": 0,
+          "sampledMs": 176
+        },
+        {
+          "function": "slice",
+          "url": "node:buffer",
+          "line": 640,
+          "sampledMs": 173
+        },
+        {
+          "function": "findSourceFileWorker",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 128602,
+          "sampledMs": 148
+        },
+        {
+          "function": "sourceFile",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+          "line": 3091,
+          "sampledMs": 138
+        },
+        {
+          "function": "speculationHelper",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 33719,
+          "sampledMs": 136
+        },
+        {
+          "function": "iterateCommentRanges",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 11917,
+          "sampledMs": 134
+        },
+        {
+          "function": "getIdentifierToken",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 12735,
+          "sampledMs": 128
+        },
+        {
+          "function": "(idle)",
+          "url": "",
+          "line": 0,
+          "sampledMs": 119
+        },
+        {
+          "function": "createNodeArray",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 33954,
+          "sampledMs": 118
+        },
+        {
+          "function": "createNodeArray",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 25500,
+          "sampledMs": 117
+        },
+        {
+          "function": "scanJsDocToken",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/node_modules/typescript/lib/typescript.js",
+          "line": 14438,
+          "sampledMs": 115
+        },
+        {
+          "function": "key",
+          "url": "file:///home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+          "line": 2045,
+          "sampledMs": 110
+        }
+      ]
+    }
+  ]
+}

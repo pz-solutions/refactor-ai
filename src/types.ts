@@ -1,15 +1,46 @@
-export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type";
+import type { ReadSetEntry } from "./core/read-set";
+export type Operation = "rename" | "imports" | "format" | "extract-function" | "extract-variable" | "rename-file" | "sync-namespace" | "move-type" | "move-file" | "inline-reexports" | "retarget-import" | "port-route";
 
 export interface RefactorRequest {
+  /** Opt-in native diagnostics; edits always use pinned TypeScript 5.9.3. */
+  checker?: "ts5" | "ts7" | "both";
+  /** TypeScript rename: select a top-level declaration instead of a position. */
+  symbol?: string;
+  /** TypeScript rename: propagate unaliased public exports through loaded consumers. */
+  public?: boolean;
+  /**
+   * Absent: full verification (program diagnostics). "bindings": edits,
+   * prechecks, reference preservation and changed files' syntax and
+   * import/export bindings, without program diagnostics (TypeScript only).
+   */
+  verify?: "bindings";
   project: string;
   root: string;
   file: string;
+  /** Atomic inline-reexports batch, sorted before planning. */
+  files?: string[];
+  /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
+  moves?: { file: string; target: string }[];
+  /** TS-style globs relative to each moved directory; excluded adapters remain. */
+  exclude?: string[];
   operation: Operation;
+  /** Retain the source shim after inline-reexports. */
+  keep?: boolean;
+  /** Module specifiers for retarget-import; exact matches only. */
+  from?: string;
+  to?: string;
+  /** retarget-import: export names; move-file: module or module#Export mappings. */
+  map?: Record<string, string>;
+  only?: string[];
+  /** Report affected test mocks (default), or add a parallel destination mock. */
+  mocks?: "report" | "add";
+  /** Internal marker: file defaults to project directory when scope is omitted. */
+  projectScope?: boolean;
   position?: number;
   end?: number;
   newName?: string;
   mode?: "sort" | "remove-unused";
-  /** Absolute destination file path for move-type. */
+  /** Absolute destination file/directory path for move-type or move-file. */
   target?: string;
   /** Absolute destination .csproj or TS/JS config for cross-project moves. */
   targetProject?: string;
@@ -17,6 +48,10 @@ export interface RefactorRequest {
   typeName?: string;
   /** Override the C# project's root namespace when its convention is not in MSBuild. */
   rootNamespace?: string;
+  /** port-route: TanStack Start routes directory; defaults to the config's start.routes. */
+  startRoutes?: string;
+  /** port-route: project configuration; defaults to <root>/.refactor-ai/port-route.json. */
+  config?: string;
 }
 
 export interface Diagnostic {
@@ -33,12 +68,21 @@ export interface FileChange {
 }
 
 export interface BackendResult {
+  /** Exact compiler filesystem observations, including negative probes. */
+  readSet?: ReadSetEntry[];
+  checker?: CheckerIdentity;
   backend: string;
   version: string;
   changes: FileChange[];
   diagnosticsBefore: Diagnostic[];
   diagnosticsAfter: Diagnostic[];
   notes: string[];
+}
+
+export interface CheckerIdentity {
+  name: "ts5" | "ts7" | "both";
+  version: string;
+  comparedWith?: string;
 }
 
 export interface Capability {

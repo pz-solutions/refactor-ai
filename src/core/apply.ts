@@ -1,8 +1,8 @@
 import { lstat, mkdir, open, readFile, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { assertFresh, assertPlanShape, changeKind, newDiagnostics, type ChangeKind, type Plan } from "./plan.ts";
-import { assertRegularPath, missingDirectories, sha256 } from "./snapshot.ts";
+import { assertRegularPath, ignoreStateDirectory, missingDirectories, sha256 } from "./snapshot.ts";
 
 interface Journal {
   schemaVersion: 2;
@@ -86,7 +86,18 @@ async function order(plan: Plan): Promise<Step[]> {
   return steps.toSorted((a, b) => rank(a) - rank(b));
 }
 
-export async function applyPlan(plan: Plan): Promise<{ status: "applied"; files: string[]; journal: string | null }> {
+/** Best-effort empty source cleanup after a successful, journaled move. */
+async function pruneMoveDirectories(plan: Plan): Promise<void> {
+  if (!["move-file", "move-type", "rename-file", "port-route"].includes(plan.request.operation)) return;
+  const root = plan.request.root, projectDirectory = dirname(plan.request.project);
+  const directories = new Set<string>();
+  for (const change of plan.changes.filter(change => change.after === null)) {
+    for (let directory = dirname(change.path); directory !== root && directory !== projectDirectory && directory.startsWith(root + sep); directory = dirname(directory)) directories.add(directory);
+  }
+  for (const directory of [...directories].sort((a, b) => b.length - a.length)) await rmdir(directory).catch(() => {});
+}
+
+export async function applyPlan(plan: Plan, compilerBase?: string): Promise<{ status: "applied"; files: string[]; journal: string | null }> {
   assertPlanShape(plan);
   if (plan.validation.status !== "passed" || newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter).length) {
     throw new Error("VALIDATION_FAILED: plan adds compiler errors");
@@ -96,6 +107,7 @@ export async function applyPlan(plan: Plan): Promise<{ status: "applied"; files:
   await mkdir(stateDirectory, { recursive: true });
   // Reserved state directory may not be redirected outside the project.
   if ((await lstat(stateDirectory)).isSymbolicLink()) throw new Error("SYMLINK_UNSUPPORTED: state directory");
+  await ignoreStateDirectory(stateDirectory);
   const lock = resolve(stateDirectory, "apply.lock");
   try { await mkdir(lock); }
   catch (error) {
@@ -115,7 +127,7 @@ export async function applyPlan(plan: Plan): Promise<{ status: "applied"; files:
   };
   const saveJournal = () => atomicWrite(journalPath, JSON.stringify(journal, null, 2) + "\n");
   try {
-    await assertFresh(plan);
+    await assertFresh(plan, compilerBase);
     if (!plan.changes.length) return { status: "applied", files: [], journal: null };
     const steps = await order(plan);
     // Populate recovery metadata for older plans too, before any source writes.
@@ -146,6 +158,7 @@ export async function applyPlan(plan: Plan): Promise<{ status: "applied"; files:
     }
     journal.status = "applied";
     await saveJournal();
+    await pruneMoveDirectories(plan);
     return { status: "applied", files: written.map(s => s.change.path), journal: journalPath };
   } catch (error) {
     let recoveryNeeded = false;

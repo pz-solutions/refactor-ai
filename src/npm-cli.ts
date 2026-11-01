@@ -1,3 +1,4 @@
+import { logRun, updateRun } from "./run-log";
 import { helpRequested, renderHelp } from "./help.ts";
 import type { BackendLoader, Operation } from "./types.ts";
 import type { Language } from "./languages.ts";
@@ -13,9 +14,14 @@ export interface NpmCliOptions {
 
 /** Answer help before invoking a refactoring engine or building the .NET helper. */
 export async function runNpmCli(args: string[], options: NpmCliOptions): Promise<void> {
+  return logRun(args, () => executeNpmCli(args, options));
+}
+
+async function executeNpmCli(args: string[], options: NpmCliOptions): Promise<void> {
   try {
     if (Number(process.versions.node.split(".")[0]) < 22) throw new Error("UNSUPPORTED_RUNTIME: Node.js 22+ is required");
     const invocation = `npx ${options.packageName}`;
+    if (args[0] === "plan" && options.operation) updateRun({ op: options.operation });
     if (helpRequested(args)) {
       const topics = args[0] === "help" ? args.slice(1) : args;
       const command = topics[0]?.startsWith("-") ? undefined : topics[0];
@@ -40,8 +46,9 @@ export async function runNpmCli(args: string[], options: NpmCliOptions): Promise
       if (!normalized[1] || normalized[1].startsWith("-")) normalized.splice(1, 0, options.operation);
       else if (normalized[1] !== options.operation) throw new Error(`UNSUPPORTED: this tool only supports ${options.operation}`);
     }
-    await runCli(normalized, { invocation, operation: options.operation, language: options.language, loadBackend: options.loadBackend, toolkitRoot: options.packageRoot });
+    await runCli(normalized, { runLog: false, invocation, operation: options.operation, language: options.language, loadBackend: options.loadBackend, toolkitRoot: options.packageRoot });
   } catch (error) {
+    updateRun({ status: "failed", exitCode: 1, errorCode: /^(?:Error: )?([A-Z][A-Z0-9_]+):/.exec(String(error))?.[1] ?? "UNKNOWN_ERROR" });
     console.error(JSON.stringify({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
     process.exitCode = 1;
   }

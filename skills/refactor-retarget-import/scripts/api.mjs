@@ -1,0 +1,1500 @@
+// scripts/skill-api.ts
+import { dirname as dirname5, join as join3, resolve as resolve7 } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+// src/api.ts
+import { readFile as readFile5, realpath as realpath3 } from "node:fs/promises";
+import { dirname as dirname3, resolve as resolve5 } from "node:path";
+
+// src/core/apply.ts
+import { lstat as lstat3, mkdir, open, readFile as readFile3, rename, rm, rmdir, stat, unlink, writeFile as writeFile2 } from "node:fs/promises";
+import { dirname as dirname2, resolve as resolve3, sep as sep3 } from "node:path";
+import { randomUUID } from "node:crypto";
+
+// src/core/read-set.ts
+import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+var inputMethods = ["readFile", "fileExists", "directoryExists", "getDirectories", "readDirectory", "realpath"];
+var inputHash = (value) => createHash("sha256").update(typeof value === "string" ? `string:${value}` : JSON.stringify(value) ?? "undefined").digest("hex");
+function inputDigest(method, value) {
+  if (method === "getDirectories" && Array.isArray(value)) {
+    value = value.filter((path) => typeof path !== "string" || path.replaceAll("\\", "/").split("/").at(-1) !== ".refactor-ai");
+  }
+  return inputHash(value);
+}
+function assertReadSetShape(inputs) {
+  if (!Array.isArray(inputs) || inputs.some((input) => !input || !inputMethods.includes(input.method) || !Array.isArray(input.args) || typeof input.args[0] !== "string" || !/^[a-f0-9]{64}$/.test(input.digest))) {
+    throw new Error("INVALID_PLAN: malformed read set");
+  }
+}
+function inputQueryDetails(input) {
+  if (input.method !== "readDirectory")
+    return "";
+  const [, extensions, excludes, includes, depth] = input.args;
+  return ` (query: ${JSON.stringify({ extensions, excludes, includes, depth })})`;
+}
+async function assertReadSetFresh(inputs, compilerBase) {
+  assertReadSetShape(inputs);
+  if (!inputs.length)
+    return;
+  const load = createRequire(compilerBase ?? import.meta.url);
+  const ts = load("typescript");
+  for (const input of inputs) {
+    const method = ts.sys[input.method];
+    if (!method || inputDigest(input.method, method(...input.args.map((value) => value === null ? undefined : value))) !== input.digest) {
+      throw new Error(`STALE_PROJECT_INPUTS: ${input.method} changed: ${input.args[0]}${inputQueryDetails(input)}; compiler inputs include project-discovery reads; create a new plan after those writers/generators settle`);
+    }
+  }
+}
+
+// src/core/plan.ts
+import { lstat as lstat2, readFile as readFile2, realpath as realpath2 } from "node:fs/promises";
+import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve2, sep as sep2 } from "node:path";
+// node_modules/diff/libesm/diff/base.js
+class Diff {
+  diff(oldStr, newStr, options = {}) {
+    let callback;
+    if (typeof options === "function") {
+      callback = options;
+      options = {};
+    } else if ("callback" in options) {
+      callback = options.callback;
+    }
+    const oldString = this.castInput(oldStr, options);
+    const newString = this.castInput(newStr, options);
+    const oldTokens = this.removeEmpty(this.tokenize(oldString, options));
+    const newTokens = this.removeEmpty(this.tokenize(newString, options));
+    return this.diffWithOptionsObj(oldTokens, newTokens, options, callback);
+  }
+  diffWithOptionsObj(oldTokens, newTokens, options, callback) {
+    var _a;
+    const done = (value) => {
+      value = this.postProcess(value, options);
+      if (callback) {
+        setTimeout(function() {
+          callback(value);
+        }, 0);
+        return;
+      } else {
+        return value;
+      }
+    };
+    const newLen = newTokens.length, oldLen = oldTokens.length;
+    let editLength = 1;
+    let maxEditLength = newLen + oldLen;
+    if (options.maxEditLength != null) {
+      maxEditLength = Math.min(maxEditLength, options.maxEditLength);
+    }
+    const maxExecutionTime = (_a = options.timeout) !== null && _a !== undefined ? _a : Infinity;
+    const abortAfterTimestamp = Date.now() + maxExecutionTime;
+    const bestPath = [{ oldPos: -1, lastComponent: undefined }];
+    let newPos = this.extractCommon(bestPath[0], newTokens, oldTokens, 0, options);
+    if (bestPath[0].oldPos + 1 >= oldLen && newPos + 1 >= newLen) {
+      return done(this.buildValues(bestPath[0].lastComponent, newTokens, oldTokens));
+    }
+    let minDiagonalToConsider = -Infinity, maxDiagonalToConsider = Infinity;
+    const execEditLength = () => {
+      for (let diagonalPath = Math.max(minDiagonalToConsider, -editLength);diagonalPath <= Math.min(maxDiagonalToConsider, editLength); diagonalPath += 2) {
+        let basePath;
+        const removePath = bestPath[diagonalPath - 1], addPath = bestPath[diagonalPath + 1];
+        if (removePath) {
+          bestPath[diagonalPath - 1] = undefined;
+        }
+        let canAdd = false;
+        if (addPath) {
+          const addPathNewPos = addPath.oldPos - diagonalPath;
+          canAdd = addPath && 0 <= addPathNewPos && addPathNewPos < newLen;
+        }
+        const canRemove = removePath && removePath.oldPos + 1 < oldLen;
+        if (!canAdd && !canRemove) {
+          bestPath[diagonalPath] = undefined;
+          continue;
+        }
+        if (!canRemove || canAdd && removePath.oldPos < addPath.oldPos) {
+          basePath = this.addToPath(addPath, true, false, 0, options);
+        } else {
+          basePath = this.addToPath(removePath, false, true, 1, options);
+        }
+        newPos = this.extractCommon(basePath, newTokens, oldTokens, diagonalPath, options);
+        if (basePath.oldPos + 1 >= oldLen && newPos + 1 >= newLen) {
+          return done(this.buildValues(basePath.lastComponent, newTokens, oldTokens)) || true;
+        } else {
+          bestPath[diagonalPath] = basePath;
+          if (basePath.oldPos + 1 >= oldLen) {
+            maxDiagonalToConsider = Math.min(maxDiagonalToConsider, diagonalPath - 1);
+          }
+          if (newPos + 1 >= newLen) {
+            minDiagonalToConsider = Math.max(minDiagonalToConsider, diagonalPath + 1);
+          }
+        }
+      }
+      editLength++;
+    };
+    if (callback) {
+      (function exec() {
+        setTimeout(function() {
+          if (editLength > maxEditLength || Date.now() > abortAfterTimestamp) {
+            return callback(undefined);
+          }
+          if (!execEditLength()) {
+            exec();
+          }
+        }, 0);
+      })();
+    } else {
+      while (editLength <= maxEditLength && Date.now() <= abortAfterTimestamp) {
+        const ret = execEditLength();
+        if (ret) {
+          return ret;
+        }
+      }
+    }
+  }
+  addToPath(path, added, removed, oldPosInc, options) {
+    const last = path.lastComponent;
+    if (last && !options.oneChangePerToken && last.added === added && last.removed === removed) {
+      return {
+        oldPos: path.oldPos + oldPosInc,
+        lastComponent: { count: last.count + 1, added, removed, previousComponent: last.previousComponent }
+      };
+    } else {
+      return {
+        oldPos: path.oldPos + oldPosInc,
+        lastComponent: { count: 1, added, removed, previousComponent: last }
+      };
+    }
+  }
+  extractCommon(basePath, newTokens, oldTokens, diagonalPath, options) {
+    const newLen = newTokens.length, oldLen = oldTokens.length;
+    let oldPos = basePath.oldPos, newPos = oldPos - diagonalPath, commonCount = 0;
+    while (newPos + 1 < newLen && oldPos + 1 < oldLen && this.equals(oldTokens[oldPos + 1], newTokens[newPos + 1], options)) {
+      newPos++;
+      oldPos++;
+      commonCount++;
+      if (options.oneChangePerToken) {
+        basePath.lastComponent = { count: 1, previousComponent: basePath.lastComponent, added: false, removed: false };
+      }
+    }
+    if (commonCount && !options.oneChangePerToken) {
+      basePath.lastComponent = { count: commonCount, previousComponent: basePath.lastComponent, added: false, removed: false };
+    }
+    basePath.oldPos = oldPos;
+    return newPos;
+  }
+  equals(left, right, options) {
+    if (options.comparator) {
+      return options.comparator(left, right);
+    } else {
+      return left === right || !!options.ignoreCase && left.toLowerCase() === right.toLowerCase();
+    }
+  }
+  removeEmpty(array) {
+    const ret = [];
+    for (let i = 0;i < array.length; i++) {
+      if (array[i]) {
+        ret.push(array[i]);
+      }
+    }
+    return ret;
+  }
+  castInput(value, options) {
+    return value;
+  }
+  tokenize(value, options) {
+    return Array.from(value);
+  }
+  join(chars) {
+    return chars.join("");
+  }
+  postProcess(changeObjects, options) {
+    return changeObjects;
+  }
+  get useLongestToken() {
+    return false;
+  }
+  buildValues(lastComponent, newTokens, oldTokens) {
+    const components = [];
+    let nextComponent;
+    while (lastComponent) {
+      components.push(lastComponent);
+      nextComponent = lastComponent.previousComponent;
+      delete lastComponent.previousComponent;
+      lastComponent = nextComponent;
+    }
+    components.reverse();
+    const componentLen = components.length;
+    let componentPos = 0, newPos = 0, oldPos = 0;
+    for (;componentPos < componentLen; componentPos++) {
+      const component = components[componentPos];
+      if (!component.removed) {
+        if (!component.added && this.useLongestToken) {
+          let value = newTokens.slice(newPos, newPos + component.count);
+          value = value.map(function(value, i) {
+            const oldValue = oldTokens[oldPos + i];
+            return oldValue.length > value.length ? oldValue : value;
+          });
+          component.value = this.join(value);
+        } else {
+          component.value = this.join(newTokens.slice(newPos, newPos + component.count));
+        }
+        newPos += component.count;
+        if (!component.added) {
+          oldPos += component.count;
+        }
+      } else {
+        component.value = this.join(oldTokens.slice(oldPos, oldPos + component.count));
+        oldPos += component.count;
+      }
+    }
+    return components;
+  }
+}
+
+// node_modules/diff/libesm/diff/line.js
+class LineDiff extends Diff {
+  constructor() {
+    super(...arguments);
+    this.tokenize = tokenize;
+  }
+  equals(left, right, options) {
+    if (options.ignoreWhitespace) {
+      if (!options.newlineIsToken || !left.includes(`
+`)) {
+        left = left.trim();
+      }
+      if (!options.newlineIsToken || !right.includes(`
+`)) {
+        right = right.trim();
+      }
+    } else if (options.ignoreNewlineAtEof && !options.newlineIsToken) {
+      if (left.endsWith(`
+`)) {
+        left = left.slice(0, -1);
+      }
+      if (right.endsWith(`
+`)) {
+        right = right.slice(0, -1);
+      }
+    }
+    return super.equals(left, right, options);
+  }
+}
+var lineDiff = new LineDiff;
+function diffLines(oldStr, newStr, options) {
+  return lineDiff.diff(oldStr, newStr, options);
+}
+function tokenize(value, options) {
+  if (options.stripTrailingCr) {
+    value = value.replace(/\r\n/g, `
+`);
+  }
+  const retLines = [], linesAndNewlines = value.split(/(\n|\r\n)/);
+  if (!linesAndNewlines[linesAndNewlines.length - 1]) {
+    linesAndNewlines.pop();
+  }
+  for (let i = 0;i < linesAndNewlines.length; i++) {
+    const line = linesAndNewlines[i];
+    if (i % 2 && !options.newlineIsToken) {
+      retLines[retLines.length - 1] += line;
+    } else {
+      retLines.push(line);
+    }
+  }
+  return retLines;
+}
+
+// node_modules/diff/libesm/patch/create.js
+function structuredPatch(oldFileName, newFileName, oldStr, newStr, oldHeader, newHeader, options) {
+  let optionsObj;
+  if (!options) {
+    optionsObj = {};
+  } else if (typeof options === "function") {
+    optionsObj = { callback: options };
+  } else {
+    optionsObj = options;
+  }
+  if (typeof optionsObj.context === "undefined") {
+    optionsObj.context = 4;
+  }
+  const context = optionsObj.context;
+  if (optionsObj.newlineIsToken) {
+    throw new Error("newlineIsToken may not be used with patch-generation functions, only with diffing functions");
+  }
+  if (!optionsObj.callback) {
+    return diffLinesResultToPatch(diffLines(oldStr, newStr, optionsObj));
+  } else {
+    const { callback } = optionsObj;
+    diffLines(oldStr, newStr, Object.assign(Object.assign({}, optionsObj), { callback: (diff) => {
+      const patch = diffLinesResultToPatch(diff);
+      callback(patch);
+    } }));
+  }
+  function diffLinesResultToPatch(diff) {
+    if (!diff) {
+      return;
+    }
+    diff.push({ value: "", lines: [] });
+    function contextLines(lines) {
+      return lines.map(function(entry) {
+        return " " + entry;
+      });
+    }
+    const hunks = [];
+    let oldRangeStart = 0, newRangeStart = 0, curRange = [], oldLine = 1, newLine = 1;
+    for (let i = 0;i < diff.length; i++) {
+      const current = diff[i], lines = current.lines || splitLines(current.value);
+      current.lines = lines;
+      if (current.added || current.removed) {
+        if (!oldRangeStart) {
+          const prev = diff[i - 1];
+          oldRangeStart = oldLine;
+          newRangeStart = newLine;
+          if (prev) {
+            curRange = context > 0 ? contextLines(prev.lines.slice(-context)) : [];
+            oldRangeStart -= curRange.length;
+            newRangeStart -= curRange.length;
+          }
+        }
+        for (const line of lines) {
+          curRange.push((current.added ? "+" : "-") + line);
+        }
+        if (current.added) {
+          newLine += lines.length;
+        } else {
+          oldLine += lines.length;
+        }
+      } else {
+        if (oldRangeStart) {
+          if (lines.length <= context * 2 && i < diff.length - 2) {
+            for (const line of contextLines(lines)) {
+              curRange.push(line);
+            }
+          } else {
+            const contextSize = Math.min(lines.length, context);
+            for (const line of contextLines(lines.slice(0, contextSize))) {
+              curRange.push(line);
+            }
+            const hunk = {
+              oldStart: oldRangeStart,
+              oldLines: oldLine - oldRangeStart + contextSize,
+              newStart: newRangeStart,
+              newLines: newLine - newRangeStart + contextSize,
+              lines: curRange
+            };
+            hunks.push(hunk);
+            oldRangeStart = 0;
+            newRangeStart = 0;
+            curRange = [];
+          }
+        }
+        oldLine += lines.length;
+        newLine += lines.length;
+      }
+    }
+    for (const hunk of hunks) {
+      for (let i = 0;i < hunk.lines.length; i++) {
+        if (hunk.lines[i].endsWith(`
+`)) {
+          hunk.lines[i] = hunk.lines[i].slice(0, -1);
+        } else {
+          hunk.lines.splice(i + 1, 0, "\\ No newline at end of file");
+          i++;
+        }
+      }
+    }
+    return {
+      oldFileName,
+      newFileName,
+      oldHeader,
+      newHeader,
+      hunks
+    };
+  }
+}
+function formatPatch(patch) {
+  if (Array.isArray(patch)) {
+    return patch.map(formatPatch).join(`
+`);
+  }
+  const ret = [];
+  if (patch.oldFileName == patch.newFileName) {
+    ret.push("Index: " + patch.oldFileName);
+  }
+  ret.push("===================================================================");
+  ret.push("--- " + patch.oldFileName + (typeof patch.oldHeader === "undefined" ? "" : "\t" + patch.oldHeader));
+  ret.push("+++ " + patch.newFileName + (typeof patch.newHeader === "undefined" ? "" : "\t" + patch.newHeader));
+  for (let i = 0;i < patch.hunks.length; i++) {
+    const hunk = patch.hunks[i];
+    if (hunk.oldLines === 0) {
+      hunk.oldStart -= 1;
+    }
+    if (hunk.newLines === 0) {
+      hunk.newStart -= 1;
+    }
+    ret.push("@@ -" + hunk.oldStart + "," + hunk.oldLines + " +" + hunk.newStart + "," + hunk.newLines + " @@");
+    for (const line of hunk.lines) {
+      ret.push(line);
+    }
+  }
+  return ret.join(`
+`) + `
+`;
+}
+function createTwoFilesPatch(oldFileName, newFileName, oldStr, newStr, oldHeader, newHeader, options) {
+  if (typeof options === "function") {
+    options = { callback: options };
+  }
+  if (!(options === null || options === undefined ? undefined : options.callback)) {
+    const patchObj = structuredPatch(oldFileName, newFileName, oldStr, newStr, oldHeader, newHeader, options);
+    if (!patchObj) {
+      return;
+    }
+    return formatPatch(patchObj);
+  } else {
+    const { callback } = options;
+    structuredPatch(oldFileName, newFileName, oldStr, newStr, oldHeader, newHeader, Object.assign(Object.assign({}, options), { callback: (patchObj) => {
+      if (!patchObj) {
+        callback(undefined);
+      } else {
+        callback(formatPatch(patchObj));
+      }
+    } }));
+  }
+}
+function splitLines(text) {
+  const hasTrailingNl = text.endsWith(`
+`);
+  const result = text.split(`
+`).map((line) => line + `
+`);
+  if (hasTrailingNl) {
+    result.pop();
+  } else {
+    result.push(result.pop().slice(0, -1));
+  }
+  return result;
+}
+// src/core/snapshot.ts
+import { execFile } from "node:child_process";
+import { createHash as createHash2 } from "node:crypto";
+import { lstat, readdir, readFile, readlink, realpath, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+var excluded = new Set([".git", "node_modules", "bin", "obj", "dist", ".refactor-ai"]);
+function sha256(value) {
+  return createHash2("sha256").update(value).digest("hex");
+}
+function describeInputPath(path) {
+  const portable = path.split(sep).join("/");
+  return /(^|\/)(next-env\.d\.ts|[^/]+\.gen\.[^/]+|_generated|\.next)(\/|$)/.test(portable) ? `${path} [generated candidate]` : path;
+}
+function snapshotChanges(before, after) {
+  return [...new Set([...Object.keys(before.files), ...Object.keys(after.files)])].sort().filter((path) => before.files[path] !== after.files[path]).map((path) => `${before.files[path] === undefined ? "added" : after.files[path] === undefined ? "removed" : "changed"} ${describeInputPath(path)}`).join(", ");
+}
+function inside(root, file) {
+  const result = resolve(file);
+  const rel = relative(root, result);
+  if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`OUTSIDE_ROOT: ${file}`);
+  }
+  if (rel.split(sep).some((part) => excluded.has(part))) {
+    throw new Error(`EXCLUDED_PATH: ${file}`);
+  }
+  return result;
+}
+async function assertRegularPath(root, file, allowMissing = false, allowDirectory = false) {
+  if (allowDirectory && resolve(file) === root && (await lstat(root)).isDirectory())
+    return;
+  const target = inside(root, file);
+  const parts = relative(root, target).split(sep);
+  let current = root;
+  for (let i = 0;i < parts.length; i++) {
+    current = resolve(current, parts[i]);
+    let stat;
+    try {
+      stat = await lstat(current);
+    } catch (error) {
+      if (allowMissing && error.code === "ENOENT")
+        return;
+      throw error;
+    }
+    if (stat.isSymbolicLink())
+      throw new Error(`SYMLINK_UNSUPPORTED: ${current}`);
+    if (i === parts.length - 1 && !stat.isFile() && !(allowDirectory && stat.isDirectory()))
+      throw new Error(`NOT_A_FILE: ${current}`);
+    if (i < parts.length - 1 && !stat.isDirectory())
+      throw new Error(`NOT_A_DIRECTORY: ${current}`);
+  }
+}
+async function canonicalMissing(file) {
+  const absolute = resolve(file);
+  const parent = dirname(absolute);
+  if (parent === absolute)
+    return realpath(absolute);
+  try {
+    return resolve(await realpath(parent), basename(absolute));
+  } catch (error) {
+    if (error.code !== "ENOENT")
+      throw error;
+    return resolve(await canonicalMissing(parent), basename(absolute));
+  }
+}
+async function missingDirectories(root, file) {
+  const parts = relative(root, dirname(inside(root, file))).split(sep).filter(Boolean);
+  const missing = [];
+  let current = root;
+  for (const part of parts) {
+    current = resolve(current, part);
+    if (missing.length) {
+      missing.push(current);
+      continue;
+    }
+    try {
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink())
+        throw new Error(`SYMLINK_UNSUPPORTED: ${current}`);
+      if (!stat.isDirectory())
+        throw new Error(`NOT_A_DIRECTORY: ${current}`);
+    } catch (error) {
+      if (error.code !== "ENOENT")
+        throw error;
+      missing.push(current);
+    }
+  }
+  return missing;
+}
+async function snapshot(rootPath) {
+  const root = await realpath(rootPath);
+  const files = {};
+  const record = async (file, kind) => {
+    files[relative(root, file)] = kind === "symlink" ? `symlink:${await readlink(file)}` : sha256(await readFile(file));
+  };
+  const listed = await gitFiles(root);
+  if (listed) {
+    for (const name of listed) {
+      if (name.split("/").some((part) => excluded.has(part)))
+        continue;
+      const file = resolve(root, name);
+      const stat = await lstat(file).catch((error) => {
+        if (error.code === "ENOENT")
+          return null;
+        throw error;
+      });
+      if (stat?.isSymbolicLink())
+        await record(file, "symlink");
+      else if (stat?.isFile())
+        await record(file, "file");
+    }
+  } else {
+    async function walk(directory) {
+      const entries = await readdir(directory, { withFileTypes: true });
+      entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      for (const entry of entries) {
+        if (excluded.has(entry.name))
+          continue;
+        const file = resolve(directory, entry.name);
+        if (entry.isSymbolicLink())
+          await record(file, "symlink");
+        else if (entry.isDirectory())
+          await walk(file);
+        else if (entry.isFile())
+          await record(file, "file");
+      }
+    }
+    await walk(root);
+  }
+  return { files, hash: sha256(JSON.stringify(files)) };
+}
+var run = promisify(execFile);
+async function gitFiles(root) {
+  try {
+    const { stdout } = await run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."], {
+      cwd: root,
+      maxBuffer: 1 << 28,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
+    });
+    try {
+      await run("git", ["check-ignore", "--no-index", "--quiet", "."], { cwd: root, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } });
+      return null;
+    } catch {}
+    const names = [...new Set(stdout.split("\x00").filter(Boolean))].map((name) => name.split(sep).join("/"));
+    return names.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+  } catch {
+    return null;
+  }
+}
+var stateIgnoreText = `*
+!config.json
+!equivalents.json
+!port-route.json
+!port-route/
+!port-route/**
+!.gitignore
+`;
+var legacyIgnoreTexts = [`*
+`, `*
+!equivalents.json
+!.gitignore
+`, `*
+!equivalents.json
+!port-route.json
+!port-route/
+!port-route/**
+!.gitignore
+`];
+async function ignoreStateDirectory(stateDirectory) {
+  const path = resolve(stateDirectory, ".gitignore");
+  const stat = await lstat(path).catch((error) => {
+    if (error.code === "ENOENT")
+      return;
+    throw error;
+  });
+  if (stat?.isSymbolicLink())
+    throw new Error("SYMLINK_UNSUPPORTED: state .gitignore");
+  if (stat?.isFile()) {
+    if (legacyIgnoreTexts.includes(await readFile(path, "utf8")))
+      await writeFile(path, stateIgnoreText);
+    return;
+  }
+  try {
+    await writeFile(path, stateIgnoreText, { flag: "wx", mode: 420 });
+  } catch (error) {
+    if (error.code !== "EEXIST")
+      throw error;
+  }
+}
+
+// src/core/plan.ts
+function newDiagnostics(before, after) {
+  const key = (d) => JSON.stringify([d.file, d.code, d.message]);
+  const counts = new Map;
+  for (const item of before)
+    counts.set(key(item), (counts.get(key(item)) ?? 0) + 1);
+  return after.filter((item) => {
+    const count = counts.get(key(item)) ?? 0;
+    if (!count)
+      return true;
+    counts.set(key(item), count - 1);
+    return false;
+  });
+}
+function planId(plan) {
+  const { id: _id, ...body } = plan;
+  return sha256(JSON.stringify(body));
+}
+function changeKind(change) {
+  if (change.before === null && change.after === null)
+    throw new Error(`INVALID_CHANGE: ${change.path} has neither before nor after content`);
+  return change.before === null ? "create" : change.after === null ? "delete" : "edit";
+}
+function byPath(a, b) {
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+}
+function caseConflict(root, files, changes) {
+  const removed = new Set(changes.filter((c) => c.after === null).map((c) => relative2(root, c.path)));
+  const created = changes.filter((c) => c.before === null).map((c) => relative2(root, c.path));
+  const spellings = new Map;
+  const record = (file) => {
+    const parts = file.split(sep2);
+    for (let i = 1;i <= parts.length; i++) {
+      const exact = parts.slice(0, i).join(sep2);
+      const key = exact.normalize("NFC").toLowerCase();
+      const set = spellings.get(key) ?? new Set;
+      set.add(exact);
+      spellings.set(key, set);
+    }
+  };
+  for (const file of Object.keys(files))
+    if (!removed.has(file))
+      record(file);
+  for (const file of created)
+    record(file);
+  for (const file of created) {
+    const parts = file.split(sep2);
+    for (let i = 1;i <= parts.length; i++) {
+      if ((spellings.get(parts.slice(0, i).join(sep2).normalize("NFC").toLowerCase())?.size ?? 0) > 1)
+        return resolve2(root, file);
+    }
+  }
+  return;
+}
+function assertPlanShape(plan) {
+  if (plan?.schemaVersion !== 1 && plan?.schemaVersion !== 2 && plan?.schemaVersion !== 3 || !plan.request || typeof plan.request.root !== "string" || !Array.isArray(plan.changes) || !plan.snapshot || !plan.validation || !Array.isArray(plan.diagnosticsBefore) || !Array.isArray(plan.diagnosticsAfter)) {
+    throw new Error("INVALID_PLAN: unsupported or malformed plan");
+  }
+  if (plan.id !== planId(plan))
+    throw new Error("INVALID_PLAN: plan integrity check failed");
+  if (plan.snapshot.hash !== sha256(JSON.stringify(plan.snapshot.files)))
+    throw new Error("INVALID_PLAN: invalid snapshot");
+  if (plan.request.verify !== undefined && (plan.request.verify !== "bindings" || plan.diagnosticsBefore.length || plan.diagnosticsAfter.length)) {
+    throw new Error("INVALID_PLAN: invalid verification mode");
+  }
+  if (plan.schemaVersion === 3)
+    assertReadSetShape(plan.readSet);
+  else if (plan.readSet !== undefined)
+    throw new Error("INVALID_PLAN: read set requires schema 3");
+  const added = newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter);
+  if (JSON.stringify(added) !== JSON.stringify(plan.validation.newDiagnostics) || plan.validation.status !== (added.length ? "failed" : "passed")) {
+    throw new Error("INVALID_PLAN: inconsistent validation");
+  }
+  const seen = new Set;
+  let previous = "";
+  for (const change of plan.changes) {
+    if (!change || typeof change.path !== "string" || change.before !== null && typeof change.before !== "string" || change.after !== null && typeof change.after !== "string" || change.before === null && change.after === null || change.before === change.after) {
+      throw new Error("INVALID_PLAN: invalid change");
+    }
+    if (change.after === null && plan.schemaVersion < 2)
+      throw new Error("INVALID_PLAN: deletions require plan schema 2");
+    const path = inside(plan.request.root, change.path);
+    if (path !== change.path || seen.has(path) || path < previous)
+      throw new Error("INVALID_PLAN: duplicate, unsorted or noncanonical path");
+    seen.add(path);
+    previous = path;
+    const expected = plan.snapshot.files[relative2(plan.request.root, path)];
+    if (change.before === null ? expected !== undefined : sha256(Buffer.from(change.before)) !== expected) {
+      throw new Error(`INVALID_PLAN: before content does not match snapshot: ${path}`);
+    }
+  }
+  const conflict = caseConflict(plan.request.root, plan.snapshot.files, plan.changes);
+  if (conflict)
+    throw new Error(`INVALID_PLAN: case-insensitive path collision: ${conflict}`);
+  if (plan.fileModes !== undefined) {
+    if (!plan.fileModes || Object.keys(plan.fileModes).length !== plan.changes.length)
+      throw new Error("INVALID_PLAN: invalid file modes");
+    const validMode = (value) => Number.isInteger(value) && value >= 0 && value <= 511;
+    for (const change of plan.changes) {
+      const modes = plan.fileModes[change.path];
+      if (!modes || (change.before === null ? modes.before !== null : !validMode(modes.before)) || (change.after === null ? modes.after !== null : !validMode(modes.after)) || change.before !== null && change.after !== null && modes.before !== modes.after) {
+        throw new Error(`INVALID_PLAN: invalid file modes: ${change.path}`);
+      }
+    }
+  }
+}
+async function canonicalRequest(request) {
+  const root = await realpath2(request.root);
+  const result = { ...request, root, project: await realpath2(request.project), file: await realpath2(request.file) };
+  if (request.operation === "move-file" || request.operation === "port-route") {
+    if (request.only)
+      result.only = [...request.only].sort();
+    if (request.exclude)
+      result.exclude = [...new Set(request.exclude)].sort();
+    if (request.map)
+      result.map = Object.fromEntries(Object.entries(request.map).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  }
+  if (request.files) {
+    if (request.operation !== "inline-reexports" || !request.files.length)
+      throw new Error("INVALID_REQUEST: files requires inline-reexports");
+    result.files = [...new Set(await Promise.all(request.files.map((file) => realpath2(file))))].sort();
+    for (const file of result.files)
+      await assertRegularPath(root, file);
+    result.file = result.files[0];
+  }
+  if (request.moves) {
+    if (request.operation !== "move-file" || !request.moves.length)
+      throw new Error("INVALID_REQUEST: moves requires move-file pairs");
+    result.moves = [];
+    for (const move of request.moves) {
+      const file = await realpath2(move.file), target = inside(root, await canonicalMissing(move.target));
+      const directory = (await lstat2(file)).isDirectory();
+      await assertRegularPath(root, file, false, directory);
+      await assertRegularPath(root, target, true, directory);
+      result.moves.push({ file, target });
+    }
+    result.moves.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : a.target < b.target ? -1 : 1);
+    result.file = result.moves[0].file;
+    result.target = result.moves[0].target;
+  }
+  await assertRegularPath(root, result.project);
+  const directory = request.operation === "move-file" && (await lstat2(result.file)).isDirectory() || request.operation === "retarget-import" || request.operation === "port-route";
+  if (request.operation === "port-route") {
+    if (!(await lstat2(result.file)).isDirectory())
+      throw new Error(`INVALID_REQUEST: port-route requires a Next route directory: ${result.file}`);
+    if (request.config === undefined)
+      throw new Error("INVALID_REQUEST: port-route requires a configuration path");
+    result.config = await realpath2(request.config).catch((error) => {
+      if (error.code === "ENOENT")
+        throw new Error(`PORT_ROUTE_CONFIG_NOT_FOUND: ${request.config}; copy examples/port-route/uber-platform/port-route.json to <root>/.refactor-ai/ and adapt it, or pass --config`);
+      throw error;
+    });
+    const configRelative = relative2(root, result.config);
+    if (!configRelative || configRelative.startsWith("..") || isAbsolute2(configRelative) || !(await lstat2(result.config)).isFile())
+      throw new Error(`INVALID_REQUEST: port-route configuration must be a file inside ${root}: ${result.config}`);
+    if (request.startRoutes !== undefined) {
+      result.startRoutes = await realpath2(request.startRoutes);
+      await assertRegularPath(root, result.startRoutes, false, true);
+    }
+  }
+  await assertRegularPath(root, result.file, false, directory);
+  if (request.targetProject !== undefined) {
+    result.targetProject = await realpath2(request.targetProject);
+    await assertRegularPath(root, result.targetProject);
+  }
+  if (result.target !== undefined) {
+    result.target = inside(root, await canonicalMissing(result.target));
+    await assertRegularPath(root, result.target, true, directory);
+  }
+  return result;
+}
+var fileId = (stat) => `${stat.dev}:${stat.ino}`;
+async function createPlan(request, analyze, compilerBase) {
+  request = await canonicalRequest(request);
+  const root = request.root;
+  const before = await snapshot(root);
+  const result = await analyze(request);
+  const after = result.readSet || !result.changes.length ? before : await snapshot(root);
+  if (result.changes.length && result.readSet)
+    await assertReadSetFresh(result.readSet, compilerBase);
+  if (result.changes.length && !result.readSet && after.hash !== before.hash)
+    throw new Error(`STALE_SNAPSHOT: project changed during analysis: ${snapshotChanges(before, after)}; retry after writers settle (including dev-server generators)`);
+  const seen = new Set;
+  const changes = [];
+  for (const change of result.changes) {
+    const kind = changeKind(change);
+    const path = inside(root, kind === "create" ? await canonicalMissing(change.path) : await realpath2(change.path));
+    if (seen.has(path))
+      throw new Error(`DUPLICATE_CHANGE: ${path}`);
+    seen.add(path);
+    if (kind === "create") {
+      if (before.files[relative2(root, path)] !== undefined)
+        throw new Error(`TARGET_EXISTS: ${path}`);
+    } else {
+      await assertRegularPath(root, path);
+      if (sha256(Buffer.from(change.before)) !== before.files[relative2(root, path)])
+        throw new Error(`BEFORE_MISMATCH: ${path}`);
+    }
+    if (change.before !== change.after)
+      changes.push({ path, before: change.before, after: change.after });
+  }
+  const deleted = new Set;
+  for (const change of changes)
+    if (change.after === null)
+      deleted.add(fileId(await lstat2(change.path)));
+  for (const change of changes) {
+    if (change.before !== null)
+      continue;
+    await assertRegularPath(root, change.path, true);
+    const existing = await lstat2(change.path).catch((error) => {
+      if (error.code === "ENOENT")
+        return null;
+      throw error;
+    });
+    if (existing && !deleted.has(fileId(existing)))
+      throw new Error(`TARGET_EXISTS: ${change.path}`);
+  }
+  changes.sort(byPath);
+  const fileModes = {};
+  const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat2(request.file)).mode & 511 : request.operation === "port-route" ? ((await lstat2(resolve2(request.file, "page.tsx")).catch(() => {
+    return;
+  }))?.mode ?? 420) & 511 : 384;
+  const creationMode = async (path) => {
+    if (request.operation === "port-route" && request.target && (path === request.target || path.startsWith(request.target + sep2))) {
+      const source = resolve2(request.file, relative2(request.target, path));
+      return changes.some((change) => change.path === source && change.after === null) ? (await lstat2(source)).mode & 511 : createdMode;
+    }
+    if (request.operation === "port-route")
+      return createdMode;
+    if (request.operation !== "move-file" || !request.target)
+      return createdMode;
+    const pair = request.moves?.find((move) => path === move.target || path.startsWith(move.target + sep2));
+    const moveFile = pair?.file ?? request.file, moveTarget = pair?.target ?? request.target;
+    const directory = (await lstat2(moveFile)).isDirectory();
+    if (!directory && path !== moveTarget)
+      return createdMode;
+    const source = directory ? resolve2(moveFile, relative2(moveTarget, path)) : moveFile;
+    if (!changes.some((change) => change.path === source && change.after === null))
+      return 384;
+    return (await lstat2(source)).mode & 511;
+  };
+  for (const change of changes) {
+    const beforeMode = change.before === null ? null : (await lstat2(change.path)).mode & 511;
+    fileModes[change.path] = { before: beforeMode, after: change.after === null ? null : beforeMode ?? await creationMode(change.path) };
+  }
+  const conflict = caseConflict(root, before.files, changes);
+  if (conflict)
+    throw new Error(`CASE_CONFLICT: ${conflict} differs only by case from another path`);
+  const added = newDiagnostics(result.diagnosticsBefore, result.diagnosticsAfter);
+  const files = Object.fromEntries(changes.filter((change) => change.before !== null).map((change) => [relative2(root, change.path), before.files[relative2(root, change.path)]]));
+  const plannedSnapshot = result.readSet ? { files, hash: sha256(JSON.stringify(files)) } : before;
+  const body = {
+    ...result.readSet ? { readSet: JSON.parse(JSON.stringify(result.readSet)) } : {},
+    schemaVersion: result.readSet ? 3 : changes.some((c) => c.before === null || c.after === null) ? 2 : 1,
+    request,
+    backend: result.backend,
+    backendVersion: result.version,
+    snapshot: plannedSnapshot,
+    changes,
+    fileModes,
+    ...result.checker ? { checker: { ...result.checker } } : {},
+    validation: { status: added.length ? "failed" : "passed", newDiagnostics: added },
+    diagnosticsBefore: result.diagnosticsBefore,
+    diagnosticsAfter: result.diagnosticsAfter,
+    notes: result.notes
+  };
+  return { ...body, id: planId(body) };
+}
+async function loadPlan(path) {
+  let plan;
+  try {
+    plan = JSON.parse(await readFile2(path, "utf8"));
+  } catch (error) {
+    if (error instanceof SyntaxError)
+      throw new Error("INVALID_PLAN: plan is not valid JSON");
+    throw error;
+  }
+  assertPlanShape(plan);
+  return plan;
+}
+async function assertFresh(plan, compilerBase) {
+  if (plan.id !== planId(plan))
+    throw new Error("INVALID_PLAN: plan integrity check failed");
+  if (await realpath2(plan.request.root) !== plan.request.root)
+    throw new Error("INVALID_PLAN: noncanonical root");
+  if (!plan.changes.length)
+    return;
+  if (plan.readSet) {
+    for (const change of plan.changes) {
+      await assertRegularPath(plan.request.root, change.path, change.before === null).catch((error) => {
+        if (error.code === "ENOENT")
+          throw new Error(`STALE_SNAPSHOT: removed ${change.path}`);
+        throw error;
+      });
+      const text = await readFile2(change.path).catch((error) => {
+        if (error.code === "ENOENT")
+          return null;
+        throw error;
+      });
+      if (text === null ? change.before !== null : change.before === null || sha256(text) !== sha256(change.before))
+        throw new Error(`STALE_SNAPSHOT: changed ${change.path}`);
+    }
+  }
+  if (plan.readSet)
+    await assertReadSetFresh(plan.readSet, compilerBase);
+  if (plan.readSet && plan.changes.some((change) => change.before === null)) {
+    const conflict = caseConflict(plan.request.root, (await snapshot(plan.request.root)).files, plan.changes);
+    if (conflict)
+      throw new Error(`STALE_SNAPSHOT: case-insensitive path collision: ${conflict}`);
+  }
+  const current = plan.readSet ? plan.snapshot : await snapshot(plan.request.root);
+  if (current.hash !== plan.snapshot.hash)
+    throw new Error(`STALE_SNAPSHOT: project changed: ${snapshotChanges(plan.snapshot, current)}; create a new plan after writers settle`);
+  for (const [path, modes] of Object.entries(plan.fileModes ?? {})) {
+    if (modes.before !== null && ((await lstat2(path)).mode & 511) !== modes.before) {
+      throw new Error(`STALE_SNAPSHOT: file permissions changed; create a new plan: ${path}`);
+    }
+  }
+}
+function preview(plan) {
+  return plan.changes.map((change) => {
+    const name = relative2(plan.request.root, change.path);
+    return createTwoFilesPatch(change.before === null ? "/dev/null" : `a/${name}`, change.after === null ? "/dev/null" : `b/${name}`, change.before ?? "", change.after ?? "", "", "", { context: 3 });
+  }).join(`
+`);
+}
+
+// src/core/apply.ts
+async function readOrNull(path) {
+  return readFile3(path).catch((error) => {
+    if (error.code === "ENOENT")
+      return null;
+    throw error;
+  });
+}
+var sameContent = (current, expected) => expected === null ? current === null : current !== null && sha256(current) === sha256(expected);
+async function atomicWrite(path, content, mode, expectedContent) {
+  const temporary = resolve3(dirname2(path), `.refactor-write-${randomUUID()}`);
+  try {
+    const handle = await open(temporary, "wx", 384);
+    try {
+      await handle.writeFile(content, "utf8");
+      if (mode !== undefined)
+        await handle.chmod(mode & 511);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    if (expectedContent !== undefined && !sameContent(await readOrNull(path), expectedContent)) {
+      throw new Error(`STALE_SNAPSHOT: ${path} changed while staging the write`);
+    }
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+async function ensureDirectories(root, file, created) {
+  for (const directory of await missingDirectories(root, file)) {
+    try {
+      await mkdir(directory);
+      created.push(directory);
+    } catch (error) {
+      if (error.code !== "EEXIST")
+        throw error;
+      const existing = await lstat3(directory);
+      if (existing.isSymbolicLink() || !existing.isDirectory())
+        throw new Error(`NOT_A_DIRECTORY: ${directory}`);
+    }
+  }
+}
+var fileId2 = (s) => `${s.dev}:${s.ino}`;
+async function order(plan) {
+  const steps = plan.changes.map((change) => ({ change, kind: changeKind(change) }));
+  const deleted = new Set;
+  for (const step of steps)
+    if (step.kind === "delete")
+      deleted.add(fileId2(await lstat3(step.change.path)));
+  const aliases = new Set;
+  for (const step of steps) {
+    if (step.kind !== "create")
+      continue;
+    const existing = await lstat3(step.change.path).catch((error) => {
+      if (error.code === "ENOENT")
+        return null;
+      throw error;
+    });
+    if (!existing)
+      continue;
+    if (!deleted.has(fileId2(existing)))
+      throw new Error(`STALE_SNAPSHOT: ${step.change.path} already exists`);
+    aliases.add(step.change);
+  }
+  const rank = (step) => step.kind === "create" ? aliases.has(step.change) ? 3 : 0 : step.kind === "edit" ? 1 : 2;
+  return steps.toSorted((a, b) => rank(a) - rank(b));
+}
+async function pruneMoveDirectories(plan) {
+  if (!["move-file", "move-type", "rename-file", "port-route"].includes(plan.request.operation))
+    return;
+  const root = plan.request.root, projectDirectory = dirname2(plan.request.project);
+  const directories = new Set;
+  for (const change of plan.changes.filter((change) => change.after === null)) {
+    for (let directory = dirname2(change.path);directory !== root && directory !== projectDirectory && directory.startsWith(root + sep3); directory = dirname2(directory))
+      directories.add(directory);
+  }
+  for (const directory of [...directories].sort((a, b) => b.length - a.length))
+    await rmdir(directory).catch(() => {});
+}
+async function applyPlan(plan, compilerBase) {
+  assertPlanShape(plan);
+  if (plan.validation.status !== "passed" || newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter).length) {
+    throw new Error("VALIDATION_FAILED: plan adds compiler errors");
+  }
+  const root = plan.request.root;
+  const stateDirectory = resolve3(root, ".refactor-ai");
+  await mkdir(stateDirectory, { recursive: true });
+  if ((await lstat3(stateDirectory)).isSymbolicLink())
+    throw new Error("SYMLINK_UNSUPPORTED: state directory");
+  await ignoreStateDirectory(stateDirectory);
+  const lock = resolve3(stateDirectory, "apply.lock");
+  try {
+    await mkdir(lock);
+  } catch (error) {
+    if (error.code === "EEXIST")
+      throw new Error("APPLY_LOCKED: another apply or interrupted transaction; inspect .refactor-ai/apply.lock");
+    throw error;
+  }
+  const journalPath = resolve3(stateDirectory, `${plan.id}.journal.json`);
+  const written = [];
+  const createdDirectories = [];
+  const journal = {
+    schemaVersion: 2,
+    planId: plan.id,
+    status: "writing",
+    changes: plan.changes.map((c) => ({
+      path: c.path,
+      kind: changeKind(c),
+      before: c.before,
+      afterHash: c.after === null ? null : sha256(c.after),
+      ...plan.fileModes?.[c.path] ? { beforeMode: plan.fileModes[c.path].before, afterMode: plan.fileModes[c.path].after } : {}
+    })),
+    createdDirectories
+  };
+  const saveJournal = () => atomicWrite(journalPath, JSON.stringify(journal, null, 2) + `
+`);
+  try {
+    await assertFresh(plan, compilerBase);
+    if (!plan.changes.length)
+      return { status: "applied", files: [], journal: null };
+    const steps = await order(plan);
+    const sourceMode = (await stat(plan.request.file)).mode & 511;
+    for (const step of steps) {
+      const record = journal.changes.find((item) => item.path === step.change.path);
+      record.beforeMode = step.kind === "create" ? null : (await stat(step.change.path)).mode & 511;
+      record.afterMode = step.kind === "delete" ? null : plan.fileModes?.[step.change.path]?.after ?? record.beforeMode ?? (["move-type", "rename-file"].includes(plan.request.operation) ? sourceMode : 384);
+    }
+    await saveJournal();
+    for (const step of steps) {
+      const { change, kind } = step;
+      if (kind === "create") {
+        const before = createdDirectories.length;
+        await ensureDirectories(root, change.path, createdDirectories);
+        if (createdDirectories.length !== before)
+          await saveJournal();
+      }
+      await assertRegularPath(root, change.path, kind === "create");
+      const current = await readOrNull(change.path);
+      if (!sameContent(current, change.before))
+        throw new Error(`STALE_SNAPSHOT: ${change.path} changed during apply`);
+      const mode = current === null ? undefined : (await stat(change.path)).mode & 511;
+      const record = journal.changes.find((item) => item.path === change.path);
+      if (mode !== undefined && mode !== record.beforeMode)
+        throw new Error(`STALE_SNAPSHOT: permissions changed during apply: ${change.path}`);
+      if (kind === "delete")
+        await unlink(change.path);
+      else
+        await atomicWrite(change.path, change.after, record.afterMode ?? undefined, change.before);
+      written.push({ ...step, mode });
+    }
+    journal.status = "applied";
+    await saveJournal();
+    await pruneMoveDirectories(plan);
+    return { status: "applied", files: written.map((s) => s.change.path), journal: journalPath };
+  } catch (error) {
+    let recoveryNeeded = false;
+    for (const { change, kind, mode } of written.toReversed()) {
+      try {
+        await assertRegularPath(root, change.path, true);
+        const current = await readOrNull(change.path);
+        if (kind === "delete") {
+          if (current === null)
+            await atomicWrite(change.path, change.before, mode, null);
+          else if (!sameContent(current, change.before))
+            recoveryNeeded = true;
+        } else if (!sameContent(current, change.after)) {
+          if (!(kind === "create" && current === null))
+            recoveryNeeded = true;
+        } else if (kind === "create")
+          await unlink(change.path);
+        else
+          await atomicWrite(change.path, change.before, mode, change.after);
+      } catch {
+        recoveryNeeded = true;
+      }
+    }
+    for (const directory of createdDirectories.toReversed()) {
+      await rmdir(directory).catch(() => {});
+    }
+    if (written.length || createdDirectories.length) {
+      journal.status = recoveryNeeded ? "recovery-needed" : "rolled-back";
+      await writeFile2(journalPath, JSON.stringify(journal, null, 2) + `
+`).catch(() => {});
+    }
+    if (recoveryNeeded)
+      throw new Error(`RECOVERY_NEEDED: inspect ${journalPath}; ${String(error)}`);
+    throw error;
+  } finally {
+    await rm(lock, { recursive: true, force: true });
+  }
+}
+
+// src/languages.ts
+import { extname } from "node:path";
+var languageOperations = {
+  typescript: ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file", "inline-reexports", "retarget-import", "port-route"],
+  csharp: ["rename", "imports", "format", "rename-file", "sync-namespace", "move-type"]
+};
+function languageForProject(project) {
+  const extension = extname(project).toLowerCase();
+  if (extension === ".csproj" || extension === ".sln")
+    return "csharp";
+  if (extension === ".json")
+    return "typescript";
+  throw new Error("UNSUPPORTED_PROJECT: use tsconfig/jsconfig.json, .csproj or .sln");
+}
+
+// src/core/repo-config.ts
+import { lstat as lstat4, readFile as readFile4 } from "node:fs/promises";
+import { resolve as resolve4 } from "node:path";
+var allowed = { verify: ["full", "bindings"], checker: ["ts5", "ts7", "both"] };
+async function readRepoConfig(root) {
+  const path = resolve4(root, ".refactor-ai/config.json");
+  const stat = await lstat4(path).catch((error) => {
+    if (["ENOENT", "ENOTDIR"].includes(error.code ?? ""))
+      return;
+    throw error;
+  });
+  if (!stat)
+    return {};
+  if (!stat.isFile())
+    throw new Error(`INVALID_REPO_CONFIG: ${path} must be a regular file`);
+  let config;
+  try {
+    config = JSON.parse(await readFile4(path, "utf8"));
+  } catch {
+    throw new Error(`INVALID_REPO_CONFIG: ${path} is not valid JSON`);
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config))
+    throw new Error(`INVALID_REPO_CONFIG: ${path} must contain an object`);
+  for (const [key, value] of Object.entries(config)) {
+    const values = Object.hasOwn(allowed, key) ? allowed[key] : undefined;
+    if (!values)
+      throw new Error(`INVALID_REPO_CONFIG: ${path}: unknown key '${key}'; supported: verify, checker`);
+    if (typeof value !== "string" || !values.includes(value))
+      throw new Error(`INVALID_REPO_CONFIG: ${path}: ${key} must be ${values.join("|")}`);
+  }
+  return config;
+}
+
+// src/api.ts
+function offset(text, point) {
+  const match = /^(\d+):(\d+)$/.exec(point);
+  if (!match)
+    throw new Error(`INVALID_POSITION: ${point}`);
+  const line = Number(match[1]), column = Number(match[2]);
+  const lines = text.split(`
+`);
+  if (line < 1 || line > lines.length || column < 1 || column > lines[line - 1].replace(/\r$/, "").length + 1) {
+    throw new Error(`INVALID_POSITION: ${point}`);
+  }
+  return lines.slice(0, line - 1).reduce((total, item) => total + item.length + 1, 0) + column - 1;
+}
+var bindingsReminder = "Plan verified bindings only (--verify bindings): program diagnostics were not computed. Run the project's typecheck (e.g. tsc --noEmit / tsgo, or the repo's check-types) before committing.";
+function createRefactorApi(context) {
+  if (Number(process.versions.node.split(".")[0]) < 22)
+    throw new Error("UNSUPPORTED_RUNTIME: Node.js 22+ is required");
+  function assertLanguage(project, backend) {
+    if (context.language && (languageForProject(project) !== context.language || backend !== undefined && backend !== (context.language === "typescript" ? "typescript" : "roslyn"))) {
+      throw new Error(`UNSUPPORTED_LANGUAGE: this tool only supports ${context.language === "typescript" ? "TypeScript/JavaScript" : "C#"}`);
+    }
+  }
+  function checkPlan(plan) {
+    assertPlanShape(plan);
+    assertLanguage(plan.request.project, plan.backend);
+  }
+  const compilerBase = context.toolkitRoot ? resolve5(context.toolkitRoot, "runtime/package.json") : undefined;
+  return {
+    async plan(options) {
+      const { project, request } = await resolveRequest();
+      const engine = await context.loadBackend(project, context.toolkitRoot);
+      return createPlan(request, engine.analyze, compilerBase);
+      async function resolveRequest() {
+        const operation = options.operation ?? context.operation;
+        if (!operation || !Object.values(languageOperations).some((items) => items.includes(operation)))
+          throw new Error(`UNSUPPORTED: ${operation}`);
+        if (context.operation && operation !== context.operation)
+          throw new Error(`UNSUPPORTED: this tool only supports ${context.operation}`);
+        assertLanguage(options.project);
+        if (options.checker !== undefined && (!["ts5", "ts7", "both"].includes(options.checker) || languageForProject(options.project) !== "typescript"))
+          throw new Error("INVALID_ARGUMENT: checker ts5|ts7|both requires TypeScript/JavaScript");
+        if ((options.symbol !== undefined || options.public !== undefined) && (operation !== "rename" || languageForProject(options.project) !== "typescript"))
+          throw new Error("INVALID_ARGUMENT: symbol and public require TypeScript/JavaScript rename");
+        if (options.symbol !== undefined && (typeof options.symbol !== "string" || !options.symbol || options.at !== undefined))
+          throw new Error("INVALID_ARGUMENT: symbol selects one declaration instead of at");
+        if (options.public !== undefined && typeof options.public !== "boolean")
+          throw new Error("INVALID_ARGUMENT: public must be a boolean");
+        if (options.verify !== undefined && !["full", "bindings"].includes(options.verify))
+          throw new Error("INVALID_ARGUMENT: verify full|bindings");
+        if (options.verify === "bindings" && languageForProject(options.project) !== "typescript")
+          throw new Error("INVALID_ARGUMENT: verify bindings requires TypeScript/JavaScript");
+        if (options.verify === "bindings" && options.checker !== undefined)
+          throw new Error("INVALID_ARGUMENT: checker selects program diagnostics, which verify bindings does not compute");
+        if (options.targetProject)
+          assertLanguage(options.targetProject);
+        if (options.mode !== undefined && !["sort", "remove-unused"].includes(options.mode))
+          throw new Error("INVALID_ARGUMENT: mode sort|remove-unused");
+        if (["move-type", "move-file", "port-route"].includes(operation) && !options.target && !options.moves?.length)
+          throw new Error(`INVALID_ARGUMENT: target required for ${operation}`);
+        if ((options.target !== undefined || options.targetProject !== undefined) && !["move-type", "move-file", "port-route"].includes(operation)) {
+          throw new Error("INVALID_ARGUMENT: target and targetProject require move-type, move-file or port-route");
+        }
+        if (operation === "port-route" && (!options.targetProject || options.moves || options.only || options.mocks !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: port-route requires --route, --to and --target-project; moves, only and mocks are unsupported");
+        }
+        if ((options.startRoutes !== undefined || options.config !== undefined) && operation !== "port-route")
+          throw new Error("INVALID_ARGUMENT: startRoutes and config require port-route");
+        if (options.keep !== undefined && (operation !== "inline-reexports" || typeof options.keep !== "boolean"))
+          throw new Error("INVALID_ARGUMENT: keep requires inline-reexports and a boolean");
+        if (operation === "retarget-import" && (!options.from || !options.to))
+          throw new Error("INVALID_ARGUMENT: from and to required for retarget-import");
+        if (operation !== "retarget-import" && [options.from, options.to].some((value) => value !== undefined)) {
+          throw new Error("INVALID_ARGUMENT: from and to require retarget-import");
+        }
+        if (!["retarget-import", "move-file", "port-route"].includes(operation) && [options.map, options.only].some((value) => value !== undefined))
+          throw new Error("INVALID_ARGUMENT: map and only require retarget-import, move-file or port-route");
+        if (operation === "move-file" && languageForProject(options.project) !== "typescript" && (options.map || options.only))
+          throw new Error("INVALID_ARGUMENT: move-file mappings require TypeScript/JavaScript");
+        if (options.mocks !== undefined && (!["retarget-import", "move-file"].includes(operation) || languageForProject(options.project) !== "typescript"))
+          throw new Error("INVALID_ARGUMENT: mocks requires TypeScript retarget-import or move-file");
+        if (options.mocks !== undefined && !["report", "add"].includes(options.mocks))
+          throw new Error("INVALID_ARGUMENT: mocks report|add");
+        if (options.exclude !== undefined && (!["move-file", "port-route"].includes(operation) || languageForProject(options.project) !== "typescript" || options.only || !Array.isArray(options.exclude) || options.exclude.some((pattern) => typeof pattern !== "string" || !pattern || pattern.startsWith("!") || /^(?:[A-Za-z]:|[\\/])/.test(pattern) || pattern.split(/[\\/]/).includes("..")))) {
+          throw new Error("INVALID_ARGUMENT: exclude requires relative move-file directory globs without --only");
+        }
+        if (options.moves !== undefined && (operation !== "move-file" || languageForProject(options.project) !== "typescript" || !Array.isArray(options.moves) || !options.moves.length || options.file !== undefined || options.target !== undefined || options.moves.some((move) => !move || typeof move.file !== "string" || !move.file || typeof move.target !== "string" || !move.target))) {
+          throw new Error("INVALID_ARGUMENT: moves requires TypeScript move-file pairs, without file/target");
+        }
+        if (options.files !== undefined && (operation !== "inline-reexports" || !Array.isArray(options.files) || !options.files.length || options.file !== undefined || options.files.some((file) => typeof file !== "string" || !file)))
+          throw new Error("INVALID_ARGUMENT: files requires an inline-reexports batch without file");
+        if (!options.file && !options.files?.length && !options.moves?.length && operation !== "retarget-import")
+          throw new Error("INVALID_ARGUMENT: file required");
+        const project = await realpath3(resolve5(options.project));
+        const file = await realpath3(resolve5(options.file ?? options.files?.[0] ?? options.moves?.[0]?.file ?? dirname3(project)));
+        const root = await realpath3(resolve5(options.root ?? dirname3(project)));
+        const defaults = languageForProject(options.project) === "typescript" ? await readRepoConfig(root) : {};
+        const verify = options.verify ?? defaults.verify ?? "full";
+        const checker = options.checker ?? (verify === "full" ? defaults.checker : undefined);
+        const text = operation !== "retarget-import" && (options.at !== undefined || options.end !== undefined) ? await readFile5(file, "utf8") : "";
+        const position = (point) => {
+          if (typeof point === "string")
+            return offset(text, point);
+          if (!Number.isInteger(point) || point < 0 || point > text.length)
+            throw new Error(`INVALID_POSITION: ${point}`);
+          return point;
+        };
+        const request = {
+          project,
+          root,
+          file,
+          operation,
+          ...options.files ? { files: options.files.map((file) => resolve5(file)) } : {},
+          ...options.moves ? { moves: options.moves.map((move) => ({ file: resolve5(move.file), target: resolve5(move.target) })), target: resolve5(options.moves[0].target) } : {},
+          ...options.exclude ? { exclude: [...new Set(options.exclude)].sort() } : {},
+          ...checker !== undefined ? { checker } : {},
+          ...verify === "bindings" ? { verify } : {},
+          ...options.keep !== undefined ? { keep: options.keep } : {},
+          ...operation === "move-file" ? { ...options.mocks ? { mocks: options.mocks } : {}, ...options.map ? { map: options.map } : {}, ...options.only ? { only: options.only } : {} } : {},
+          ...operation === "port-route" ? {
+            ...options.map ? { map: options.map } : {},
+            ...options.startRoutes !== undefined ? { startRoutes: resolve5(options.startRoutes) } : {},
+            config: resolve5(options.config ?? resolve5(root, ".refactor-ai/port-route.json"))
+          } : {},
+          ...operation === "retarget-import" ? {
+            from: options.from,
+            to: options.to,
+            ...options.map ? { map: options.map } : {},
+            ...options.only ? { only: options.only } : {},
+            ...options.mocks !== undefined ? { mocks: options.mocks } : {},
+            ...!options.file ? { projectScope: true } : {}
+          } : {},
+          ...options.symbol !== undefined ? { symbol: options.symbol } : {},
+          ...options.public !== undefined ? { public: options.public } : {},
+          ...options.at !== undefined ? { position: position(options.at) } : {},
+          ...options.end !== undefined ? { end: position(options.end) } : {},
+          ...options.name !== undefined ? { newName: options.name } : {},
+          ...operation === "imports" ? { mode: options.mode ?? (context.language === "csharp" ? "remove-unused" : "sort") } : {},
+          ...options.target !== undefined ? { target: resolve5(options.target) } : {},
+          ...options.targetProject !== undefined ? { targetProject: await realpath3(resolve5(options.targetProject)) } : {},
+          ...options.typeName !== undefined ? { typeName: options.typeName } : {},
+          ...options.rootNamespace !== undefined ? { rootNamespace: options.rootNamespace } : {}
+        };
+        return { project, request };
+      }
+    },
+    preview(plan) {
+      checkPlan(plan);
+      return preview(plan);
+    },
+    async validate(plan) {
+      checkPlan(plan);
+      await assertFresh(plan, compilerBase);
+      return { status: plan.validation.status === "passed" ? "validated" : "failed", validation: plan.validation, id: plan.id, verify: plan.request.verify ?? "full" };
+    },
+    async apply(plan) {
+      checkPlan(plan);
+      const result = await applyPlan(plan, compilerBase);
+      return plan.request.verify === "bindings" ? { ...result, verify: "bindings", next: bindingsReminder } : result;
+    },
+    async loadPlan(path) {
+      const plan = await loadPlan(resolve5(path));
+      checkPlan(plan);
+      return plan;
+    },
+    async capabilities(project) {
+      assertLanguage(project);
+      const engine = await context.loadBackend(await realpath3(resolve5(project)), context.toolkitRoot);
+      return engine.capabilities.filter((item) => !context.operation || item.operation === context.operation).map((item) => ({ ...item, ...item.modes ? { modes: [...item.modes] } : {} }));
+    }
+  };
+}
+
+// src/runtime/skill.ts
+import { existsSync as existsSync2, readFileSync } from "node:fs";
+import { mkdir as mkdir2, rm as rm2 } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { join as join2 } from "node:path";
+
+// src/runtime/npm.ts
+import { existsSync, realpathSync } from "node:fs";
+import { delimiter, dirname as dirname4, join, resolve as resolve6 } from "node:path";
+function npmCli() {
+  const executableDirectory = dirname4(process.execPath);
+  const candidates = [
+    process.env.npm_execpath,
+    join(executableDirectory, "node_modules", "npm", "bin", "npm-cli.js"),
+    resolve6(executableDirectory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    ...(process.env.PATH ?? "").split(delimiter).map((directory) => join(directory, process.platform === "win32" ? "npm.cmd" : "npm"))
+  ];
+  for (const candidate of candidates) {
+    if (!candidate)
+      continue;
+    try {
+      let path = realpathSync(candidate);
+      if (path.endsWith(".cmd"))
+        path = join(dirname4(path), "node_modules", "npm", "bin", "npm-cli.js");
+      if (path.endsWith("npm-cli.js") && existsSync(path))
+        return path;
+    } catch {}
+  }
+  throw new Error("NPM_NOT_FOUND: npm is required; install Node.js with npm");
+}
+
+// src/runtime/skill.ts
+async function ensureSkillRuntime(skillRoot, quiet = false) {
+  const runtime = join2(skillRoot, "assets", "runtime");
+  const ready = () => {
+    try {
+      const manifest = JSON.parse(readFileSync(join2(runtime, "node_modules", "typescript", "package.json"), "utf8"));
+      return manifest.version === "5.9.3" && existsSync2(join2(runtime, "node_modules", "typescript", "lib", "typescript.js"));
+    } catch {
+      return false;
+    }
+  };
+  if (ready())
+    return;
+  const lock = join2(runtime, ".setup.lock");
+  try {
+    await mkdir2(lock);
+  } catch (error) {
+    if (error.code === "EEXIST")
+      throw new Error(`SKILL_SETUP_BUSY: another setup is running; after an interrupted setup inspect ${lock}`);
+    throw error;
+  }
+  try {
+    if (ready())
+      return;
+    if (!quiet)
+      process.stderr.write(`Installing the skill's locked TypeScript runtime dependency...
+`);
+    const result = spawnSync(process.execPath, [npmCli(), "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], {
+      cwd: runtime,
+      stdio: quiet ? ["ignore", "pipe", "pipe"] : ["ignore", process.stderr, process.stderr],
+      timeout: 180000,
+      encoding: "utf8"
+    });
+    if (result.error)
+      throw new Error(`SKILL_SETUP_FAILED: ${result.error.message}`);
+    if (result.status !== 0 || !ready())
+      throw new Error(`SKILL_SETUP_FAILED: npm ci did not install the locked runtime dependency${quiet ? `
+${result.stderr || result.stdout}` : ""}`);
+  } finally {
+    await rm2(lock, { recursive: true, force: true });
+  }
+}
+
+// scripts/skill-api.ts
+async function createInstalledRefactor(moduleUrl, operation) {
+  const skillRoot = resolve7(dirname5(fileURLToPath(moduleUrl)), "..");
+  if (Number(process.versions.node.split(".")[0]) < 22)
+    throw new Error("UNSUPPORTED_RUNTIME: Node.js 22+ is required");
+  await ensureSkillRuntime(skillRoot, true);
+  const { loadBackend } = await import(pathToFileURL(join3(skillRoot, "assets", "runtime", "api.mjs")).href);
+  return createRefactorApi({
+    loadBackend,
+    operation,
+    language: operation.startsWith("extract-") || operation === "retarget-import" || operation === "port-route" ? "typescript" : operation === "sync-namespace" ? "csharp" : undefined,
+    toolkitRoot: join3(skillRoot, "assets")
+  });
+}
+
+// dist/skill-api-entry.ts
+var createRefactor = () => createInstalledRefactor(import.meta.url, "retarget-import");
+export {
+  createRefactor
+};

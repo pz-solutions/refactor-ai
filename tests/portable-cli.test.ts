@@ -32,7 +32,7 @@ test("Windows drive and UNC module paths use forward slashes", () => {
 for (const language of ["ts", "js"]) {
   test(`built Node CLI completes every supported ${language} plan workflow on native paths`, async () => {
     const cli = join(repo, "dist", "cli.js");
-    for (const operation of ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type"]) {
+    for (const operation of ["rename", "imports", "format", "extract-function", "extract-variable", "rename-file", "move-type", "move-file"]) {
       const project = join(root, `${language} ${operation}`), file = join(project, `Wrong.${language}`);
       await mkdir(project);
       const source = `export class Widget { id = 1; }\nexport function oldName(value${language === "ts" ? ": number" : ""}) {\n  const total = value + 1;\n  return total;\n}\nconsole.log(oldName(2), new Widget().id);\n`;
@@ -43,7 +43,7 @@ for (const language of ["ts", "js"]) {
         : operation === "extract-function" ? ["--at", "3:3", "--end", "4:16", "--name", "calculate"]
         : operation === "extract-variable" ? ["--at", "3:17", "--end", "3:26", "--name", "result"]
         : ["rename-file", "move-type"].includes(operation) ? ["--type", "Widget"] : [];
-      if (operation === "move-type") options.push("--to", join(project, "nested", `Widget.${language}`));
+      if (["move-type", "move-file"].includes(operation)) options.push("--to", join(project, "nested", `Widget.${language}`));
       const response = JSON.parse(run(node, [cli, "plan", operation, "--project", config, "--file", file, ...options], project));
       expect(response.validation.status).toBe("passed");
       const plan = JSON.parse(await readFile(response.plan, "utf8"));

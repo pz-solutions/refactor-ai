@@ -1,0 +1,385 @@
+{
+  "rename": {
+    "pairs": [
+      {
+        "report": "pre-parent-fix-paired.json",
+        "run": 1,
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "fileCount": 2
+      },
+      {
+        "report": "pre-parent-fix-paired.json",
+        "run": 2,
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "fileCount": 2
+      },
+      {
+        "report": "pre-parent-fix-paired.json",
+        "run": 3,
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "3269bcc2ac3a82d0543030ca157f1bf63e505968c4f68daa943b615278d313a1",
+        "fileCount": 2
+      }
+    ],
+    "variants": {
+      "before": {
+        "n": 3,
+        "medianMs": 18454,
+        "minMs": 12544,
+        "maxMs": 19123,
+        "samplesMs": [
+          19123,
+          12544,
+          18454
+        ],
+        "phaseMediansMs": {
+          "diagnostics.after": 12039
+        }
+      },
+      "after": {
+        "n": 3,
+        "medianMs": 15808,
+        "minMs": 10049,
+        "maxMs": 16758,
+        "samplesMs": [
+          16758,
+          10049,
+          15808
+        ],
+        "phaseMediansMs": {
+          "diagnostics.after": 10449
+        }
+      },
+      "ts7": {
+        "n": 3,
+        "medianMs": 11999,
+        "minMs": 10007,
+        "maxMs": 16573,
+        "samplesMs": [
+          16573,
+          11999,
+          10007
+        ],
+        "phaseMediansMs": {
+          "diagnostics.ts7": 6666,
+          "inputs.check": 1
+        }
+      },
+      "both": {
+        "n": 3,
+        "medianMs": 28046,
+        "minMs": 18336,
+        "maxMs": 30745,
+        "samplesMs": [
+          28046,
+          30745,
+          18336
+        ],
+        "phaseMediansMs": {
+          "diagnostics.after": 14495,
+          "diagnostics.ts7": 5647,
+          "inputs.check": 0
+        }
+      }
+    }
+  },
+  "retarget": {
+    "pairs": [
+      {
+        "report": "pre-parent-fix-paired.json",
+        "run": 1,
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "fileCount": 98
+      },
+      {
+        "report": "pre-parent-fix-paired.json",
+        "run": 2,
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "fileCount": 98
+      },
+      {
+        "report": "pre-parent-fix-paired.json",
+        "run": 3,
+        "snapshotHash": "6956b543ea9cbc8b2666c49d06f940e78213b06aa1724d696045d298d9a249d7",
+        "editHash": "781c2af04ea4e98dfcc63b46b15d77a11412a3bddae651ac6e756dff4ab9f711",
+        "fileCount": 98
+      }
+    ],
+    "variants": {
+      "before": {
+        "n": 3,
+        "medianMs": 30295,
+        "minMs": 24094,
+        "maxMs": 32080,
+        "samplesMs": [
+          32080,
+          24094,
+          30295
+        ],
+        "phaseMediansMs": {
+          "diagnostics.after": 19858
+        }
+      },
+      "after": {
+        "n": 3,
+        "medianMs": 27295,
+        "minMs": 22805,
+        "maxMs": 32232,
+        "samplesMs": [
+          32232,
+          22805,
+          27295
+        ],
+        "phaseMediansMs": {
+          "diagnostics.after": 16799
+        }
+      },
+      "ts7": {
+        "n": 3,
+        "medianMs": 18843,
+        "minMs": 16577,
+        "maxMs": 21332,
+        "samplesMs": [
+          21332,
+          18843,
+          16577
+        ],
+        "phaseMediansMs": {
+          "diagnostics.ts7": 9694,
+          "inputs.check": 2
+        }
+      },
+      "both": {
+        "n": 3,
+        "medianMs": 40268,
+        "minMs": 32789,
+        "maxMs": 40727,
+        "samplesMs": [
+          32789,
+          40268,
+          40727
+        ],
+        "phaseMediansMs": {
+          "diagnostics.after": 19424,
+          "diagnostics.ts7": 11001,
+          "inputs.check": 3
+        }
+      }
+    }
+  },
+  "inline": {
+    "pairs": [
+      {
+        "report": "paired-inline-main.json",
+        "run": 1,
+        "snapshotHash": "7fe71333f1b741c668a3d99ede3f4f2478b256f0441b92511b6a1aecc1c9e15c",
+        "editHash": "5c2c4d56fc913f8ac4e39f64d8500218b7a531830ad3421605abf097c02ca426",
+        "fileCount": 100
+      },
+      {
+        "report": "paired-inline-main.json",
+        "run": 3,
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "fileCount": 97
+      },
+      {
+        "report": "paired-inline-replacement.json",
+        "run": 1,
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "fileCount": 97
+      }
+    ],
+    "variants": {
+      "before": {
+        "n": 3,
+        "medianMs": 125965,
+        "minMs": 122959,
+        "maxMs": 151389,
+        "samplesMs": [
+          151389,
+          122959,
+          125965
+        ],
+        "phaseMediansMs": {
+          "workspace.load": 7755,
+          "workspace.prepare": 4588,
+          "workspace.validate": 36946
+        }
+      },
+      "after": {
+        "n": 3,
+        "medianMs": 27541,
+        "minMs": 24798,
+        "maxMs": 35324,
+        "samplesMs": [
+          35324,
+          24798,
+          27541
+        ],
+        "phaseMediansMs": {
+          "workspace.external-projects": 1198,
+          "workspace.inline": 1041,
+          "workspace.inputs": 40,
+          "workspace.load": 7061,
+          "workspace.prepare": 1045,
+          "workspace.program": 3844,
+          "workspace.validate": 12130
+        }
+      },
+      "ts7": {
+        "n": 3,
+        "medianMs": 19844,
+        "minMs": 17477,
+        "maxMs": 24834,
+        "samplesMs": [
+          24834,
+          17477,
+          19844
+        ],
+        "phaseMediansMs": {
+          "diagnostics.ts7": 5499,
+          "workspace.external-projects": 1072,
+          "workspace.inline": 1001,
+          "workspace.inputs": 49,
+          "workspace.load": 5696,
+          "workspace.prepare": 989,
+          "workspace.program": 3801,
+          "workspace.validate": 6108
+        }
+      },
+      "both": {
+        "n": 3,
+        "medianMs": 34803,
+        "minMs": 33252,
+        "maxMs": 38217,
+        "samplesMs": [
+          38217,
+          33252,
+          34803
+        ],
+        "phaseMediansMs": {
+          "diagnostics.ts7": 5690,
+          "workspace.external-projects": 1159,
+          "workspace.inline": 1053,
+          "workspace.inputs": 45,
+          "workspace.load": 6194,
+          "workspace.prepare": 967,
+          "workspace.program": 3733,
+          "workspace.validate": 20286
+        }
+      }
+    }
+  },
+  "move": {
+    "pairs": [
+      {
+        "report": "paired-move.json",
+        "run": 1,
+        "snapshotHash": "7fe71333f1b741c668a3d99ede3f4f2478b256f0441b92511b6a1aecc1c9e15c",
+        "editHash": "adbd1e142b3e074e53e472b37f8fe20abc7c41885a0e5b4b17e561f5dee61be2",
+        "fileCount": 18
+      },
+      {
+        "report": "paired-move.json",
+        "run": 2,
+        "snapshotHash": "7fe71333f1b741c668a3d99ede3f4f2478b256f0441b92511b6a1aecc1c9e15c",
+        "editHash": "adbd1e142b3e074e53e472b37f8fe20abc7c41885a0e5b4b17e561f5dee61be2",
+        "fileCount": 18
+      },
+      {
+        "report": "paired-move.json",
+        "run": 3,
+        "snapshotHash": "7fe71333f1b741c668a3d99ede3f4f2478b256f0441b92511b6a1aecc1c9e15c",
+        "editHash": "adbd1e142b3e074e53e472b37f8fe20abc7c41885a0e5b4b17e561f5dee61be2",
+        "fileCount": 18
+      }
+    ],
+    "variants": {
+      "before": {
+        "n": 3,
+        "medianMs": 99416,
+        "minMs": 88544,
+        "maxMs": 106593,
+        "samplesMs": [
+          106593,
+          99416,
+          88544
+        ],
+        "phaseMediansMs": {
+          "workspace.load": 10976,
+          "workspace.move": 14202,
+          "workspace.prepare": 2607,
+          "workspace.validate": 49021
+        }
+      },
+      "after": {
+        "n": 3,
+        "medianMs": 62994,
+        "minMs": 55521,
+        "maxMs": 63422,
+        "samplesMs": [
+          55521,
+          62994,
+          63422
+        ],
+        "phaseMediansMs": {
+          "workspace.external-projects": 613,
+          "workspace.inputs": 75,
+          "workspace.load": 9109,
+          "workspace.move": 3012,
+          "workspace.prepare": 965,
+          "workspace.program": 4984,
+          "workspace.validate": 40394
+        }
+      },
+      "ts7": {
+        "n": 3,
+        "medianMs": 40454,
+        "minMs": 34952,
+        "maxMs": 45136,
+        "samplesMs": [
+          45136,
+          34952,
+          40454
+        ],
+        "phaseMediansMs": {
+          "diagnostics.ts7": 16183,
+          "workspace.external-projects": 666,
+          "workspace.inputs": 59,
+          "workspace.load": 10223,
+          "workspace.move": 3228,
+          "workspace.prepare": 864,
+          "workspace.program": 5150,
+          "workspace.validate": 17783
+        }
+      },
+      "both": {
+        "n": 3,
+        "medianMs": 72319,
+        "minMs": 63976,
+        "maxMs": 84389,
+        "samplesMs": [
+          84389,
+          63976,
+          72319
+        ],
+        "phaseMediansMs": {
+          "diagnostics.ts7": 14200,
+          "workspace.external-projects": 773,
+          "workspace.inputs": 55,
+          "workspace.load": 9858,
+          "workspace.move": 3074,
+          "workspace.prepare": 855,
+          "workspace.program": 5064,
+          "workspace.validate": 51781
+        }
+      }
+    }
+  }
+}

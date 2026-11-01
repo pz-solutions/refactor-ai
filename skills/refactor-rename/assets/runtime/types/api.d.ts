@@ -4,32 +4,72 @@ import { RefactorContext } from "./refactor-context.js";
 export type { Plan } from "./core/plan.js";
 export type { Capability, Diagnostic, FileChange, Operation } from "./types.js";
 export interface PlanOptions {
+    /** Diagnostics checker for full verification; defaults to .refactor-ai/config.json, then TS5. */
+    checker?: "ts5" | "ts7" | "both";
+    /** TypeScript rename: select a top-level declaration instead of a position. */
+    symbol?: string;
+    /** TypeScript rename: propagate unaliased public exports through loaded consumers. */
+    public?: boolean;
+    /**
+     * full (default): program diagnostics. bindings (TypeScript): edits, prechecks,
+     * reference preservation and changed files' syntax/import bindings only; run
+     * the project typecheck after apply. Defaults to .refactor-ai/config.json.
+     */
+    verify?: "full" | "bindings";
     project: string;
-    file: string;
+    file?: string;
+    /** Atomic inline-reexports batch, sorted before planning. */
+    files?: string[];
+    /** Atomic file/directory moves; mutually exclusive with file/target in the public API. */
+    moves?: {
+        file: string;
+        target: string;
+    }[];
+    /** TS-style globs relative to each moved directory; excluded adapters remain. */
+    exclude?: string[];
     /** Defaults to the project configuration's directory. Must cover all changed files. */
     root?: string;
     /** Required for the aggregate API; operation packages select their own operation. */
     operation?: Operation;
+    /** Exact source/destination module specifiers for retarget-import. */
+    from?: string;
+    to?: string;
+    /** retarget-import: export names; move-file: module or module#Export mappings. */
+    map?: Record<string, string>;
+    /** retarget-import: imported export names; move-file: declarations to extract. */
+    only?: string[];
+    /** Report affected external test mocks (default), or add parallel mapped mocks. */
+    mocks?: "report" | "add";
     /** A 1-based UTF-16 line:column string or a zero-based UTF-16 offset. */
     at?: string | number;
     /** Exclusive extraction end, using the same coordinates as at. */
     end?: string | number;
     name?: string;
     mode?: "sort" | "remove-unused";
+    /** Keep an inlined re-export shim; valid only for inline-reexports. */
+    keep?: boolean;
     target?: string;
     targetProject?: string;
     typeName?: string;
     rootNamespace?: string;
+    /** port-route: TanStack Start routes directory (defaults to the config's start.routes). */
+    startRoutes?: string;
+    /** port-route: project configuration (defaults to <root>/.refactor-ai/port-route.json). */
+    config?: string;
 }
 export interface ValidationResult {
     status: "validated" | "failed";
     validation: Plan["validation"];
     id: string;
+    verify: "full" | "bindings";
 }
 export interface ApplyResult {
     status: "applied";
     files: string[];
     journal: string | null;
+    /** Present for --verify bindings plans: program diagnostics were not computed. */
+    verify?: "bindings";
+    next?: string;
 }
 export interface RefactorApi {
     /** Compute changes without writing sources or a plan file. Failed diagnostics remain in the plan. */

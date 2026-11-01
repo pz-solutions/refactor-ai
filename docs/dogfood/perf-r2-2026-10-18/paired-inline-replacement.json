@@ -1,0 +1,144 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "before": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli-before-r2.js",
+  "after": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+  "node": "v22.23.3",
+  "targetCommit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+  "beforeHash": "365c1c14f4ab0a580d6f33921cb2482270e5c183f80acf4d119b411fb247e090",
+  "afterHash": "77f8e071314c83e05d20f86aee4d5aa09f299cf9bc475af446fda16a09fac216",
+  "mode": "paired cold processes; OS cache retained; cache off; no apply",
+  "samples": [
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "before",
+      "ms": 125965,
+      "status": 0,
+      "machineLoad": [
+        6.41,
+        8.41,
+        11.62
+      ],
+      "phases": {
+        "workspace.load": 7755,
+        "workspace.prepare": 4588,
+        "workspace.validate": 36946
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "fileCount": 97
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "after",
+      "ms": 27541,
+      "status": 0,
+      "machineLoad": [
+        8.58,
+        8.76,
+        11.34
+      ],
+      "phases": {
+        "workspace.load": 7061,
+        "workspace.program": 3844,
+        "workspace.prepare": 1045,
+        "workspace.inline": 1041,
+        "workspace.external-projects": 1198,
+        "workspace.validate": 12130,
+        "workspace.inputs": 34
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts5",
+          "version": "5.9.3"
+        },
+        "fileCount": 97
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "ts7",
+      "ms": 19844,
+      "status": 0,
+      "machineLoad": [
+        7.39,
+        8.5,
+        11.19
+      ],
+      "phases": {
+        "workspace.load": 5696,
+        "workspace.program": 3801,
+        "workspace.prepare": 989,
+        "workspace.inline": 1001,
+        "workspace.external-projects": 1072,
+        "diagnostics.ts7": 5499,
+        "workspace.validate": 6108,
+        "workspace.inputs": 49
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "ts7",
+          "version": "7.0.2"
+        },
+        "fileCount": 97
+      }
+    },
+    {
+      "scenario": "inline",
+      "run": 1,
+      "variant": "both",
+      "ms": 34803,
+      "status": 0,
+      "machineLoad": [
+        6.79,
+        8.27,
+        11.05
+      ],
+      "phases": {
+        "workspace.load": 6194,
+        "workspace.program": 3733,
+        "workspace.prepare": 967,
+        "workspace.inline": 1027,
+        "workspace.external-projects": 1219,
+        "diagnostics.ts7": 5919,
+        "workspace.validate": 20286,
+        "workspace.inputs": 36
+      },
+      "outcome": {
+        "snapshotHash": "f0a9eb21aa6467b99b203480f8c08693337d7f1ce25e6ce6365eb0910736aac2",
+        "editHash": "a5b71e3a1af05d024a6ccee39153fd5f4030f4801332a65393674d6ac19cac7f",
+        "validation": {
+          "status": "passed",
+          "newDiagnostics": []
+        },
+        "checker": {
+          "name": "both",
+          "version": "7.0.2",
+          "comparedWith": "typescript@5.9.3"
+        },
+        "fileCount": 97
+      }
+    }
+  ],
+  "stage": "Final engine. One complete pair replaces the rejected baseline repetition."
+}

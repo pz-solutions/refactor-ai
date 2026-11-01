@@ -1,0 +1,104 @@
+{
+  "checker": "typescript-7.0.2",
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "project": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/packages/app-features/tsconfig.json",
+  "mode": "full native diagnostics over real edit-only plans; disk unchanged",
+  "samples": [
+    {
+      "stage": "baseline",
+      "ms": 4186,
+      "diagnostics": 0
+    },
+    {
+      "stage": "plan 1",
+      "ms": 3567,
+      "diagnostics": 0,
+      "files": 2
+    },
+    {
+      "stage": "plan 2",
+      "ms": 3503,
+      "diagnostics": 0,
+      "files": 2
+    },
+    {
+      "stage": "plan 3",
+      "ms": 3107,
+      "diagnostics": 0,
+      "files": 2
+    },
+    {
+      "stage": "plan 4",
+      "ms": 3444,
+      "diagnostics": 0,
+      "files": 2
+    },
+    {
+      "stage": "plan 5",
+      "ms": 3448,
+      "diagnostics": 0,
+      "files": 2
+    }
+  ],
+  "timing": {
+    "enabled": true,
+    "totals": {
+      "requestCount": 48,
+      "roundTripMs": 21249.357787999994,
+      "bytesSent": 7242,
+      "bytesReceived": 509831,
+      "serverTimeMs": 21239.856977000003,
+      "transportOverheadMs": 9.50081099999079,
+      "nodesMaterialized": 0,
+      "sourceFilesFetched": 11,
+      "nodesFetched": 10951
+    },
+    "recentRequests": [
+      {
+        "method": "getConfigFileParsingDiagnostics",
+        "roundTripMs": 0.04493399999773828,
+        "bytesSent": 115,
+        "bytesReceived": 2,
+        "timestamp": 1792311237368,
+        "serverTimeMs": 0.00568,
+        "transportOverheadMs": 0.039253999997738286
+      },
+      {
+        "method": "getProgramDiagnostics",
+        "roundTripMs": 0.6976009999998496,
+        "bytesSent": 115,
+        "bytesReceived": 2,
+        "timestamp": 1792311237369,
+        "serverTimeMs": 0.65452,
+        "transportOverheadMs": 0.0430809999998496
+      },
+      {
+        "method": "getGlobalDiagnostics",
+        "roundTripMs": 3320.121755,
+        "bytesSent": 115,
+        "bytesReceived": 2,
+        "timestamp": 1792311240689,
+        "serverTimeMs": 3320.027318,
+        "transportOverheadMs": 0.09443700000019817
+      },
+      {
+        "method": "getSyntacticDiagnostics",
+        "roundTripMs": 0.35021899999992456,
+        "bytesSent": 115,
+        "bytesReceived": 2,
+        "timestamp": 1792311240689,
+        "serverTimeMs": 0.297529,
+        "transportOverheadMs": 0.052689999999924575
+      },
+      {
+        "method": "getSemanticDiagnostics",
+        "roundTripMs": 1.0451739999989513,
+        "bytesSent": 115,
+        "bytesReceived": 2,
+        "timestamp": 1792311240690,
+        "serverTimeMs": 1.002283,
+        "transportOverheadMs": 0.042890999998951296
+      }
+    ]
+  }
+}

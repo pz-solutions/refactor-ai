@@ -1,0 +1,25 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "cli": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/baseline.js",
+  "runs": 1,
+  "mode": "cold process, OS filesystem cache retained",
+  "results": [
+    {
+      "scenario": "rename",
+      "medianMs": 19771,
+      "minMs": 19771,
+      "maxMs": 19771,
+      "samples": [
+        {
+          "ms": 19771,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {},
+          "notes": [
+            "Validated 23 affected file(s): the changed files and their transitive importers."
+          ]
+        }
+      ]
+    }
+  ]
+}

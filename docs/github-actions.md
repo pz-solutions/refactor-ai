@@ -10,7 +10,7 @@ The `CI / Build, test and pack` job uses Ubuntu 24.04, Node 22, Bun 1.4.2 and .N
 
 `CI / Windows Node CLI and distributions` builds the same JavaScript resources on Windows 2022 and exercises TS/JS plan/preview/validate/apply for every implemented operation, including extraction, nested destinations, explicit files lists, include/exclude globs and cross-project re-exports. It also runs an independently copied skill and an actual packed npm executable through Node/npm exec. This job covers TS/JS portability; it does not claim to validate Windows ACL preservation or C# on Windows. Both jobs must pass before the publishing job starts.
 
-The job runs TypeScript checking, a locked Roslyn build, Node builds, regression tests, independent skill installation tests, packed npm integration tests and the behavior-preserving demo. It then packs all fourteen generated npm packages and records SHA-512 integrity values in `release.json`.
+The job runs TypeScript checking, a locked Roslyn build, Node builds, regression tests, independent skill installation tests, packed npm integration tests and the behavior-preserving demo. It then packs all fifteen generated npm packages and records SHA-512 integrity values in `release.json`.
 
 Successful runs upload two artifacts:
 
@@ -39,9 +39,9 @@ node dist/npm-release.mjs pack
 
 `.github/workflows/publish.yml` triggers on pushed `v*` tags. Its publishing job runs only for tags in `pz-solutions/refactor-ai`, after verification passes. It downloads `npm-packages` from that same workflow run and publishes those archives without rebuilding them. Repository write access is unnecessary.
 
-All fourteen packages follow a **fixed common version** sourced from the private author `package.json`. CI checks a release tag against that version while packing, before uploading release artifacts; the publisher checks it again. Local real publication also requires an explicit matching `--ref`. Packages must have the expected scope and repository metadata. All archive hashes are checked before registry access. Stable versions use the npm `latest` tag; prereleases use `next`.
+All fifteen packages follow a **fixed common version** sourced from the private author `package.json`. CI checks a release tag against that version while packing, before uploading release artifacts; the publisher checks it again. Local real publication also requires an explicit matching `--ref`. Packages must have the expected scope and repository metadata. All archive hashes are checked before registry access. Stable versions use the npm `latest` tag; prereleases use `next`.
 
-Before publishing, it queries each exact version. Identical existing archives are skipped. For an incomplete release, it also checks every package's distribution tags before the first upload. A stable release cannot move `latest` backwards; a prerelease cannot move `next` backwards or precede an existing `latest`. Comparison follows SemVer, so `beta.10` is newer than `beta.9`. An existing version with different content, a malformed response or a registry/network error aborts preflight. Only an npm `E404` is interpreted as a missing version/channel. Publication of fourteen packages is sequential and cannot be atomic; a retry with identical artifacts resumes missing packages. A completed release retry performs no uploads or tag changes, even when a newer release exists.
+Before publishing, it queries each exact version. Identical existing archives are skipped. For an incomplete release, it also checks every package's distribution tags before the first upload. A stable release cannot move `latest` backwards; a prerelease cannot move `next` backwards or precede an existing `latest`. Comparison follows SemVer, so `beta.10` is newer than `beta.9`. An existing version with different content, a malformed response or a registry/network error aborts preflight. Only an npm `E404` is interpreted as a missing version/channel. Publication of fifteen packages is sequential and cannot be atomic; a retry with identical artifacts resumes missing packages. A completed release retry performs no uploads or tag changes, even when a newer release exists.
 
 The workflow serializes publishers with its concurrency group. Registry checks are not a transaction against publishers outside this workflow; use this workflow as the single release path rather than publishing concurrently by hand. Dry runs do not query registry state, so they validate packaging, not availability or advancement of distribution tags.
 
@@ -66,7 +66,7 @@ node /absolute/path/to/npm-packages/release.mjs publish \
 
 Use the artifact's actual version and select `next` instead of `latest` for a prerelease. The native `npm publish` commands allow interactive 2FA during this one-time bootstrap. Each new scoped package must exist before its Trusted Publisher can be configured. These commands are instructions for the publisher; repository builds and tests never execute a real publication.
 
-In GitHub, create an environment named `npm`. In each of the fourteen packages' npm Settings, add a GitHub Actions Trusted Publisher with these exact values:
+In GitHub, create an environment named `npm`. In each of the fifteen packages' npm Settings, add a GitHub Actions Trusted Publisher with these exact values:
 
 | npm field | Value |
 | --- | --- |

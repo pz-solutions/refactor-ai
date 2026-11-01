@@ -1,0 +1,31 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "mode": "warm LanguageService, sequential distinct rename plans, no apply",
+  "samples": [
+    {
+      "plan": 1,
+      "ms": 14842,
+      "status": "ok"
+    },
+    {
+      "plan": 2,
+      "ms": 11966,
+      "status": "ok"
+    },
+    {
+      "plan": 3,
+      "ms": 11352,
+      "status": "ok"
+    },
+    {
+      "plan": 4,
+      "ms": 9420,
+      "status": "ok"
+    },
+    {
+      "plan": 5,
+      "ms": 11584,
+      "status": "ok"
+    }
+  ]
+}

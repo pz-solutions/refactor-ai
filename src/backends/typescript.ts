@@ -1,9 +1,16 @@
 import ts from "typescript";
+import { timed } from "./typescript-timing";
+import { baselineDiagnostics, CompilerInputs } from "./typescript-diagnostics-cache";
 import { statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, resolve } from "node:path";
 import type { BackendResult, Capability, Diagnostic, FileChange, RefactorRequest } from "../types";
 import { analyzeFileOperation, fileCapabilities } from "./typescript-fileops";
-import { isInside } from "./typescript-paths";
+import { moduleSpecifiers, setWorkspaceWarmMode } from "./typescript-workspace";
+import { retargetImports } from "./typescript-retarget-import";
+import { isInside, workspaceRootHint } from "./typescript-paths";
+import { bothIdentity, compareWorkspaceDiagnostics, loadTs7Checker, ts7Identity } from "./typescript-ts7";
+import { VirtualFs } from "./typescript-vfs";
+import { ambientModules, assertBindings, type BindingState } from "./typescript-bindings";
 
 export const capabilities: Capability[] = [
   { operation: "rename", description: "Rename a TypeScript or JavaScript symbol across its configured project." },
@@ -11,6 +18,7 @@ export const capabilities: Capability[] = [
   { operation: "format", description: "Format a source file with the TypeScript formatter." },
   { operation: "extract-function", description: "Extract the selected statements or expression to a named function." },
   { operation: "extract-variable", description: "Extract the selected expression to a named variable." },
+  { operation: "retarget-import", description: "Retarget imports and re-exports to an API-compatible module, with optional export mapping." },
   ...fileCapabilities,
 ];
 
@@ -31,6 +39,7 @@ const formatOptions: ts.FormatCodeSettings = {
 };
 
 interface ProjectState {
+  inputs: CompilerInputs;
   configPath: string;
   root: string;
   fileNames: string[];
@@ -39,6 +48,19 @@ interface ProjectState {
   versions: Map<string, number>;
   service: ts.LanguageService;
   bumpProjectVersion(): void;
+}
+
+let warmMode = false;
+const warmProjects = new Map<string, ProjectState>();
+
+/** Explicit server lifetime; ordinary CLI/API calls still release their programs. */
+export function setWarmMode(enabled: boolean): void {
+  warmMode = enabled;
+  setWorkspaceWarmMode(enabled);
+  if (!enabled) {
+    for (const state of warmProjects.values()) state.service.dispose();
+    warmProjects.clear();
+  }
 }
 
 function fail(code: string, reason: string): never {
@@ -81,9 +103,14 @@ function loadProject(request: RefactorRequest): ProjectState {
   const project = assertAbsolute("project", request.project);
   const configPath = configPathFor(project);
   if (!isInside(root, configPath)) fail("OUTSIDE_ROOT", `project config is outside ${root}`);
+  const cacheKey = `${root}\0${configPath}`;
+  const warm = warmProjects.get(cacheKey);
+  if (warm && warm.inputs.unchanged()) return warm;
+  if (warm) { warm.service.dispose(); warmProjects.delete(cacheKey); }
 
+  const inputs = new CompilerInputs(true);
   const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, {
-    ...ts.sys,
+    ...inputs.sys,
     onUnRecoverableConfigFileDiagnostic(diagnostic) {
       fail("INVALID_CONFIG", ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
     },
@@ -105,23 +132,24 @@ function loadProject(request: RefactorRequest): ProjectState {
     getScriptVersion: (fileName) => String(versions.get(canonical(fileName)) ?? 0),
     getScriptSnapshot(fileName) {
       const path = canonical(fileName);
-      const text = overlays.get(path) ?? ts.sys.readFile(path);
+      const text = overlays.get(path) ?? inputs.sys.readFile(path);
       return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
     },
     getCurrentDirectory: () => dirname(configPath),
     getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
-    fileExists: ts.sys.fileExists,
-    readFile: ts.sys.readFile,
-    readDirectory: ts.sys.readDirectory,
-    directoryExists: ts.sys.directoryExists,
-    getDirectories: ts.sys.getDirectories,
-    realpath: ts.sys.realpath,
+    fileExists: inputs.sys.fileExists,
+    readFile: inputs.sys.readFile,
+    readDirectory: inputs.sys.readDirectory,
+    directoryExists: inputs.sys.directoryExists,
+    getDirectories: inputs.sys.getDirectories,
+    realpath: inputs.sys.realpath,
     useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
     getNewLine: () => ts.sys.newLine,
     getProjectVersion: () => String(projectVersion),
   };
   const service = ts.createLanguageService(host, ts.createDocumentRegistry());
-  return {
+  const state: ProjectState = {
+    inputs,
     configPath,
     root,
     fileNames,
@@ -131,10 +159,18 @@ function loadProject(request: RefactorRequest): ProjectState {
     service,
     bumpProjectVersion() { projectVersion += 1; },
   };
+  if (warmMode) {
+    if (warmProjects.size >= 4) {
+      const [key, oldest] = warmProjects.entries().next().value!;
+      oldest.service.dispose(); warmProjects.delete(key);
+    }
+    warmProjects.set(cacheKey, state);
+  }
+  return state;
 }
 
 function sourceText(state: ProjectState, path: string): string | undefined {
-  return state.overlays.get(path) ?? ts.sys.readFile(path);
+  return state.overlays.get(path) ?? state.inputs.sys.readFile(path);
 }
 
 function setOverlay(state: ProjectState, path: string, text: string): void {
@@ -177,21 +213,89 @@ function diagnosticRecord(diagnostic: ts.Diagnostic, fallback: string): Diagnost
   };
 }
 
-function diagnostics(state: ProjectState): Diagnostic[] {
+function diagnostics(state: ProjectState, program: ts.Program, only?: Set<string>): Diagnostic[] {
   const records: Diagnostic[] = [];
   const add = (diagnostic: ts.Diagnostic) => {
     if (diagnostic.category !== ts.DiagnosticCategory.Error) return;
     records.push(diagnosticRecord(diagnostic, state.configPath));
   };
-  for (const item of state.service.getCompilerOptionsDiagnostics()) add(item);
-  const programFiles = state.service.getProgram()?.getSourceFiles()
+  for (const item of program.getOptionsDiagnostics()) add(item);
+  for (const item of program.getGlobalDiagnostics()) add(item);
+  const programFiles = program.getSourceFiles()
     .map((source) => canonical(source.fileName))
     .filter((path) => isInside(state.root, path) && !path.includes("/node_modules/")) ?? state.fileNames;
-  for (const file of [...new Set(programFiles)].sort()) {
-    for (const item of state.service.getSyntacticDiagnostics(file)) add(item);
-    for (const item of state.service.getSemanticDiagnostics(file)) add(item);
+  for (const file of [...new Set(programFiles)].filter((path) => !only || only.has(path)).sort()) {
+    const source = program.getSourceFile(file)!;
+    for (const item of program.getSyntacticDiagnostics(source)) add(item);
+    for (const item of program.getSemanticDiagnostics(source)) add(item);
+    if (state.options.declaration || state.options.composite) for (const item of program.getDeclarationDiagnostics(source)) add(item);
   }
   return records.sort((a, b) => a.file.localeCompare(b.file) || a.code.localeCompare(b.code) || a.message.localeCompare(b.message));
+}
+
+/** User files that import each user file (directly), from the unmodified program. */
+function importersByFile(state: ProjectState, program = state.service.getProgram()!): Map<string, Set<string>> {
+  const host = state.inputs.sys;
+  const cache = ts.createModuleResolutionCache(dirname(state.configPath), (name) => host.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
+  const importers = new Map<string, Set<string>>();
+  const link = (target: string, importer: string) => {
+    if (!isInside(state.root, target) || target.includes("/node_modules/")) return;
+    const set = importers.get(target) ?? new Set<string>();
+    set.add(importer);
+    importers.set(target, set);
+  };
+  for (const source of program.getSourceFiles()) {
+    const file = canonical(source.fileName);
+    if (!isInside(state.root, file) || file.includes("/node_modules/")) continue;
+    for (const specifier of moduleSpecifiers(source)) {
+      const mode = program.getModeForUsageLocation(source, specifier);
+      const resolved = ts.resolveModuleName(specifier.text, file, state.options, host, cache, undefined, mode).resolvedModule;
+      if (resolved) link(canonical(resolved.resolvedFileName), file);
+    }
+    for (const reference of source.referencedFiles) link(canonical(resolve(dirname(file), reference.fileName)), file);
+  }
+  return importers;
+}
+
+/** A change to this file can alter types outside its importers (scripts, global or ambient module augmentation). */
+function hasGlobalEffect(text: string, path: string): boolean {
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false);
+  if (!ts.isExternalModule(source)) return true;
+  const visit = (node: ts.Node): boolean => (ts.isModuleDeclaration(node)
+    && (ts.isStringLiteral(node.name) || (node.flags & ts.NodeFlags.GlobalAugmentation) !== 0)) || !!ts.forEachChild(node, visit);
+  return visit(source);
+}
+
+/**
+ * Changed files and their transitive importers, or undefined when a changed
+ * file (before or after) can affect unrelated files; then the whole program is checked.
+ */
+function affectedFiles(state: ProjectState, importers: Map<string, Set<string>>, originals: Map<string, string | undefined>): Set<string> | undefined {
+  const changed = [...state.overlays.keys()].filter((path) => originals.get(path) !== state.overlays.get(path));
+  for (const path of changed) {
+    if (!/\.[cm]?[jt]sx?$/i.test(path) || /\.d\.[cm]?ts$/i.test(path)) return undefined;
+    for (const text of [originals.get(path), state.overlays.get(path)]) if (text !== undefined && hasGlobalEffect(text, path)) return undefined;
+  }
+  const affected = new Set<string>();
+  const pending = [...changed];
+  while (pending.length) {
+    const path = pending.pop()!;
+    if (affected.has(path)) continue;
+    affected.add(path);
+    pending.push(...(importers.get(path) ?? []));
+  }
+  return affected;
+}
+
+/** Planned or original program view for --verify bindings; resolution uses the project's options. */
+function bindingState(state: ProjectState, program: ts.Program): BindingState {
+  const cache = ts.createModuleResolutionCache(dirname(state.configPath), (name) => state.inputs.sys.useCaseSensitiveFileNames ? name : name.toLowerCase(), state.options);
+  return {
+    source: (path) => program.getSourceFile(path),
+    resolve: (specifier, source) => ts.resolveModuleName(specifier.text, source.fileName, state.options, state.inputs.sys, cache, undefined,
+      program.getModeForUsageLocation(source, specifier)).resolvedModule?.resolvedFileName,
+    key: canonical,
+  };
 }
 
 function validatePosition(text: string, position: number | undefined, label = "position"): number {
@@ -240,6 +344,7 @@ function assertRenameSemantics(
   anchorBefore: ts.RenameLocation,
   grouped: ReadonlyMap<string, readonly ts.RenameLocation[]>,
   newName: string,
+  publicName = false,
 ): void {
   const expected = mappedRenameLocations(grouped, newName);
   let anchor: { fileName: string; start: number; length: number } | undefined;
@@ -258,7 +363,7 @@ function assertRenameSemantics(
   if (!anchor) fail("RENAME_CONFLICT", "could not map the renamed symbol declaration");
 
   const after = state.service.findRenameLocations(anchor.fileName, anchor.start, false, false, {
-    providePrefixAndSuffixTextForRename: true,
+    providePrefixAndSuffixTextForRename: !publicName,
   });
   const expectedCounts = new Map<string, number>();
   for (const location of expected) {
@@ -281,14 +386,28 @@ function assertRenameSemantics(
 
 function rename(state: ProjectState, file: string, request: RefactorRequest): void {
   const text = sourceText(state, file)!;
-  const position = validatePosition(text, request.position);
+  let selectedPosition = request.position;
+  if (request.symbol !== undefined) {
+    if (request.position !== undefined) fail("INVALID_REQUEST", "symbol and position are mutually exclusive");
+    const source = state.service.getProgram()!.getSourceFile(file)!;
+    const names: ts.Identifier[] = [];
+    for (const statement of source.statements) {
+      if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) if (ts.isIdentifier(declaration.name) && declaration.name.text === request.symbol) names.push(declaration.name);
+      } else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement) || ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement) || ts.isEnumDeclaration(statement))
+        && statement.name?.text === request.symbol) names.push(statement.name);
+    }
+    if (names.length !== 1) fail(names.length ? "SYMBOL_AMBIGUOUS" : "SYMBOL_NOT_FOUND", `${request.symbol}: expected one top-level declaration, found ${names.length}`);
+    selectedPosition = names[0]!.getStart(source);
+  }
+  const position = validatePosition(text, selectedPosition);
   if (!request.newName?.trim()) fail("INVALID_REQUEST", "newName is required for rename");
   if (!isValidIdentifier(request.newName, state.options.target ?? ts.ScriptTarget.Latest)) {
     fail("INVALID_NAME", `${request.newName} is not a valid identifier`);
   }
   const info = state.service.getRenameInfo(file, position, { providePrefixAndSuffixTextForRename: true });
   if (!info.canRename) fail("RENAME_UNAVAILABLE", info.localizedErrorMessage);
-  const locations = state.service.findRenameLocations(file, position, false, false, { providePrefixAndSuffixTextForRename: true });
+  const locations = state.service.findRenameLocations(file, position, false, false, { providePrefixAndSuffixTextForRename: !request.public });
   if (!locations?.length) fail("RENAME_UNAVAILABLE", "TypeScript found no semantic rename locations");
   const definitions = state.service.getDefinitionAndBoundSpan(file, position)?.definitions ?? [];
   const anchor = definitions
@@ -315,7 +434,7 @@ function rename(state: ProjectState, file: string, request: RefactorRequest): vo
       newText: `${location.prefixText ?? ""}${request.newName}${location.suffixText ?? ""}`,
     })),
   })));
-  assertRenameSemantics(state, anchor, grouped, request.newName);
+  assertRenameSemantics(state, anchor, grouped, request.newName, request.public);
 }
 
 function imports(state: ProjectState, file: string, request: RefactorRequest): void {
@@ -364,35 +483,46 @@ function changedFiles(state: ProjectState, originals: Map<string, string | undef
 }
 
 export async function analyze(request: RefactorRequest): Promise<BackendResult> {
-  if (request.operation === "rename-file" || request.operation === "move-type") return analyzeFileOperation(request);
+  if (request.checker !== undefined && !["ts5", "ts7", "both"].includes(request.checker)) fail("INVALID_REQUEST", "checker must be ts5, ts7 or both");
+  if (request.verify !== undefined && request.verify !== "bindings") fail("INVALID_REQUEST", "verify must be bindings or omitted (full)");
+  if (request.verify === "bindings" && request.checker !== undefined) fail("INVALID_REQUEST", "checker selects program diagnostics, which verify bindings does not compute");
+  if (request.operation === "rename-file" || request.operation === "move-type" || request.operation === "move-file" || request.operation === "inline-reexports" || request.operation === "port-route") return analyzeFileOperation(request);
   if (request.operation === "sync-namespace") {
     fail("UNSUPPORTED_OPERATION", "sync-namespace is C# only; ES modules have no namespace-to-directory convention");
   }
+  const checkerMode = request.checker === "both" ? "both" : "ts7";
+  const nativeChecker = request.checker === "ts7" || request.checker === "both" ? await loadTs7Checker(checkerMode) : undefined;
   const state = loadProject(request);
   try {
     const file = assertAbsolute("file", request.file);
     if (!isInside(state.root, file)) fail("OUTSIDE_ROOT", `file is outside ${state.root}`);
-    const text = sourceText(state, file);
+    const text = request.operation === "retarget-import" ? "" : sourceText(state, file);
     if (text === undefined) fail("FILE_NOT_FOUND", file);
     const extension = extname(file).toLowerCase();
-    if (![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].includes(extension)) {
+    if (request.operation !== "retarget-import" && ![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"].includes(extension)) {
       fail("UNSUPPORTED_FILE", extension || "file has no extension");
     }
-    const program = state.service.getProgram();
-    if (!program?.getSourceFile(file)) fail("FILE_NOT_IN_PROJECT", file);
+    let program = state.service.getProgram();
+    if (!program || (request.operation !== "retarget-import" && !program.getSourceFile(file))) fail("FILE_NOT_IN_PROJECT", file);
     const outsideUserSources = program.getSourceFiles()
       .filter((source) => !isInside(state.root, canonical(source.fileName)) && !source.isDeclarationFile)
       .map((source) => canonical(source.fileName))
       .sort();
     if (outsideUserSources.length) {
-      fail("PROJECT_SCOPE_INCOMPLETE", `program contains user source outside ${state.root}: ${outsideUserSources.join(", ")}`);
+      fail("PROJECT_SCOPE_INCOMPLETE", `program contains user source outside ${state.root}: ${outsideUserSources.slice(0, 5).join(", ")}${outsideUserSources.length > 5 ? ` and ${outsideUserSources.length - 5} more` : ""}${workspaceRootHint(state.root, outsideUserSources)}`);
     }
 
-    const diagnosticsBefore = diagnostics(state);
+    const bindingsOnly = request.verify === "bindings";
+    const importers = bindingsOnly ? new Map<string, Set<string>>() : importersByFile(state);
     const originals = new Map<string, string | undefined>();
     for (const path of state.fileNames) originals.set(path, sourceText(state, path));
 
+    let operationNotes: string[] = [];
     switch (request.operation) {
+      case "retarget-import": operationNotes = retargetImports({ sys: state.inputs.sys, service: state.service, options: state.options, root: state.root,
+        setText: (path, text) => setOverlay(state, path, text),
+        rename: (path, position, newName) => rename(state, path, { ...request, operation: "rename", file: path, position, newName }),
+      }, request); break;
       case "rename": rename(state, file, request); break;
       case "imports": imports(state, file, request); break;
       case "format": format(state, file); break;
@@ -401,23 +531,62 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
       default: fail("UNSUPPORTED_OPERATION", String(request.operation));
     }
 
-    for (const path of state.overlays.keys()) if (!originals.has(path)) originals.set(path, ts.sys.readFile(path));
-    const diagnosticsAfter = diagnostics(state);
-    const beforeCounts = new Map<string, number>();
-    for (const item of diagnosticsBefore) {
-      const key = `${item.file}\0${item.code}\0${item.message}`;
-      beforeCounts.set(key, (beforeCounts.get(key) ?? 0) + 1);
+    for (const path of state.overlays.keys()) if (!originals.has(path)) originals.set(path, state.inputs.sys.readFile(path));
+    let diagnosticsBefore: Diagnostic[] = [], diagnosticsAfter: Diagnostic[] = [];
+    let nativeVfs: VirtualFs | undefined;
+    const notes: string[] = operationNotes;
+    if (bindingsOnly) {
+      const planned = state.service.getProgram()!, original = program;
+      const checked = timed("bindings", () => assertBindings(bindingState(state, planned), run => run(bindingState(state, original)),
+        changedFiles(state, originals).map(change => change.path), ambientModules([...original.getSourceFiles(), ...planned.getSourceFiles()]), path => path));
+      notes.push(`Verified bindings only (--verify bindings): reference preservation, syntax and import/export bindings of ${checked} changed file(s); program diagnostics were not computed. Run the project typecheck after apply.`);
+    } else {
+      // Validate the changed files and everything that (transitively) imports them; unrelated files cannot change.
+      let afterProgram: ts.Program | undefined = state.service.getProgram()!;
+      for (const [target, callers] of importersByFile(state, afterProgram)) {
+        importers.set(target, new Set([...(importers.get(target) ?? []), ...callers]));
+      }
+      let affected = affectedFiles(state, importers, originals);
+      const beforePaths = new Set(program.getSourceFiles().map(source => canonical(source.fileName)));
+      const afterPaths = new Set(afterProgram.getSourceFiles().map(source => canonical(source.fileName)));
+      // A newly reached ambient dependency can affect files with no import edge.
+      for (const source of [...program.getSourceFiles(), ...afterProgram.getSourceFiles()]) {
+        const path = canonical(source.fileName);
+        if (beforePaths.has(path) !== afterPaths.has(path) && !/\.json$/i.test(path) && hasGlobalEffect(source.text, path)) affected = undefined;
+      }
+      diagnosticsAfter = request.checker === "ts7" ? [] : timed("diagnostics.after", () => diagnostics(state, afterProgram!, affected));
+      nativeVfs = nativeChecker ? new VirtualFs(state.root) : undefined;
+      if (nativeChecker && nativeVfs) {
+        for (const [path, text] of state.overlays) nativeVfs.write(path, text);
+        diagnosticsAfter = compareWorkspaceDiagnostics(nativeChecker, nativeVfs, state.configPath, state.options,
+          afterProgram.getSourceFiles().map(source => canonical(source.fileName)).filter(path => isInside(state.root, path) && !path.includes("/node_modules/")), diagnosticsAfter, affected);
+      }
+      if (diagnosticsAfter.length) { state.service.cleanupSemanticCache(); afterProgram = undefined; }
+      // A clean planned set cannot introduce an error. Only errors require the
+      // original multiset; avoid its expensive generic inference on clean plans.
+      diagnosticsBefore = request.checker !== "ts7" && diagnosticsAfter.length
+        ? timed("diagnostics.before", () => baselineDiagnostics(state.root, state.configPath, program!, affected, state.inputs, () => diagnostics(state, program!, affected))) : [];
+      if (nativeChecker && nativeVfs && diagnosticsAfter.length) diagnosticsBefore = nativeVfs.original(() => compareWorkspaceDiagnostics(nativeChecker, nativeVfs!, state.configPath, state.options,
+        program!.getSourceFiles().map(source => canonical(source.fileName)).filter(path => isInside(state.root, path) && !path.includes("/node_modules/")), diagnosticsBefore, affected));
+      program = undefined;
+      const beforeCounts = new Map<string, number>();
+      for (const item of diagnosticsBefore) {
+        const key = `${item.file}\0${item.code}\0${item.message}`;
+        beforeCounts.set(key, (beforeCounts.get(key) ?? 0) + 1);
+      }
+      const introduced = diagnosticsAfter.filter((item) => {
+        const key = `${item.file}\0${item.code}\0${item.message}`;
+        const count = beforeCounts.get(key) ?? 0;
+        if (count === 0) return true;
+        beforeCounts.set(key, count - 1);
+        return false;
+      });
+      if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.message}`).join("; "));
+      if (!diagnosticsAfter.length) notes.push("Skipped baseline diagnostics: the planned affected set has no errors.");
+      if (request.checker === "ts7") notes.push("Validated all user sources in the configured project with TS7 7.0.2; TS5 graph discovery is not used to restrict native diagnostics.");
+      else if (affected) notes.push(`Validated ${affected.size} affected file(s): the changed files and their transitive importers.`);
     }
-    const introduced = diagnosticsAfter.filter((item) => {
-      const key = `${item.file}\0${item.code}\0${item.message}`;
-      const count = beforeCounts.get(key) ?? 0;
-      if (count === 0) return true;
-      beforeCounts.set(key, count - 1);
-      return false;
-    });
-    if (introduced.length) fail("NEW_DIAGNOSTICS", introduced.map((item) => `${item.code} ${item.message}`).join("; "));
-
-    const notes: string[] = [];
+    program = undefined;
     if (request.operation === "imports") {
       notes.push(request.mode === "sort"
         ? "Sorting imports can reorder module initialization; verify application behavior."
@@ -426,8 +595,14 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
     if ([".js", ".jsx", ".mjs", ".cjs"].includes(extension) && ["rename", "extract-function", "extract-variable"].includes(request.operation)) {
       notes.push("JavaScript analysis is semantic only for symbols TypeScript can resolve; dynamic properties, reflection, and string-based references are not changed.");
     }
+    if (changedFiles(state, originals).length) {
+      if (!state.inputs.unchanged()) fail("STALE_PROJECT_INPUTS", "a compiler read changed during analysis; retry after writers/generators settle");
+      if (nativeVfs) timed("inputs.check", () => nativeVfs!.assertStableMetadata());
+    }
     return {
+      readSet: [...state.inputs.snapshot(), ...(nativeVfs?.inputs.snapshot() ?? [])],
       backend: "typescript",
+      ...(bindingsOnly ? {} : { checker: nativeChecker ? checkerMode === "both" ? bothIdentity : ts7Identity : { name: "ts5" as const, version: ts.version } }),
       version: ts.version,
       changes: changedFiles(state, originals),
       diagnosticsBefore,
@@ -435,6 +610,10 @@ export async function analyze(request: RefactorRequest): Promise<BackendResult> 
       notes,
     };
   } finally {
-    state.service.dispose();
+    if (warmMode) {
+      for (const path of state.overlays.keys()) state.versions.set(path, (state.versions.get(path) ?? 0) + 1);
+      state.overlays.clear();
+      state.bumpProjectVersion();
+    } else state.service.dispose();
   }
 }

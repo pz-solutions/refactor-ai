@@ -1,0 +1,44 @@
+{
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "cli": "/home/wooboo/.t3/worktrees/refactor-ai/perf/dist/cli.js",
+  "runs": 2,
+  "mode": "cold process, OS filesystem cache retained",
+  "results": [
+    {
+      "scenario": "retarget-import",
+      "medianMs": 30250,
+      "minMs": 27980,
+      "maxMs": 32519,
+      "samples": [
+        {
+          "ms": 32519,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "diagnostics.after": 22531
+          },
+          "notes": [
+            "Retargeted imports/re-exports; compiler validation does not prove runtime API compatibility.",
+            "Tests mocking @/lib/formatters import retargeted files: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/incomes/_components/income-record-dialog.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/invoices/[id]/invoice-detail-client.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/invoices/invoices-content.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/receivables/_components/receivable-form.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/receivables/receivables-content.component.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/properties/[code]/tenancy-history-dialog.helpers.test.ts, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenancies/[id]/history/tenancy-history-browser-client.helpers.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenancies/[id]/history/tenancy-rent-history-chart.test.tsx. Review mocks or use --mocks add.",
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Validated 258 affected file(s): the changed files and their transitive importers."
+          ]
+        },
+        {
+          "ms": 27980,
+          "status": 0,
+          "outcome": "planned",
+          "phases": {
+            "diagnostics.after": 17438
+          },
+          "notes": [
+            "Retargeted imports/re-exports; compiler validation does not prove runtime API compatibility.",
+            "Tests mocking @/lib/formatters import retargeted files: /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/incomes/_components/income-record-dialog.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/invoices/[id]/invoice-detail-client.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/invoices/invoices-content.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/receivables/_components/receivable-form.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/financials/receivables/receivables-content.component.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/properties/[code]/tenancy-history-dialog.helpers.test.ts, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenancies/[id]/history/tenancy-history-browser-client.helpers.test.tsx, /home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92/apps/web/src/app/[locale]/dashboard/tenancies/[id]/history/tenancy-rent-history-chart.test.tsx. Review mocks or use --mocks add.",
+            "Skipped baseline diagnostics: the planned affected set has no errors.",
+            "Validated 258 affected file(s): the changed files and their transitive importers."
+          ]
+        }
+      ]
+    }
+  ]
+}

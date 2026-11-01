@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { analyze } from "../src/backends/typescript";
+import { analyze, setWarmMode } from "../src/backends/typescript";
 
 const temporaryProjects: string[] = [];
 
@@ -20,6 +20,7 @@ async function project(files: Record<string, string>, compilerOptions: object = 
 }
 
 afterEach(async () => {
+  setWarmMode(false);
   await Promise.all(temporaryProjects.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -230,7 +231,7 @@ describe("TypeScript backend", () => {
 
     expect(result.changes[0]!.after).toContain("const subtotal = base + 10;");
     expect(result.changes[0]!.after).toContain("return subtotal;");
-    expect(result.notes).toHaveLength(1);
+    expect(result.notes.filter((note) => note.startsWith("JavaScript analysis"))).toHaveLength(1);
     expect(await readFile(p.file("src/a.js"), "utf8")).toBe(source);
   });
 
@@ -328,6 +329,72 @@ describe("TypeScript backend", () => {
 
     expect(result.changes[0]!.after).toContain("export const total = 1;");
     expect(result.changes[0]!.after).toContain("console.log(total);");
-    expect(result.notes).toHaveLength(1);
+    expect(result.notes.filter((note) => note.startsWith("JavaScript analysis"))).toHaveLength(1);
+  });
+
+  test("validates only the changed files and their transitive importers", async () => {
+    const p = await project({
+      "src/a.ts": "import { y } from './y';\nimport { x } from './x';\nexport const a = x + y;\n",
+      "src/x.ts": "export const x = 1;\n",
+      "src/y.ts": "export const y = 2;\n",
+      "src/b.ts": "import { a } from './a';\nexport const b = a;\n",
+      "src/c.ts": "export { b } from './b';\n",
+      "src/unrelated.ts": "export const u = 3;\n",
+    });
+    const result = await analyze({ project: p.config, root: p.root, file: p.file("src/a.ts"), operation: "imports", mode: "sort" });
+    expect(result.changes).toHaveLength(1);
+    expect(result.notes).toContain("Validated 3 affected file(s): the changed files and their transitive importers.");
+    expect(result.diagnosticsBefore).toEqual([]);
+  });
+
+  test("falls back to the whole program when a changed file augments globals", async () => {
+    const p = await project({
+      "src/a.ts": "import { x } from './x';\nimport { b } from './b';\ndeclare global { interface Window { tag: string } }\nexport const a = x + b;\n",
+      "src/x.ts": "export const x = 1;\n",
+      "src/b.ts": "export const b = 2;\n",
+    });
+    const result = await analyze({ project: p.config, root: p.root, file: p.file("src/a.ts"), operation: "imports", mode: "sort" });
+    expect(result.changes).toHaveLength(1);
+    expect(result.notes.some((note) => note.startsWith("Validated"))).toBe(false);
+  });
+
+  test("retargeting checks an importer two hops beyond a re-export", async () => {
+    const p = await project({
+      "src/old.ts": "export const value = 1;\n",
+      "src/new.ts": 'export const value = "bad";\n',
+      "src/leaf.ts": 'export { value } from "./old";\n',
+      "src/middle.ts": 'export { value } from "./leaf";\n',
+      "src/caller.ts": 'import { value } from "./middle"; export const n: number = value;\n',
+    }, { strict: true, module: "esnext", moduleResolution: "bundler" });
+    await expect(analyze({ project: p.config, root: p.root, file: p.file("src/leaf.ts"), operation: "retarget-import", from: "./old", to: "./new" })).rejects.toThrow(/NEW_DIAGNOSTICS: TS2322/);
+  });
+
+  test("retargeting a newly reached ambient dependency checks unrelated files", async () => {
+    const p = await project({
+      "node_modules/old/package.json": '{"types":"index.d.ts"}',
+      "node_modules/old/index.d.ts": "export const value: number;\n",
+      "node_modules/new/package.json": '{"types":"index.d.ts"}',
+      "node_modules/new/index.d.ts": 'export const value: number; declare global { interface Object { added: string } }\n',
+      "src/leaf.ts": 'export { value } from "old";\n',
+      "src/unrelated.ts": 'export const n: Object = { added: 1 };\n',
+    }, { strict: true, module: "esnext", moduleResolution: "bundler", skipLibCheck: true });
+    await expect(analyze({ project: p.config, root: p.root, file: p.file("src/leaf.ts"), operation: "retarget-import", from: "old", to: "new" })).rejects.toThrow(/NEW_DIAGNOSTICS:.*TS2322/s);
+  });
+
+  test("warm plans invalidate dependencies, new roots and config contents by hash", async () => {
+    const p = await project({
+      "src/a.ts": 'import {value} from "./dependency";export const n:number=value;\n',
+      "src/dependency.ts": 'export const value = 1;\n',
+    }, { strict: true });
+    const request = { project: p.config, root: p.root, file: p.file("src/a.ts"), operation: "format" as const };
+    setWarmMode(true);
+    const first = await analyze(request), second = await analyze(request);
+    expect(second).toEqual(first);
+    await writeFile(p.file("src/dependency.ts"), 'export const value = "bad";\n');
+    expect((await analyze(request)).diagnosticsBefore.some(item => item.code === "TS2322")).toBe(true);
+    await writeFile(p.file("src/new.d.ts"), 'declare const another: number;\n');
+    expect((await analyze(request)).diagnosticsBefore.some(item => item.code === "TS2322")).toBe(true);
+    await writeFile(p.config, JSON.stringify({ compilerOptions: { noLib: true }, include: ["src/**/*"] }));
+    expect((await analyze(request)).diagnosticsBefore.some(item => item.code === "TS2318")).toBe(true);
   });
 });

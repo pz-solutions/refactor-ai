@@ -105,7 +105,7 @@ test("prerelease advancement uses numeric SemVer precedence and leaves latest un
     publishes.push(args);
     return { status: 0, stdout: "", stderr: "" };
   });
-  expect(publishes).toHaveLength(14);
+  expect(publishes).toHaveLength(npmDistributions.length);
   expect(publishes.every(args => args[args.indexOf("--tag") + 1] === "next")).toBe(true);
 });
 
@@ -118,7 +118,7 @@ test("completed old releases are idempotent and preserve newer registry tags", a
     expect(args[2]).toBe("dist.integrity");
     return { status: 0, stdout: JSON.stringify(archive.integrity), stderr: "" };
   });
-  expect(calls).toHaveLength(14);
+  expect(calls).toHaveLength(npmDistributions.length);
 });
 
 test("channel lookup supports beta-only packages and falls back when next is absent", async () => {
@@ -175,6 +175,6 @@ test("prerelease dry runs use next and never query registry state", async () => 
     calls.push(args);
     return { status: 0, stdout: "", stderr: "" };
   });
-  expect(calls).toHaveLength(14);
+  expect(calls).toHaveLength(npmDistributions.length);
   expect(calls.every(args => args[0] === "publish" && args.includes("--dry-run") && args[args.indexOf("--tag") + 1] === "next")).toBe(true);
 });

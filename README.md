@@ -8,12 +8,16 @@ Deterministic refactorings exposed through skills and a CLI written in TypeScrip
 | --- | --- | --- |
 | Rename a symbol and its references | Yes | Yes, including across projects in a `.sln` |
 | Remove unused imports / using directives | Yes, explicit mode | Yes, Roslyn `CS8019` diagnostics |
+| Retarget imports / re-exports (`retarget-import`) | Yes, partial selection, export mapping and compiler validation | Not yet |
 | Sort imports | Yes, without removing unused imports | Not yet |
 | Format a file | TypeScript formatter | Roslyn Formatter |
 | Extract function | Yes, engine-provided action | Not yet |
 | Extract variable / constant | Yes, engine-provided action | Not yet |
 | Move a type between directories / projects | Yes, TypeScript's “Move to file” action | Yes, Roslyn with planned `.csproj` edits |
+| Move whole modules or directories between workspace packages | Yes, including package exports and import updates | Not yet |
 | Match a filename to its declared type | Yes, including import updates | Yes, including explicit `Compile` entries |
+| Inline shim re-exports into their callers | Yes, with package entry preservation | Not yet |
+| Port a Next App Router route to TanStack Start (`port-route`) | Yes, view move + generated Next adapter and Start route from project templates | Not applicable |
 | Match a namespace to the project structure | Not applicable to ES modules | Yes, including semantic reference updates |
 
 ## Getting started
@@ -75,6 +79,15 @@ node dist/cli.js plan extract-variable --project examples/typescript/tsconfig.js
   --file examples/typescript/math.ts --at 2:10 --end 2:22 --name total
 ```
 
+Retarget API-compatible TS/JS modules across the loaded project, or narrow to a file/directory with `--file`:
+
+```sh
+node dist/cli.js plan retarget-import --project apps/web/tsconfig.json --root . \
+  --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider
+```
+
+`--map` renames unaliased local bindings and semantic references (including JSX); explicit aliases stay unchanged. `--only Name,Name` selects pre-map names and splits declarations. Compatible destination named imports merge; quotes, type-only modifiers, comments and directives are retained. Default/namespace imports require `--only` absent and pass compiler validation. Exact specifiers only; missing target modules fail `TARGET_UNRESOLVED`, missing exports fail `NEW_DIAGNOSTICS`. No matches produce a successful no-op. `--mocks report` (default) lists tests that mock the source module while transitively importing retargeted files. `--mocks add` adds parallel destination mocks with the same factory text, skipping files already mocking the destination. Only standalone mock statements can be added; callers must be in the loaded project. Runtime compatibility still needs application tests.
+
 The default root is the project configuration's directory. Supply `--root` for a wider scope; use a `.sln` for C# rename operations with callers in several projects. Plans default to `<root>/.refactor-ai/`; `--out` may point outside the project or into that directory. `node dist/cli.js` lists these commands. When relocating the CLI, set `REFACTOR_AI_HOME` to this package's directory so it can locate the C# helper.
 
 Type refactoring examples (replace paths and type names with your own):
@@ -86,6 +99,8 @@ node dist/cli.js plan move-type --project ./Workspace.sln --root . \
   --file ./Source/Widget.cs --type Widget --to ./Destination/Models/Widget.cs \
   --target-project ./Destination/Destination.csproj
 ```
+
+`move-file` moves a whole file or directory (repeat `--exclude` globs to retain adapters), or batches repeated `--file source=destination` pairs in one analysis, including non-source text files, with `--to` and optional `--target-project`. Cross-package callers use declared package exports; missing exact entries are planned in package.json. Importer packages must already declare the target dependency. Source-project aliases between moved files become relative imports; unresolved aliases fail with a diagnostic hint. Moved files replace destination-package self-imports with relative specifiers in that package’s style. Matching ESLint bulk-suppression entries follow moved files, merging rule counts; a new ledger requires a destination package ESLint config, otherwise dropped entries are noted for review. Directory moves preserve relative layout and file modes. Symlinks and non-UTF-8 assets are rejected.
 
 `--to` specifies the destination file, including one in a directory that does not exist yet. For cross-project moves, `--target-project` identifies the destination `.csproj` or TS/JS configuration; `--root` must cover all changes. Plans that create or delete files use schemaVersion 2; legacy version 1 edit plans remain supported. `preview` also shows created and deleted files, and apply records a journal and rolls back its own changes on failure.
 
@@ -103,11 +118,11 @@ if ((await rename.validate(plan)).status !== "validated") throw new Error("Renam
 await rename.apply(plan);
 ```
 
-Read the [programmatic interface](docs/api.md) for installed-skill imports, all methods and options, requirements, errors and sequential automation. Apply each step before planning the next because plans are tied to project snapshots. Package builds include this interface; publishing a new version is required to distribute it through npm.
+Read the [programmatic interface](docs/api.md) for installed-skill imports, all methods and options, requirements, errors and sequential automation. Apply each step before planning the next because plans are tied to observed inputs. Package builds include this interface; publishing a new version is required to distribute it through npm.
 
 ## npm CLI packages
 
-Build fourteen independently publishable packages: the complete `@refactor-ai/cli`, seven `@refactor-ai/ts-<operation>` tools for TypeScript/JavaScript, and six `@refactor-ai/csharp-<operation>` tools for C#. Each declares a single executable in npm's `bin` field. The author checkout remains private.
+Build independently publishable packages: the complete `@refactor-ai/cli`, `@refactor-ai/ts-<operation>` tools for TypeScript/JavaScript, and six `@refactor-ai/csharp-<operation>` tools for C#. Each declares a single executable in npm's `bin` field. The author checkout remains private.
 
 ```sh
 bun run package:npm
@@ -136,7 +151,7 @@ npx --yes file:/tmp/refactor-ai-ts-rename-0.1.3.tgz --help
 
 See [npm packaging and publishing](docs/npm-packages.md) for package names, local installation, publication and versioning. `bun run test:npm` tests actual packed archives through npx, including complete TS, JS and C# workflows.
 
-All fourteen npm packages share the version in the author `package.json`. After building, use `bun run version:packages patch --dry-run` to preview a bump, or `bun run version:packages --help` for minor/major and beta/RC examples. Release tags must match `v<version>`; stable releases use `latest` and prereleases use `next`. The publisher checks registry versions and refuses to move those channels backwards. See the [release procedure](docs/github-actions.md#release-a-version).
+All generated npm packages share the version in the author `package.json`. After building, use `bun run version:packages patch --dry-run` to preview a bump, or `bun run version:packages --help` for minor/major and beta/RC examples. Release tags must match `v<version>`; stable releases use `latest` and prereleases use `next`. The publisher checks registry versions and refuses to move those channels backwards. See the [release procedure](docs/github-actions.md#release-a-version).
 
 ## Skills
 
@@ -150,6 +165,10 @@ Ready-to-use runner instructions are included in the repository:
 - [refactor-rename-file](skills/refactor-rename-file/SKILL.md)
 - [refactor-sync-namespace](skills/refactor-sync-namespace/SKILL.md)
 - [refactor-move-type](skills/refactor-move-type/SKILL.md)
+- [refactor-move-file](skills/refactor-move-file/SKILL.md)
+- [refactor-inline-reexports](skills/refactor-inline-reexports/SKILL.md)
+- [refactor-retarget-import](skills/refactor-retarget-import/SKILL.md)
+- [refactor-port-route](skills/refactor-port-route/SKILL.md)
 
 Each skill is a self-contained directory with `SKILL.md`, a Node launcher in `scripts/refactor.mjs`, and the built CLI and npm lockfile in `assets/runtime/`. Skills supporting C# also include Roslyn helper sources in `assets/dotnet/`. They depend on files within their own directory and can run independently of the original checkout.
 
@@ -171,16 +190,67 @@ You can also invoke an installed skill directly:
 node .agents/skills/refactor-rename/scripts/refactor.mjs capabilities --project ./tsconfig.json
 ```
 
-For authors: `bun run package:skills` rebuilds the CLI and refreshes the resources for all eight skills. Include the generated `scripts/` and `assets/` directories in each distributed skill, excluding local caches such as `node_modules`, `bin`, `obj` and `.setup.lock`. `SKILL.md` alone cannot execute a refactoring. `bun run build` also refreshes these resources.
+For authors: `bun run package:skills` rebuilds the CLI and refreshes the resources for all skills. Include the generated `scripts/` and `assets/` directories in each distributed skill, excluding local caches such as `node_modules`, `bin`, `obj` and `.setup.lock`. `SKILL.md` alone cannot execute a refactoring. `bun run build` also refreshes these resources.
+
+## Recipe: extracting framework-free code into a workspace package
+
+Field-tested on a Next.js → TanStack Start migration of a ~900-file Bun monorepo ([dogfood log](docs/dogfood/2026-10-17-tanstack-start-migration.md)). Each step is one plan; run them in this order so every plan validates cleanly:
+
+Stop dev servers and let generators settle before planning. Use `--checker ts7` when the repository typechecks with TS7. For compatible workspace migrations, combine preparation and relocation in one `move-file --map @/lib/hooks=@scope/shared/hooks --map next-intl=use-intl` plan (`--only` extracts selected exported declarations from one source file; use `--map source#Old=destination#New` for renamed imported exports). `.refactor-ai/equivalents.json` supplies defaults when the destination declares the equivalent; explicit maps win. For export renames or runtime adapters, prepare first:
+
+1. **Retarget framework imports** in the files you will move: `retarget-import --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider --file <dir> --mocks add`, and app aliases that re-export shared code (`--from @/lib/formatters --to @scope/shared/formatters`).
+2. **Inline shims** that only re-export the target package: `inline-reexports --file <shim>`. A dynamic `import()` can bypass a pure single-origin `export *` shim when the origin has no default export.
+3. **Move** the module or directory: `move-file --file <dir> --to packages/<pkg>/src/<dir> --target-project packages/<pkg>/tsconfig.json`. Importers get the package's `exports` subpath (entries are added, index modules publish the directory), `vi.mock` paths follow, same-package imports become relative, ESLint bulk-suppression entries move with their files.
+4. If the move fails with `NEW_DIAGNOSTICS`, read the first errors: an unresolved `@/…` alias means a dependency still lives in the app (retarget or move it first); `Cannot find module 'x'` means the destination package must declare `x` (add it with the app's version and install).
+
+For TS/JS rename, `--symbol Name` selects a unique top-level declaration instead
+of `--at`; missing and ambiguous names fail explicitly. Add `--public` to rename
+unaliased public re-exports and their loaded consumers instead of retaining the old
+name behind an alias. Explicit aliases and consumers outside the loaded project
+still need review. The default rename behavior is unchanged.
+
+CLI history is appended locally to `<root>/.refactor-ai/runs.jsonl`, including
+failed commands and help. Disable it with `REFACTOR_AI_RUN_LOG=off` (also keeps help
+free of filesystem writes). See [run history schema](docs/run-history.md). The
+importable API does not log. `node dist/cli.js gc --root .` removes completed apply
+journals while preserving rolled-back/recovery journals and respecting the apply
+lock. Successful moves also remove empty source directories; excluded files stay.
+Loaded consumers using `new URL("...", import.meta.url)` for moved assets are listed
+in plan notes for hand updates.
+
+## Recipe: porting a Next route to TanStack Start (`port-route`)
+
+Once a route's view is framework-free (steps above, or ports such as `navigation`/`search` props), one plan does the per-route mechanics:
+
+```sh
+node dist/cli.js plan port-route --project apps/web/tsconfig.json \
+  --target-project packages/app-features/tsconfig.json --root . \
+  --route 'apps/web/src/app/[locale]/dashboard/properties/[code]/units' \
+  --to packages/app-features/src/properties/units --checker ts7 --out /tmp/units.json
+```
+
+It moves the route's client files (keeping `page.tsx`, `_hooks/**`, adapters, server-only files and nested routes in Next), rewrites each `usePreloaded(preloadedX)` prop of the rendered view into an `initialX` data prop, generates the Next adapter that keeps the server preloads, makes `page.tsx` render it, and generates `apps/web-start/src/routes/<flat.route>.tsx` whose loader prefetches the same Convex queries with arguments translated from the page (route params, configured equivalents such as `await searchParams`, package imports and pure page consts). Untranslatable values become `TODO(port-route)` placeholders plus plan notes. All three projects are validated, with the ignored TanStack route tree regenerated in memory. Pages without loader work omit the loader; empty prefetch batches are omitted. Parameter hooks share one call, and dynamic-route adapters/components derive names from the view. Everything project-specific lives in `.refactor-ai/port-route.json`; see [examples/port-route/uber-platform](examples/port-route/uber-platform) and `plan port-route --help`.
+
+Optional `formatCommand` in `port-route.json` is an argv array, for example
+`["bun", "x", "oxfmt", "--stdin-filepath", "{{file}}"]`. It runs from the plan root,
+reads each generated adapter/Start route on stdin and must write only formatted
+source to stdout. `{{file}}` is the intended absolute output path. Formatting runs
+before compiler validation and stays in the plan; planning writes no generated
+source files. Nonzero exit, empty output or a 30-second timeout fails planning as
+`PORT_ROUTE_FORMAT_FAILED`. Use an installed/pinned project formatter. Commands in
+`afterApply` remain advisory notes.
+
+Always pass the workspace root as `--root`, run the project's formatter and linter on changed files after `apply` (the engine uses the TypeScript formatter), and run the application tests. Lint rules that depend on per-package configuration (for example shadcn's `components.json`) do not move with the code; compare the destination package's lint setup.
 
 ## MVP guarantees and limitations
 
-- Planning transforms code in memory and compares compiler errors before and after the change. `validate` checks snapshot freshness and the stored analysis result; it does not automatically run an arbitrary project's tests. The demo and regression tests separately verify example behavior.
-- Apply executes the exact stored plan and rejects changed snapshots and new errors. The snapshot covers regular files under the root, excluding `.git`, `node_modules`, `bin`, `obj`, `dist` and `.refactor-ai`. Dependencies are represented by manifests and lockfiles; changes to libraries outside the root are not fully fingerprinted.
+- Planning transforms code in memory and compares compiler errors before and after the change. `validate` checks recorded input freshness and the stored analysis result; it does not automatically run an arbitrary project's tests. The demo and regression tests separately verify example behavior.
+- Apply executes the exact stored plan and rejects changed inputs and new errors. New TS plans use schema 3: edited paths and compiler reads (including dependencies, negative probes, symlink resolution and directory queries) are checked. Unrelated files outside the read set may change; every source read for discovery/validation remains protected. Empty plans skip freshness checks. Legacy plans and backends without read tracking retain whole-root snapshots, excluding `.git`, `node_modules`, `bin`, `obj`, `dist` and `.refactor-ai`; their outside-root dependencies remain incompletely fingerprinted.
 - Rename uses symbols and references. Comments and strings remain unchanged; API consumers outside the loaded project, reflection and dynamic JS references are not automatically updated.
-- TS `rename-file` and `move-type` validate the source and destination configurations and the loaded project-reference graph, with declarations built in memory. Other TS operations still reject project references. C# analyzes the loaded MSBuild configuration rather than every possible compilation condition; select a `.sln` to include dependent projects.
+- TS `rename-file`, `move-type`, `move-file` and `inline-reexports` validate the source and destination configurations and the loaded project-reference graph, with declarations built in memory. Other TS operations still reject project references. C# analyzes the loaded MSBuild configuration rather than every possible compilation condition; select a `.sln` to include dependent projects.
+- TS file operations check changed files and their transitive importers in each participant's original and planned module graphs. Resolution changes (including package `exports` edits) also seed the closure, even for unchanged importers. Scripts, declaration-file edits, global/ambient declarations, configuration edits, non-`exports` package edits and project-reference declaration builds retain full checks. Compiler option/global diagnostics and output-layout checks always run; unrelated existing file diagnostics may be omitted from plans using the closure. Imported declarations can still require checking dependencies, so cost does not scale only with the closure's size.
 - Additional TS/JS configurations beside a participating project, such as `tsconfig.build.json`, are updated and validated when they cover the affected file. Discovered callers importing that file also join the analysis. Other configurations covering it cause rejection rather than leaving unchecked changes.
-- TS/JS moves support declarations in ES modules; CommonJS source code, merged declarations and types inside namespaces are rejected. Compiling ES modules to CommonJS is supported. Projects in the shared analysis must have compatible module-resolution options.
+- TS/JS type moves support declarations in ES modules; CommonJS source code, merged declarations and types inside namespaces are rejected. Compiling ES modules to CommonJS is supported. Projects may use different `paths`, `baseUrl`, `rootDirs`, `customConditions`, `moduleSuffixes`, `resolvePackageJsonExports`, `resolvePackageJsonImports` and `allowImportingTsExtensions`; each participant validates its own resolution, and moved type imports must retain their original targets. Shared editing still requires identical `module`, `moduleResolution`, `moduleDetection`, `allowJs`, `jsx`, `jsxImportSource`, `esModuleInterop`, `allowSyntheticDefaultImports`, `resolveJsonModule`, `rewriteRelativeImportExtensions`, `allowArbitraryExtensions`, `verbatimModuleSyntax`, `preserveSymlinks`, `experimentalDecorators` and `typeRoots`.
 - C# type moves and namespace changes reject, among other cases, partial declarations spread across files, conditional compilation, and multiple or nested namespaces. `.csproj` edits support standard SDK globbing or explicit, unconditional `Compile` entries; unknown MSBuild rules, dependency cycles and new compiler errors cause plan rejection.
 - C# type moves retain source-project global using directives, including when the moved type was the file's only declaration. Required new project references are inserted unconditionally. Helper discovery uses the selected toolkit directory; it never executes a helper found in the analyzed project's working directory.
 - TS/JS type moves reject effectful static initializers, static blocks, decorators, computed members, evaluated base-class expressions, nonconstant enum initializers and new module cycles for runtime classes. Simple identifier base classes and primitive constant initializers are supported. Compiler checks do not prove whole-program behavior equivalence; run application tests after a move.
@@ -191,6 +261,108 @@ For authors: `bun run package:skills` rebuilds the CLI and refreshes the resourc
 - After an interrupted apply, inspect `.refactor-ai/apply.lock` and the `.journal.json` journal. The journal contains original text and hashes of the new versions; the MVP does not yet provide an automatic recovery command. Preserve files subsequently changed by another process when recovering.
 
 ## Verification and research
+
+Measure cold plan latency against the dogfood monorepo (fresh Node processes;
+filesystem caches are retained). All benchmark plans stay outside that repository:
+
+```sh
+bun run bench -- --root /path/to/uber-platform --runs 3 --json /tmp/cold.json
+bun run bench:warm -- --root /path/to/uber-platform --runs 5 --json /tmp/warm.json
+```
+
+The author CLI supports `node dist/cli.js serve --root <repo>`: send one NDJSON
+request per stdin line, for example
+`{"id":1,"args":["plan","rename","--project","tsconfig.json","--file","src.ts","--at","1:14","--name","next","--out","/tmp/plan.json"]}`.
+Responses carry `id`, `status`, and `output` or `error`. Requests run sequentially;
+EOF closes the server. Up to four single-project TypeScript LanguageServices stay
+warm. Content hashes, compiler filesystem queries and directory membership are
+rechecked before reuse. Workspace file operations (`move-file`, `port-route`,
+`inline-reexports`, `rename-file`, `move-type`) build a fresh workspace per plan but
+share parsed documents across plans: script versions are content identities, so a
+retained parse is only reused for byte-identical text, and every plan re-reads and
+records all of its compiler inputs, so warm and cold plans have identical read sets
+and plan IDs.
+
+### Verification modes (`--verify`)
+
+`--verify full` (default; API `verify: "full"`) is the behavior described below:
+program diagnostics of the planned affected set, compared with the original.
+`--verify bindings` (TypeScript/JavaScript) skips program diagnostics, for agents
+that run the repository's own typecheck afterwards anyway. A bindings plan still
+runs every operation precheck (project graph discovery and membership, ownership,
+dependency/alias prechecks, access and cycle checks, output layout, case and
+encoding checks), the operation's reference preservation (rename binding identity,
+moved import edges and importer sets, moved-type references and imports, inline
+re-export resolution) and snapshot/read-set freshness. It adds a cheap check of
+every changed file: syntax errors and import/export bindings — each module
+specifier must resolve with the owning project's options (or match an ambient
+`declare module`), and each named import/re-export must name an export of that
+module (computed syntactically, following `export *`). Problems that already
+existed in the original file are not attributed to the plan.
+
+Bindings mode deliberately does **not** report type errors (assignability,
+overloads, missing properties, implicit any, a retargeted export with the same name
+but another type), declaration/options/global diagnostics, or effects on unchanged
+files. Named bindings of modules whose exports cannot be proven syntactically
+(`export =`, CommonJS, scripts, unresolved `export *`) are accepted; an export only
+added by a module augmentation is reported (use `--verify full`). Project-reference
+graphs need in-memory declaration builds and fail with `VERIFY_UNSUPPORTED`.
+Bindings plans record `request.verify: "bindings"`, carry no diagnostics or
+`checker`, and `apply`/`validate` report `verify` plus a reminder to typecheck.
+Full plans are unchanged (no `verify` field). `--checker` selects the diagnostics
+checker and is rejected with `--verify bindings`.
+
+Commit `<root>/.refactor-ai/config.json` for repository defaults, e.g.
+`{"verify":"bindings","checker":"ts7"}`. Explicit options win; the configured
+checker applies when verification is full (`--verify full`). Only `verify` and
+`checker` are accepted; the file applies to TypeScript plans.
+
+Validation checks the planned affected set first. When it has no errors, the
+original error baseline is unnecessary and `diagnosticsBefore` is empty; notes
+record that shortcut. Otherwise the original multiset is checked before accepting
+existing errors. Project-reference declaration builds retain full before/after
+checks. Workspace editing uses one LanguageService and DocumentRegistry; validation
+shares parsed sources and releases project checkers sequentially to limit memory.
+
+For repeated plans in projects with existing errors, `REFACTOR_AI_CACHE=on` enables
+an optional persistent **original-baseline-only** diagnostics cache at
+`<root>/.refactor-ai/cache`. `REFACTOR_AI_CACHE_DIR=/tmp/rai-cache` selects an
+external location. The default is off: clean plans need no baseline, and hashing
+every compiler input has a cost. Planned diagnostics are always checked. Cache
+keys include compiler version/options, all source/dependency contents and the
+selected files; a hit also rechecks filesystem reads, negative resolution probes,
+directory listings and symlink targets. Malformed or unavailable caches fall back
+to checking. Remove the cache directory to reclaim space.
+
+`bun run bench:checkers -- --root <repo> --tsgo <binary> --rust <binary>` compares
+optional native diagnostic executables without installing dependencies or changing
+the target. `node scripts/probe-native-checkers.mjs <unpacked-package-directory>`
+probes in-memory overlays. See the [native checker investigation](docs/research/2026-10-18-native-checkers.md)
+for versions, API differences and correctness limits.
+
+`plan ... --checker ts7` (API: `checker: "ts7"`) opts into Microsoft Go 7.0.2
+diagnostics over the in-memory planned filesystem. Install its optional peer
+explicitly alongside the CLI/API package: `npm install --save-dev typescript7@npm:typescript@7.0.2`.
+For an installed skill, install the alias in `<skill-root>/assets/runtime`.
+The author checkout includes it as a development dependency. Planning never
+downloads TS7. Run the built CLI/API with Node.js 22+; TS7's sync
+IPC API does not support Bun.
+
+`--checker ts7` uses only TS7 for diagnostics; edits and dependency graphs remain
+on 5.9.3. `--checker both` (API: `checker: "both"`) audits every selected pass
+against 5.9.3 by file and error code, including duplicate counts. Disagreement in
+audit mode rejects the plan with `CHECKER_MISMATCH`. Both modes verify user-file
+membership, failing with `CHECKER_SOURCE_MISMATCH` on disagreement; missing/wrong
+versions fail explicitly. Options,
+configuration, global, syntax, semantic and declaration diagnostics are included.
+Project-reference declaration builds are unsupported in TS7 mode and fail
+explicitly; use the default checker for them. Audit mode keeps TS5 diagnostic
+wording; TS7 mode stores native diagnostics. `plan.checker` records the selected
+checker, exact version and audit reference. The differential test corpus covers
+re-exports, moves, package exports, aliases, JSX, merging, satisfies, generics and
+ambient changes; it cannot guarantee agreement for arbitrary code. Native-only mode checks every user source in each participant with batched API
+calls; a TS5 dependency closure does not establish TS7 dependency semantics.
+The default remains TS5.9.3. Run the project's own typecheck after applying any plan.
 
 GitHub Actions are configured in [CI](.github/workflows/ci.yml) and [npm publication](.github/workflows/publish.yml). CI builds and tests the Node CLI, Roslyn helper, installed skills and packed npm tools, runs the demo, and uploads npm archives plus self-contained skills. A matching `vX.Y.Z` tag publishes the verified `@refactor-ai` archives using npm OIDC. [GitHub Actions setup and releases](docs/github-actions.md) describes the first publication, Trusted Publisher settings and retries.
 
@@ -204,3 +376,16 @@ bun run test:skills  # separate installation test; requires network access, npm/
 ```
 
 See the [recorded demonstration with diffs](docs/mvp-demo.txt), [architecture and development sequence](docs/refactoring-toolkit-plan.md), and research on [ReSharper/Roslyn](docs/research/resharper-roslyn-catalog.md), [TypeScript](docs/research/typescript-engine.md) and [C#](docs/research/csharp-engine.md). Research documents describe findings from before implementation; the table above and `capabilities` show the current feature set.
+
+`plan inline-reexports --project ./tsconfig.json --file ./src/shim.ts` rewrites
+workspace imports and re-exports to the shim's symbol origins, splitting declarations
+by origin. Relative chains resolve through the checker; bare/package specifiers
+retain the public entry used by the shim. Quotes, aliases, type modifiers and
+relative extension conventions are preserved. Pure, unreferenced re-export shims
+are deleted (schemaVersion 2), with literal config file lists updated; `--keep`
+retains them. Repeat `--file` to inline several shims in one plan (API: `files: [...]`), sharing one workspace and final validation. Mixed modules retain all original re-exports. Side-effect imports
+stay unchanged with a note; import-type references prevent deletion. Dynamic imports bypass pure single-origin star shims with no default export; other dynamic references retain the shim with a note.
+Namespace imports require a pure single-origin `export *` shim whose origin has
+no default export. Import/export attributes are unsupported. Compiler validation
+does not verify module initialization effects, directives such as `"use client"`,
+or consumers outside the loaded workspace; verify application behavior.

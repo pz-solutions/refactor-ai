@@ -1,18 +1,24 @@
+import { assertReadSetFresh, assertReadSetShape, type ReadSetEntry } from "./read-set";
 import { lstat, readFile, realpath } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createTwoFilesPatch } from "diff";
-import type { BackendResult, Diagnostic, FileChange, RefactorRequest } from "../types.ts";
-import { assertRegularPath, canonicalMissing, inside, sha256, snapshot, type Snapshot } from "./snapshot.ts";
+import type { BackendResult, CheckerIdentity, Diagnostic, FileChange, RefactorRequest } from "../types.ts";
+import { assertRegularPath, canonicalMissing, inside, sha256, snapshot, snapshotChanges, type Snapshot } from "./snapshot.ts";
 
 /**
  * Schema 1: edits and file creations (`after` is always a string).
  * Schema 2: adds deletions (`after: null`) and creations below parent
  * directories that do not exist yet. New plans use 2 only when a change
- * creates or deletes a file, so edit-only plans stay readable by older tools.
+ * creates or deletes a file. Schema 3 adds recorded compiler reads (including
+ * negative probes and matching directory queries) for scoped freshness. Backends
+ * without read tracking and legacy schema 1/2 plans retain whole-root freshness.
  */
-export type PlanSchemaVersion = 1 | 2;
+export type PlanSchemaVersion = 1 | 2 | 3;
 
 export interface Plan {
+  /** Schema 3: exact filesystem reads used for analysis, instead of whole-root freshness. */
+  readSet?: ReadSetEntry[];
+  checker?: CheckerIdentity;
   schemaVersion: PlanSchemaVersion;
   id: string;
   request: RefactorRequest;
@@ -88,13 +94,19 @@ function caseConflict(root: string, files: Snapshot["files"], changes: FileChang
 
 /** Structural and integrity validation shared by loadPlan and applyPlan. */
 export function assertPlanShape(plan: Plan): void {
-  if ((plan?.schemaVersion !== 1 && plan?.schemaVersion !== 2) || !plan.request || typeof plan.request.root !== "string" ||
+  if ((plan?.schemaVersion !== 1 && plan?.schemaVersion !== 2 && plan?.schemaVersion !== 3) || !plan.request || typeof plan.request.root !== "string" ||
       !Array.isArray(plan.changes) || !plan.snapshot || !plan.validation ||
       !Array.isArray(plan.diagnosticsBefore) || !Array.isArray(plan.diagnosticsAfter)) {
     throw new Error("INVALID_PLAN: unsupported or malformed plan");
   }
   if (plan.id !== planId(plan)) throw new Error("INVALID_PLAN: plan integrity check failed");
   if (plan.snapshot.hash !== sha256(JSON.stringify(plan.snapshot.files))) throw new Error("INVALID_PLAN: invalid snapshot");
+  // Bindings plans never carry program diagnostics; absent means full verification.
+  if (plan.request.verify !== undefined && (plan.request.verify !== "bindings" || plan.diagnosticsBefore.length || plan.diagnosticsAfter.length)) {
+    throw new Error("INVALID_PLAN: invalid verification mode");
+  }
+  if (plan.schemaVersion === 3) assertReadSetShape(plan.readSet!);
+  else if (plan.readSet !== undefined) throw new Error("INVALID_PLAN: read set requires schema 3");
   const added = newDiagnostics(plan.diagnosticsBefore, plan.diagnosticsAfter);
   if (JSON.stringify(added) !== JSON.stringify(plan.validation.newDiagnostics) ||
       plan.validation.status !== (added.length ? "failed" : "passed")) {
@@ -138,15 +150,56 @@ export function assertPlanShape(plan: Plan): void {
 async function canonicalRequest(request: RefactorRequest): Promise<RefactorRequest> {
   const root = await realpath(request.root);
   const result: RefactorRequest = { ...request, root, project: await realpath(request.project), file: await realpath(request.file) };
+  if (request.operation === "move-file" || request.operation === "port-route") {
+    if (request.only) result.only = [...request.only].sort();
+    if (request.exclude) result.exclude = [...new Set(request.exclude)].sort();
+    if (request.map) result.map = Object.fromEntries(Object.entries(request.map).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  }
+  if (request.files) {
+    if (request.operation !== "inline-reexports" || !request.files.length) throw new Error("INVALID_REQUEST: files requires inline-reexports");
+    result.files = [...new Set(await Promise.all(request.files.map(file => realpath(file))))].sort();
+    for (const file of result.files) await assertRegularPath(root, file);
+    result.file = result.files[0]!;
+  }
+  if (request.moves) {
+    if (request.operation !== "move-file" || !request.moves.length) throw new Error("INVALID_REQUEST: moves requires move-file pairs");
+    result.moves = [];
+    for (const move of request.moves) {
+      const file = await realpath(move.file), target = inside(root, await canonicalMissing(move.target));
+      const directory = (await lstat(file)).isDirectory();
+      await assertRegularPath(root, file, false, directory);
+      await assertRegularPath(root, target, true, directory);
+      result.moves.push({ file, target });
+    }
+    result.moves.sort((a, b) => a.file < b.file ? -1 : a.file > b.file ? 1 : a.target < b.target ? -1 : 1);
+    result.file = result.moves[0]!.file;
+    result.target = result.moves[0]!.target;
+  }
   await assertRegularPath(root, result.project);
-  await assertRegularPath(root, result.file);
+  const directory = (request.operation === "move-file" && (await lstat(result.file)).isDirectory()) || request.operation === "retarget-import" || request.operation === "port-route";
+  if (request.operation === "port-route") {
+    if (!(await lstat(result.file)).isDirectory()) throw new Error(`INVALID_REQUEST: port-route requires a Next route directory: ${result.file}`);
+    if (request.config === undefined) throw new Error("INVALID_REQUEST: port-route requires a configuration path");
+    result.config = await realpath(request.config).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`PORT_ROUTE_CONFIG_NOT_FOUND: ${request.config}; copy examples/port-route/uber-platform/port-route.json to <root>/.refactor-ai/ and adapt it, or pass --config`);
+      throw error;
+    });
+    // The state directory holds project configuration; plan outputs stay excluded elsewhere.
+    const configRelative = relative(root, result.config);
+    if (!configRelative || configRelative.startsWith("..") || isAbsolute(configRelative) || !(await lstat(result.config)).isFile()) throw new Error(`INVALID_REQUEST: port-route configuration must be a file inside ${root}: ${result.config}`);
+    if (request.startRoutes !== undefined) {
+      result.startRoutes = await realpath(request.startRoutes);
+      await assertRegularPath(root, result.startRoutes, false, true);
+    }
+  }
+  await assertRegularPath(root, result.file, false, directory);
   if (request.targetProject !== undefined) {
     result.targetProject = await realpath(request.targetProject);
     await assertRegularPath(root, result.targetProject);
   }
-  if (request.target !== undefined) {
-    result.target = inside(root, await canonicalMissing(request.target));
-    await assertRegularPath(root, result.target, true);
+  if (result.target !== undefined) {
+    result.target = inside(root, await canonicalMissing(result.target));
+    await assertRegularPath(root, result.target, true, directory);
   }
   return result;
 }
@@ -156,12 +209,15 @@ const fileId = (stat: { dev: number; ino: number }) => `${stat.dev}:${stat.ino}`
 export async function createPlan(
   request: RefactorRequest,
   analyze: (request: RefactorRequest) => Promise<BackendResult>,
+  compilerBase?: string,
 ): Promise<Plan> {
   request = await canonicalRequest(request);
   const root = request.root;
   const before = await snapshot(root);
   const result = await analyze(request);
-  if ((await snapshot(root)).hash !== before.hash) throw new Error("STALE_SNAPSHOT: project changed during analysis");
+  const after = result.readSet || !result.changes.length ? before : await snapshot(root);
+  if (result.changes.length && result.readSet) await assertReadSetFresh(result.readSet, compilerBase);
+  if (result.changes.length && !result.readSet && after.hash !== before.hash) throw new Error(`STALE_SNAPSHOT: project changed during analysis: ${snapshotChanges(before, after)}; retry after writers settle (including dev-server generators)`);
   const seen = new Set<string>();
   const changes: Plan["changes"] = [];
   for (const change of result.changes) {
@@ -194,17 +250,42 @@ export async function createPlan(
   }
   changes.sort(byPath);
   const fileModes: NonNullable<Plan["fileModes"]> = {};
-  const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat(request.file)).mode & 0o777 : 0o600;
+  const createdMode = ["move-type", "rename-file"].includes(request.operation) ? (await lstat(request.file)).mode & 0o777
+    // Generated route files inherit the Next page's permissions.
+    : request.operation === "port-route" ? ((await lstat(resolve(request.file, "page.tsx")).catch(() => undefined))?.mode ?? 0o644) & 0o777 : 0o600;
+  const creationMode = async (path: string): Promise<number> => {
+    if (request.operation === "port-route" && request.target && (path === request.target || path.startsWith(request.target + sep))) {
+      const source = resolve(request.file, relative(request.target, path));
+      return changes.some(change => change.path === source && change.after === null) ? (await lstat(source)).mode & 0o777 : createdMode;
+    }
+    if (request.operation === "port-route") return createdMode;
+    if (request.operation !== "move-file" || !request.target) return createdMode;
+    const pair = request.moves?.find(move => path === move.target || path.startsWith(move.target + sep));
+    const moveFile = pair?.file ?? request.file, moveTarget = pair?.target ?? request.target;
+    const directory = (await lstat(moveFile)).isDirectory();
+    if (!directory && path !== moveTarget) return createdMode;
+    const source = directory
+      ? resolve(moveFile, relative(moveTarget, path)) : moveFile;
+    if (!changes.some(change => change.path === source && change.after === null)) return 0o600;
+    return (await lstat(source)).mode & 0o777;
+  };
   for (const change of changes) {
     const beforeMode = change.before === null ? null : (await lstat(change.path)).mode & 0o777;
-    fileModes[change.path] = { before: beforeMode, after: change.after === null ? null : beforeMode ?? createdMode };
+    fileModes[change.path] = { before: beforeMode, after: change.after === null ? null : beforeMode ?? await creationMode(change.path) };
   }
   const conflict = caseConflict(root, before.files, changes);
   if (conflict) throw new Error(`CASE_CONFLICT: ${conflict} differs only by case from another path`);
   const added = newDiagnostics(result.diagnosticsBefore, result.diagnosticsAfter);
+  // Schema 3 keeps only edit preconditions in snapshot; compiler reads have
+  // their own observations. Unrelated root content cannot affect the plan ID.
+  const files = Object.fromEntries(changes.filter(change => change.before !== null)
+    .map(change => [relative(root, change.path), before.files[relative(root, change.path)]!]));
+  const plannedSnapshot = result.readSet ? { files, hash: sha256(JSON.stringify(files)) } : before;
   const body: Omit<Plan, "id"> = {
-    schemaVersion: changes.some(c => c.before === null || c.after === null) ? 2 : 1, request, backend: result.backend, backendVersion: result.version,
-    snapshot: before, changes, fileModes,
+    ...(result.readSet ? { readSet: JSON.parse(JSON.stringify(result.readSet)) as ReadSetEntry[] } : {}),
+    schemaVersion: result.readSet ? 3 : changes.some(c => c.before === null || c.after === null) ? 2 : 1, request, backend: result.backend, backendVersion: result.version,
+    snapshot: plannedSnapshot, changes, fileModes,
+    ...(result.checker ? { checker: { ...result.checker } } : {}),
     validation: { status: added.length ? "failed" : "passed", newDiagnostics: added },
     diagnosticsBefore: result.diagnosticsBefore,
     diagnosticsAfter: result.diagnosticsAfter,
@@ -224,10 +305,30 @@ export async function loadPlan(path: string): Promise<Plan> {
   return plan;
 }
 
-export async function assertFresh(plan: Plan): Promise<void> {
+export async function assertFresh(plan: Plan, compilerBase?: string): Promise<void> {
   if (plan.id !== planId(plan)) throw new Error("INVALID_PLAN: plan integrity check failed");
   if ((await realpath(plan.request.root)) !== plan.request.root) throw new Error("INVALID_PLAN: noncanonical root");
-  if ((await snapshot(plan.request.root)).hash !== plan.snapshot.hash) throw new Error("STALE_SNAPSHOT: project changed; create a new plan");
+  if (!plan.changes.length) return;
+  if (plan.readSet) {
+    for (const change of plan.changes) {
+      await assertRegularPath(plan.request.root, change.path, change.before === null).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`STALE_SNAPSHOT: removed ${change.path}`);
+        throw error;
+      });
+      const text = await readFile(change.path).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      });
+      if (text === null ? change.before !== null : change.before === null || sha256(text) !== sha256(change.before)) throw new Error(`STALE_SNAPSHOT: changed ${change.path}`);
+    }
+  }
+  if (plan.readSet) await assertReadSetFresh(plan.readSet, compilerBase);
+  if (plan.readSet && plan.changes.some(change => change.before === null)) {
+    const conflict = caseConflict(plan.request.root, (await snapshot(plan.request.root)).files, plan.changes);
+    if (conflict) throw new Error(`STALE_SNAPSHOT: case-insensitive path collision: ${conflict}`);
+  }
+  const current = plan.readSet ? plan.snapshot : await snapshot(plan.request.root);
+  if (current.hash !== plan.snapshot.hash) throw new Error(`STALE_SNAPSHOT: project changed: ${snapshotChanges(plan.snapshot, current)}; create a new plan after writers settle`);
   for (const [path, modes] of Object.entries(plan.fileModes ?? {})) {
     if (modes.before !== null && ((await lstat(path)).mode & 0o777) !== modes.before) {
       throw new Error(`STALE_SNAPSHOT: file permissions changed; create a new plan: ${path}`);

@@ -10,11 +10,43 @@ interface OperationHelp {
 }
 
 export const operationHelp: Record<Operation, OperationHelp> = {
+  "port-route": {
+    description: "Port a Next App Router route to TanStack Start in one plan: move its client view, generate the Next adapter and the Start route.",
+    support: "TypeScript and JavaScript (Next App Router to TanStack Start, React)",
+    required: "--route <next route directory> --to <feature directory> --target-project <config> [--start-routes <directory>] [--config <port-route.json>] [--map <from=to> ...] [--exclude <glob> ...]",
+    details: "Reads <root>/.refactor-ai/port-route.json (or --config): Next app directory, exclusions, preload functions, Start project/routes, route-tree generator, module maps, expression translations, ports and templates; project APIs are never built in (see examples/port-route/uber-platform). Client files of the route directory move to --to as one move-file batch with the configured maps; page.tsx, layout/loading/error files, **/_hooks/**, *adapter*, files importing server-only modules and nested route directories stay in Next. The page's default export is analyzed on the original program: const x = await hook(args), await Promise.all([...]) destructuring and direct configured preload calls are traced through hook modules to the Convex function reference and arguments. Arguments translate through configured equivalents (e.g. await searchParams), route parameters of the Start route, package imports, moved modules and the page's own const declarations; anything else (Next-only modules, let/try values, page parameters, functions) becomes a typechecking TODO(port-route) placeholder plus a plan note, never a guess. The page must render exactly one component imported from a moved file; each preloaded prop used as `const { data } = usePreloaded(prop)` or `usePreloaded(prop).data` becomes a data prop (data.prop pattern) typed by the hook's type argument or data.type. The generated Next adapter exports the page's view name, keeps the preloaded props and calls the configured data snippet; page.tsx imports the adapter instead of the view. The Start route file is named from the route's segments (dynamic [x] -> $x, groups dropped, .index when nested routes exist) and renders the view with loader prefetches, loader data and configured ports/params. View props that no page attribute, port or parameter provides become TODO placeholders when required. With start.routeTree the project's TanStack router generator regenerates the ignored route tree in a scratch mirror for validation only; regenerate it after apply. All participating projects, including the Start project, are validated; new diagnostics reject the plan with hints. Catch-all, parallel and private segments, spread or children props, memo/forwardRef views and views using a preloaded prop more than once are rejected. Review TODO notes, server-only logic (auth, redirects, notFound, metadata) and route ownership lists; run application tests and E2E.",
+    examples: [
+      "plan port-route --project apps/web/tsconfig.json --target-project packages/app-features/tsconfig.json --root . --route 'apps/web/src/app/[locale]/dashboard/properties/[code]/units' --to packages/app-features/src/properties/units --checker ts7 --out /tmp/units.json",
+      "plan port-route --project apps/web/tsconfig.json --target-project packages/feature/tsconfig.json --root . --route apps/web/src/app/dashboard/reports --to packages/feature/src/reports --start-routes apps/start/src/routes --config .refactor-ai/port-route.json",
+    ],
+  },
+  "move-file": {
+    description: "Move modules atomically, selected declarations, or a directory with exclusions.",
+    support: "TypeScript and JavaScript",
+    required: "--to <destination> OR repeated --file <source=destination> [--exclude <glob> ...] [--target-project <config>] [--root <directory>]",
+    details: "--file accepts a file or directory with --to, or repeated source=destination pairs without --to. A batch loads the workspace once and validates the final graph; mutually importing batch files may move together in any argument order. Directory moves preserve relative layout. Repeat --exclude with tsconfig-style globs relative to each source directory to keep server files/adapters; e.g. page.tsx and **/_hooks/**. File moves retain their extension. Destinations must not collide; target project include/files rules must cover moved sources. Use a --root covering source, destination and callers. TypeScript updates imports; cross-package importers use the destination package's exports and must declare its dependency. Exact exports are appended when needed; packages without exports are rejected. Repeat --map source=destination to retarget moved files’ own imports/re-exports and literal dynamic imports and vi.mock/doMock/importActual calls. Add --map source#Old=destination#New for named exports, preserving local/public names with aliases. Mock factory text stays unchanged: review runtime compatibility. External consumer mocks are reported; --mocks add clones standalone registrations for the mapped module. --only selects exported declarations from one source file and moves only their required imports; unselected declarations stay in the source. Types, functions and safe classes/enums are supported; variable initialization, merged declarations and re-exports require preparation. The r3 mapping-only --only behavior is now available through retarget-import --only before moving. Module maps are simultaneous and scoped to moved files. Root .refactor-ai/equivalents.json supplies default module maps only when the destination declares the alternative; explicit maps win. Compiler checks do not prove runtime compatibility. Aliases between moved files become relative imports; unresolved source-project aliases fail MOVE_IMPORT_UNRESOLVED before program loading; missing destination packages fail MISSING_DEPENDENCY with source versions and install hints. Project membership, references, cycles and new compiler errors are checked. Non-UTF-8 files and symlinks are rejected. Run application tests after moving runtime modules.",
+    examples: [
+      "plan move-file --project ./tsconfig.json --file ./src/components/button.tsx --to ./src/ui/button.tsx",
+      "plan move-file --project ./tsconfig.json --file ./src/a.ts=./src/ui/a.ts --file ./src/b.ts=./src/ui/b.ts",
+      "plan move-file --project ./tsconfig.json --file ./src/route --to ./src/ui/route --exclude page.tsx --exclude **/_hooks/**",
+      "plan move-file --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/components --to ./packages/feature/src/components --target-project ./packages/feature/tsconfig.json --map @/lib/hooks=@scope/feature/hooks --map next-intl=use-intl --checker ts7",
+    ],
+  },
+  "retarget-import": {
+    description: "Retarget imports and re-exports to an API-compatible module.",
+    support: "TypeScript and JavaScript",
+    required: "--from <specifier> --to <specifier> [--map Old=New ...] [--only Name,Name] [--mocks report|add] [--file <file|directory>]",
+    details: "Exact specifiers only; wildcards are rejected. Omit --file for the loaded project. --only selects pre-map export names and splits declarations. Unaliased mapped imports rename local references semantically, including JSX; explicit aliases stay unchanged. Re-export mappings rename the imported export. Compatible named destination imports merge and identical bindings dedupe; type-only modifiers, quotes, directives and comments are retained. Default, namespace, star exports, literal dynamic imports and side-effect imports retarget only without --only; compiler diagnostics validate their compatibility. Targets must resolve from every affected file (TARGET_UNRESOLVED). Missing exports fail NEW_DIAGNOSTICS. No matches succeed with a note. --mocks report (default) lists loaded test files mocking the source while transitively importing retargeted files, including callers outside --file. --mocks add copies each standalone vi/vitest/jest mock/doMock registration for the destination with the same factory text, unless that file already mocks the destination. Expression-valued calls fail UNSUPPORTED_MOCK_CALL in add mode. Project references are unsupported. Verify runtime behavior separately.",
+    examples: [
+      "plan retarget-import --project apps/web/tsconfig.json --root . --from next-intl --to use-intl --map NextIntlClientProvider=IntlProvider",
+      "plan retarget-import --project ./tsconfig.json --from old-lib --to new-lib --only Widget,Options --file ./src/features",
+    ],
+  },
   rename: {
     description: "Rename a symbol and its semantic references.",
     support: "TypeScript, JavaScript and C#",
-    required: "--at <line:column> --name <identifier>",
-    details: "Comments and string literals are excluded. Use a .sln and a common --root for C# callers across projects. External consumers and dynamic references are outside the loaded scope.",
+    required: "--at <line:column> --name <identifier> (TS/JS: --symbol <name> instead of --at; optional --public)",
+    details: "TS/JS --symbol selects one top-level declaration (missing or ambiguous names fail); --public propagates unaliased public names through loaded consumers instead of keeping the old export name. Comments and string literals are excluded. Use a .sln and a common --root for C# callers across projects. External consumers and dynamic references are outside the loaded scope.",
     examples: [
       "plan rename --project examples/typescript/tsconfig.json --file examples/typescript/math.ts --at 1:17 --name sum",
       "plan rename --project examples/javascript/jsconfig.json --file examples/javascript/math.js --at 2:17 --name sum",
@@ -60,6 +92,16 @@ export const operationHelp: Record<Operation, OperationHelp> = {
       "plan extract-variable --project examples/typescript/tsconfig.json --file examples/typescript/math.ts --at 2:10 --end 2:22 --name total",
     ],
   },
+  "inline-reexports": {
+    description: "Import re-exported bindings directly from their origin modules.",
+    support: "TypeScript and JavaScript",
+    required: "[--file <shim> ...] [--keep]",
+    details: "Follows compiler-resolved aliases and relative export * chains, stopping at bare/package entries. Splits mixed imports by origin, retaining type modifiers, aliases, quotes and extension conventions. Mixed modules retain all re-exports. Unreferenced pure shims are deleted and config file lists updated unless --keep is supplied. Side-effect imports stay with a note. Namespace imports require a pure single-origin export * shim with no default export at the origin. Literal dynamic imports also retarget pure single-origin star shims with no default export; other dynamic references and import types prevent deletion. Repeat --file to inline several shims with shared callers in one plan. New compiler errors are rejected; run application tests for initialization behavior and external consumers.",
+    examples: [
+      "plan inline-reexports --project ./tsconfig.json --file ./src/shim.ts",
+      "plan inline-reexports --project ./apps/web/tsconfig.json --root . --file ./apps/web/src/shim.ts --keep",
+    ],
+  },
   "rename-file": {
     description: "Rename a source file to match a selected declared type.",
     support: "TypeScript, JavaScript and C#",
@@ -103,6 +145,7 @@ const languageDetails: Record<Language, Partial<Record<Operation, Partial<Operat
     "move-type": { details: "Select a top-level type explicitly when several exist. Other declarations stay in the source; an empty source may be deleted. Missing destination directories are created during apply. Use a --root covering source, destination and callers, and --target-project for a cross-project move. Sources must use ES modules; compatible module resolution and valid composite project references are required. Effectful static initializers, static blocks, decorators, computed members, evaluated bases and nonconstant enum initializers are rejected (INITIALIZATION_EFFECTS_UNSUPPORTED). Simple identifier bases are supported if no new module cycle is introduced. Compiler checks do not prove whole-program behavior equivalence; run application tests." },
   },
   csharp: {
+    rename: { required: "--at <line:column> --name <identifier>", details: "Comments and string literals are excluded. Use a .sln and a common --root for callers across projects. External consumers and dynamic references are outside the loaded scope." },
     imports: { description: "Remove unused C# using directives identified by Roslyn.", required: "[--mode remove-unused]", details: "The C# package defaults to remove-unused; sorting is unsupported. Uses Roslyn's built-in compiler diagnostics." },
     format: { description: "Format a C# file with the Roslyn Formatter API.", details: "Uses Roslyn document options. An already formatted file produces a plan with no changes." },
     "rename-file": { details: "The only top-level type is selected automatically; select explicitly when several exist. Renames the whole file and keeps its extension and other declarations. Explicit Compile entries are updated. Existing targets and unsupported case-only renames are rejected." },
@@ -125,18 +168,25 @@ function optionsText(language?: Language): string {
   const project = language === "typescript" ? "tsconfig.json or jsconfig.json"
     : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln";
   return `  --project <config>       Required for capabilities and plan; ${project}.
-${language !== "csharp" ? "                           Named TS configurations are supported by file/type operations.\n" : ""}  --file <source>          Required for plan; file included by the selected project.
-  --root <directory>       Boundary for source, configs and callers; defaults to
+${language !== "csharp" ? "                           Named TS configurations are supported by file/type operations.\n" : ""}  --file <source>          Required for plan except retarget-import; a file, or a directory for move-file/retarget-import.
+                           move-file accepts repeated --file source=destination pairs; inline-reexports accepts repeated files.
+  --keep                   Retain the shim for inline-reexports.
+${language !== "csharp" ? "  --checker <ts5|ts7|both> TS5 default; ts7 uses installed Go 7.0.2 diagnostics.\n                           both audits TS5+TS7, rejecting any disagreement.\n  --verify <full|bindings> full (default) checks program diagnostics; bindings checks\n                           edits, references and import bindings only (typecheck after\n                           apply). Defaults: <root>/.refactor-ai/config.json.\n" : ""}  --root <directory>       Boundary for source, configs and callers; defaults to
                            the project configuration's directory.
   --at <line:column>       Symbol/type position or extraction start, 1-based UTF-16.
-  --end <line:column>      Extraction end, exclusive, 1-based UTF-16.
+${language !== "csharp" ? "  --symbol <name>          TS/JS rename: top-level declaration instead of --at.\n  --public                 TS/JS rename: propagate unaliased public export names.\n" : ""}  --end <line:column>      Extraction end, exclusive, 1-based UTF-16.
   --name <identifier>      Required new name for rename and extraction.
   --mode <mode>            imports: ${language === "csharp" ? "remove-unused (default); sorting is unsupported" : "sort (default) or remove-unused"}.
   --type <identifier>      Declared type for rename-file or move-type; select when
                            several types exist, or use --at.
-  --to <file>              Required destination for move-type; relative to cwd.
-  --target-project <config> Destination project config; move-type only.
-${language !== "typescript" ? "  --root-namespace <name>  C# namespace convention override for sync-namespace\n                           or move-type.\n" : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
+  --to <path|specifier>    Destination for move-type/move-file (path) or retarget-import (specifier).
+  --from <specifier>       Source module specifier for retarget-import.
+  --map <from=to>          Repeatable export mapping (retarget-import), module or module#Export mapping (move-file).
+  --only <Name,Name>       retarget-import: pre-map export names; move-file: declarations to move.
+  --exclude <glob>         Repeatable directory move exclusions, relative to each source directory.
+  --mocks <report|add>     Report affected test mocks (default), or add parallel mocks.
+  --target-project <config> Destination project config; move-type, move-file or port-route.
+${language !== "csharp" ? "  --route <directory>      port-route: Next App Router route directory (instead of --file).\n  --start-routes <dir>     port-route: TanStack Start routes directory override.\n  --config <json>          port-route: configuration, default <root>/.refactor-ai/port-route.json.\n" : ""}${language !== "typescript" ? "  --root-namespace <name>  C# namespace convention override for sync-namespace\n                           or move-type.\n" : ""}  --out <plan.json>        Plan output; defaults to <root>/.refactor-ai/<id>.json.
                            Within root, store plans only in .refactor-ai;
                            an output path outside root is also allowed.
   --plan <plan.json>       Required for preview, validate and apply.
@@ -173,7 +223,7 @@ function workflow(invocation: string): string {
   untouched. Read the JSON response's plan path, then use that exact plan:
 ${examples(invocation, ["preview --plan ./path/to/plan.json", "validate --plan ./path/to/plan.json", "apply --plan ./path/to/plan.json"])}
   Validation checks snapshot freshness and stored compiler analysis; it does not
-  run your project's tests. Apply requires passed validation and a fresh snapshot.
+  run your project's tests. Apply requires passed validation and unchanged recorded inputs. Empty plans apply regardless of unrelated changes.
   Changed sources/configs require replanning. Multi-file writes use a journal and
   attempt rollback on failure; they are not a filesystem-wide atomic transaction.
 
@@ -205,7 +255,7 @@ export function renderHelp(args: string[], invocation = "node dist/cli.js", runt
   const topics = args[0] === "help" ? args.slice(1) : args;
   const command = topics[0]?.startsWith("-") ? undefined : topics[0];
   const operation = topics[1]?.startsWith("-") ? undefined : topics[1];
-  const known = ["capabilities", "plan", "preview", "validate", "apply"];
+  const known = ["capabilities", "plan", "preview", "validate", "apply", "serve", "gc"];
   if (command && !known.includes(command)) throw new Error(`INVALID_ARGUMENT: unknown help command ${command}`);
   if (operation && (command !== "plan" || !Object.hasOwn(operationHelp, operation))) {
     throw new Error(`UNSUPPORTED: help topic ${command} ${operation}`);
@@ -217,17 +267,22 @@ export function renderHelp(args: string[], invocation = "node dist/cli.js", runt
   if (["preview", "validate", "apply"].includes(command ?? "")) {
     const descriptions = {
       preview: "Print the stored unified diff, including file creation/deletion. Does not write sources or check snapshot freshness; use validate before apply.",
-      validate: "Check the plan's integrity, current snapshot and stored compiler analysis. Does not re-run compilation or project tests. A failed validation returns exit 1.",
-      apply: "Apply the exact validated plan to an unchanged snapshot. Uses a lock and journal; on failure attempts to roll back its own writes. Replan after changes.",
+      validate: "Check the plan's integrity, recorded read set and stored compiler analysis. Does not re-run compilation or project tests. A failed validation returns exit 1.",
+      apply: "Apply the exact validated plan to unchanged recorded inputs. Empty plans need no freshness check. Uses a lock and journal; on failure attempts to roll back its own writes. Replan after changes.",
     };
     return `${title}\n${command}: ${descriptions[command as keyof typeof descriptions]}\n\nUsage:\n  ${invocation} ${command} --plan <plan.json>\n\nOptions:\n  --plan <plan.json>  Required saved plan path.\n  --help, -h         Show this help.\n\nExamples:\n${examples(invocation, [`${command} --plan ./.refactor-ai/saved-plan.json`, `${command} --plan "/path with spaces/plan.json"`])}\n\n${workflow(invocation)}`;
+  }
+  if (command === "gc") return `${title}\ngc: Remove completed apply journals; retain failed and interrupted transactions.\n\nUsage:\n  ${invocation} gc [--root <repo>]\n\nExamples:\n  ${invocation} gc --root .\n`;
+  if (command === "serve") {
+    return `${title}\nserve (author CLI): Keep TypeScript single-project programs warm between sequential plan requests.\n\nUsage:\n  ${invocation} serve --root <repo>\n\nSend one JSON object per stdin line: {"id":1,"args":["plan",<normal plan arguments>]}.\nOne response per stdout line: {id,status,output} or {id,status,error}. Requests may\nonly plan within the server root. EOF releases programs and exits. External content,\nconfiguration, resolution probes and directory membership are rechecked before reuse.\nWorkspace file operations still use fresh workspaces.\n\nExamples:\n  ${invocation} serve --root .\n\nREFACTOR_AI_CACHE=on enables the optional persistent baseline cache. Its location defaults to\n<root>/.refactor-ai/cache; REFACTOR_AI_CACHE_DIR selects an external directory.\n`;
   }
   if (command === "capabilities") {
     return `${title}\ncapabilities: List implemented operations and modes as JSON for the selected backend.\n\nUsage:\n  ${invocation} capabilities --project <config>\n\nOptions:\n  --project <config>  Required ${language === "typescript" ? "tsconfig.json or jsconfig.json" : language === "csharp" ? ".csproj or .sln" : "tsconfig.json, jsconfig.json, .csproj or .sln"}.\n  --help, -h          Show this help.\n\nExamples:\n${examples(invocation, (["capabilities --project examples/typescript/tsconfig.json", "capabilities --project examples/javascript/jsconfig.json", "capabilities --project examples/csharp/Caller.csproj"]).filter(example => !language || (language === "csharp" ? example.includes("csharp/") : !example.includes("csharp/"))))}\n\nThe configuration must exist. This command reports implemented backend capabilities,\nnot whether a particular source selection can be refactored. It does not load or\nchange source files.\n\n${runtimeRequirements}`;
   }
   if (operation) {
-    return `${title}\nUsage:\n  ${invocation} plan ${operation} --project <config> --file <source> [operation options]\n\n${operationText(operation as Operation, invocation, language)}\nOptions and defaults:\n${options}\n${context}\n${workflow(invocation)}\n${runtimeRequirements}`;
+    return `${title}\nUsage:\n  ${invocation} plan ${operation} --project <config> ${operation === "retarget-import" ? "[--file <file|directory>]" : operation === "port-route" ? "--route <directory>" : "--file <source>"} [operation options]\n\n${operationText(operation as Operation, invocation, language)}\nOptions and defaults:\n${options}\n${context}\n${workflow(invocation)}\n${runtimeRequirements}`;
   }
+  if (!command) return `${title}\nCommands: capabilities, plan, preview, validate, apply, serve, gc, help.\n\nOperations:\n${(language ? languageOperations[language] : Object.keys(operationHelp)).map(key => `  ${key}`).join("\n")}\n\nExamples:\n  ${invocation} plan <operation> --help\n  ${invocation} <command> --help\n`;
   const commands = command === "plan"
     ? `Usage:\n  ${invocation} plan <operation> --project <config> --file <source> [options]\n`
     : `Commands:\n  capabilities --project <config>       List backend operations and modes (JSON).\n  plan <operation> --project <config> --file <source> [options]\n                                       Compute a plan without writing sources.\n  preview --plan <plan.json>            Print a stored unified diff.\n  validate --plan <plan.json>           Check freshness and stored validation.\n  apply --plan <plan.json>              Apply the exact plan and journal writes.\n  help [command] [operation]            Show help, also available via --help/-h.\n`;

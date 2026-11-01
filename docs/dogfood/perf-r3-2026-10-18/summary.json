@@ -1,0 +1,114 @@
+{
+  "mode": "cold Node processes, ts7, cache off, OS cache retained, paired sequential runs, no apply",
+  "root": "/home/wooboo/.t3/worktrees/uber-platform/t3-2595fe92",
+  "node": "v22.23.3",
+  "targetCommit": "8e1f5cf4f7afa8ab8ea2549f3556a497d56e2a47",
+  "successfulSamples": 12,
+  "targetCleanThroughout": true,
+  "editHashesMatch": true,
+  "deterministicIdsPerVariant": true,
+  "rows": [
+    {
+      "scenario": "in-package",
+      "variants": {
+        "r2": {
+          "medianMs": 28848,
+          "minMs": 28221,
+          "maxMs": 29112,
+          "samplesMs": [
+            29112,
+            28848,
+            28221
+          ],
+          "phaseMediansMs": {
+            "diagnostics.ts7": 10193,
+            "workspace.external-projects": 561,
+            "workspace.inputs": 39,
+            "workspace.load": 7874,
+            "workspace.move": 2414,
+            "workspace.prepare": 748,
+            "workspace.program": 4046,
+            "workspace.validate": 11593
+          },
+          "planId": "666e6493fbd86e392c60a5c55117d06ff2e0d098c41348b2fcb43bb366b6d888",
+          "readSet": null,
+          "files": 22
+        },
+        "r3": {
+          "medianMs": 28559,
+          "minMs": 28339,
+          "maxMs": 29086,
+          "samplesMs": [
+            28559,
+            28339,
+            29086
+          ],
+          "phaseMediansMs": {
+            "diagnostics.ts7": 9668,
+            "workspace.external-projects": 559,
+            "workspace.inputs": 761,
+            "workspace.load": 8031,
+            "workspace.move": 2404,
+            "workspace.prepare": 0,
+            "workspace.program": 3718,
+            "workspace.validate": 10762
+          },
+          "planId": "4c68bf49e24cedc3e80e7db2db1332465de45c22a18ea9720d097e8d9cb3f9ad",
+          "readSet": 64648,
+          "files": 22
+        }
+      }
+    },
+    {
+      "scenario": "cross-package",
+      "variants": {
+        "r2": {
+          "medianMs": 25479,
+          "minMs": 21662,
+          "maxMs": 25738,
+          "samplesMs": [
+            21662,
+            25479,
+            25738
+          ],
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8527,
+            "workspace.external-projects": 918,
+            "workspace.inputs": 42,
+            "workspace.load": 5525,
+            "workspace.move": 2080,
+            "workspace.prepare": 1422,
+            "workspace.program": 3838,
+            "workspace.validate": 9476
+          },
+          "planId": "522319dd693f0b7c861ed0b200d7a51ba680abf8a8f67227127c1178f683b395",
+          "readSet": null,
+          "files": 10
+        },
+        "r3": {
+          "medianMs": 28056,
+          "minMs": 27564,
+          "maxMs": 33762,
+          "samplesMs": [
+            27564,
+            33762,
+            28056
+          ],
+          "phaseMediansMs": {
+            "diagnostics.ts7": 8259,
+            "workspace.external-projects": 1005,
+            "workspace.inputs": 833,
+            "workspace.load": 6777,
+            "workspace.move": 2337,
+            "workspace.prepare": 0,
+            "workspace.program": 3801,
+            "workspace.validate": 11287
+          },
+          "planId": "8b4232edaf9ffbd426c30068ed11332cbb058d1dde2794ec4420865bb57c4f20",
+          "readSet": 62965,
+          "files": 10
+        }
+      }
+    }
+  ]
+}
